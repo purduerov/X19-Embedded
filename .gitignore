@@ -1,0 +1,25 @@
+# Build artifacts
+build/
+bin/
+obj/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.obj
+*.d
+*.a
+
+# VS Code & IDE caches
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/c_cpp_properties.json
+.cache/
+.DS_Store
+
+# CubeMX temporary files
+*.bak
+*.tmp

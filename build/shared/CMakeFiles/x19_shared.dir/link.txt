@@ -1,2 +1,0 @@
-C:\msys64\ucrt64\bin\ar.exe qc libx19_shared.a CMakeFiles/x19_shared.dir/src/x19_can_protocol.c.obj CMakeFiles/x19_shared.dir/src/x19_pwm_ramp.c.obj CMakeFiles/x19_shared.dir/src/x19_i2c_recovery.c.obj CMakeFiles/x19_shared.dir/src/x19_safety.c.obj
-C:\msys64\ucrt64\bin\ranlib.exe libx19_shared.a
