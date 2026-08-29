@@ -1,0 +1,2 @@
+C:\msys64\ucrt64\bin\ar.exe qc libx19_drivers.a CMakeFiles/x19_drivers.dir/src/tcan1044.c.obj CMakeFiles/x19_drivers.dir/src/lsm6dsoxtr.c.obj CMakeFiles/x19_drivers.dir/src/ms5837.c.obj CMakeFiles/x19_drivers.dir/src/bme280.c.obj CMakeFiles/x19_drivers.dir/src/ina226.c.obj CMakeFiles/x19_drivers.dir/src/tps25990.c.obj
+C:\msys64\ucrt64\bin\ranlib.exe libx19_drivers.a

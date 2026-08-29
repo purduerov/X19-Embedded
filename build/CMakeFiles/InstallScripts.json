@@ -1,0 +1,12 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/aman/Documents/Programming/X18-ROV/X19-Embedded/build/cmake_install.cmake",
+		"C:/Users/aman/Documents/Programming/X18-ROV/X19-Embedded/build/shared/cmake_install.cmake",
+		"C:/Users/aman/Documents/Programming/X18-ROV/X19-Embedded/build/drivers/cmake_install.cmake",
+		"C:/Users/aman/Documents/Programming/X18-ROV/X19-Embedded/build/nodes/node1_pi_shield/cmake_install.cmake",
+		"C:/Users/aman/Documents/Programming/X18-ROV/X19-Embedded/build/nodes/node2_control_board/cmake_install.cmake",
+		"C:/Users/aman/Documents/Programming/X18-ROV/X19-Embedded/build/nodes/node3_power_slab/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

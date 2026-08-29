@@ -4,7 +4,7 @@ project(X19-Embedded C ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# Strict warnings for subsea embedded safety
+# Strict compiler warnings for subsea embedded safety
 add_compile_options(
     -Wall
     -Wextra
@@ -25,9 +25,7 @@ include_directories(
 add_subdirectory(shared)
 add_subdirectory(drivers)
 
-# Subdirectories for application nodes
-# add_subdirectory(nodes/node1_pi_shield)
-# add_subdirectory(nodes/node2_control_board)
-# add_subdirectory(nodes/node3_power_slab)
-# add_subdirectory(nodes/node4_usb_hub)
-# add_subdirectory(bootloader/stm32_can_bootloader)
+# Add application nodes
+add_subdirectory(nodes/node1_pi_shield)
+add_subdirectory(nodes/node2_control_board)
+add_subdirectory(nodes/node3_power_slab)
