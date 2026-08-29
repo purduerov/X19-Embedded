@@ -1,0 +1,57 @@
+{
+    "folders": [
+        {
+            "name": "X19-Embedded (Root)",
+            "path": "."
+        },
+        {
+            "name": "Shared Library",
+            "path": "shared"
+        },
+        {
+            "name": "Hardware Drivers",
+            "path": "drivers"
+        },
+        {
+            "name": "Node 1: Pi Shield",
+            "path": "nodes/node1_pi_shield"
+        },
+        {
+            "name": "Node 2: Control Board",
+            "path": "nodes/node2_control_board"
+        },
+        {
+            "name": "Node 3: Power Slab",
+            "path": "nodes/node3_power_slab"
+        },
+        {
+            "name": "Node 4: USB Camera Hub",
+            "path": "nodes/node4_usb_hub"
+        },
+        {
+            "name": "CAN Bootloader Suite",
+            "path": "bootloader"
+        }
+    ],
+    "settings": {
+        "cmake.sourceDirectory": "${workspaceFolder}",
+        "cmake.buildDirectory": "${workspaceFolder}/build",
+        "C_Cpp.default.cStandard": "c11",
+        "C_Cpp.default.cppStandard": "c++17",
+        "C_Cpp.default.intelliSenseMode": "gcc-arm",
+        "files.associations": {
+            "*.h": "c",
+            "*.c": "c",
+            "*.ioc": "xml"
+        }
+    },
+    "extensions": {
+        "recommendations": [
+            "STMicroelectronics.stm32-for-vscode",
+            "ms-vscode.cpptools",
+            "ms-vscode.cmake-tools",
+            "marus25.cortex-debug",
+            "twxs.cmake"
+        ]
+    }
+}
