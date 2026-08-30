@@ -31,3 +31,7 @@ jobs:
       - name: Build All STM32 Nodes & Libraries (-Werror)
         run: |
           cmake --build build --verbose
+
+      - name: Run Embedded Unit Tests (CTest)
+        run: |
+          ctest --test-dir build --output-on-failure

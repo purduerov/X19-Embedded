@@ -4,6 +4,8 @@ project(X19-Embedded C ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+enable_testing()
+
 # Strict compiler warnings for subsea embedded safety
 add_compile_options(
     -Wall
@@ -29,3 +31,6 @@ add_subdirectory(drivers)
 add_subdirectory(nodes/node1_pi_shield)
 add_subdirectory(nodes/node2_control_board)
 add_subdirectory(nodes/node3_power_slab)
+
+# Add unit tests
+add_subdirectory(tests)
