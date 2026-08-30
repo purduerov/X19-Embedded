@@ -9,11 +9,11 @@
 
 | Node Name | Directory | Target MCU | Primary Responsibilities |
 | :--- | :--- | :--- | :--- |
-| **Node 1: Pi Shield** | `nodes/node1_pi_shield/` | STM32G431K8 | BME280 leak & vacuum testing, INA226 5V monitor, GPIO leak traces, 10 Hz Leak stream (`0x210`). |
-| **Node 2: Control Board** | `nodes/node2_control_board/` | STM32G431CB | 8x Thruster PWM (`TIM1`/`TIM8`), 1 kHz ramping (`TIM6`), 10-ch SMC solenoids, LSM6DSOXTR IMU (SPI), MS5837 Depth (I2C), 100 Hz Nav stream (`0x200`). |
-| **Node 3: Power Slab** | `nodes/node3_power_slab/` | STM32G431K8 | PMBus I2C to 5 converter bricks (4x 12V 300W + 1x 5.2V 50W), PCB copper thermal ADC, LM74700 ideal diode status, 20 Hz Power stream (`0x300`). |
-| **Node 4: USB Camera Hub** | `nodes/node4_usb_hub/` | STM32G431K8 | Per-port VBUS voltage/current monitoring, remote camera power cycling via GPIO, 5 Hz USB Hub stream (`0x310`). |
-| **CAN Bootloader** | `bootloader/` | STM32G4 (Sector 0) | High-speed underwater firmware updating over CAN FD (5 Mbps data phase). |
+| **Node 1: Pi Shield** | `nodes/node1_pi_shield/` | STM32G431CB (48-Pin) | BME280 leak & vacuum testing, INA226 5V monitor, GPIO leak traces, 10 Hz Leak stream (`0x210`). |
+| **Node 2: Control Board** | `nodes/node2_control_board/` | STM32G431CB (48-Pin) | 8x Thruster PWM (`TIM1`/`TIM8`), 1 kHz ramping (`TIM6`), 10-ch SMC solenoids, LSM6DSOXTR IMU (SPI), MS5837 Depth (I2C), 100 Hz Nav stream (`0x200`). |
+| **Node 3: Power Slab** | `nodes/node3_power_slab/` | STM32G431CB (48-Pin) | PMBus I2C to 5 converter bricks (4x 12V 300W + 1x 5.2V 50W), PCB copper thermal ADC, LM74700 ideal diode status, 20 Hz Power stream (`0x300`). |
+| **Node 4: USB Camera Hub** | `nodes/node4_usb_hub/` | STM32G431CB (48-Pin) | Per-port VBUS voltage/current monitoring, remote camera power cycling via GPIO, 5 Hz USB Hub stream (`0x310`). |
+| **CAN Bootloader** | `bootloader/` | STM32G431CB (Sector 0) | High-speed underwater firmware updating over CAN FD (5 Mbps data phase). |
 
 ---
 

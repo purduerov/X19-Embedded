@@ -1,15 +1,15 @@
-#MicroX Explorer Configurationfor STM32G431K8Tx
+#MicroX Explorer Configurationfor STM32G431CBTx
 File.Version=6
 KeepUserPlacement=false
-Mcu.CPN=STM32G431K8Tx
+Mcu.CPN=STM32G431CBTx
 Mcu.Family=STM32G4
 Mcu.IP0=FDCAN1
 Mcu.IP1=I2C1
 Mcu.IP2=I2C2
 Mcu.IP3=RCC
 Mcu.IP4=SYS
-Mcu.Name=STM32G431K(6-8)Tx
-Mcu.Package=LQFP32
+Mcu.Name=STM32G431C(6-8-B)Tx
+Mcu.Package=LQFP48
 Mcu.Pin0=PB8-BOOT0
 Mcu.Pin1=PB9
 Mcu.Pin2=PA9

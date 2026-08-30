@@ -23,7 +23,7 @@
             "servertype": "openocd",
             "cwd": "${workspaceFolder}",
             "executable": "${workspaceFolder}/build/nodes/node3_power_slab/node3_power_slab.elf",
-            "device": "STM32G431K8",
+            "device": "STM32G431CB",
             "configFiles": [
                 "interface/stlink.cfg",
                 "target/stm32g4x.cfg"
@@ -37,7 +37,7 @@
             "servertype": "openocd",
             "cwd": "${workspaceFolder}",
             "executable": "${workspaceFolder}/build/nodes/node1_pi_shield/node1_pi_shield.elf",
-            "device": "STM32G431K8",
+            "device": "STM32G431CB",
             "configFiles": [
                 "interface/stlink.cfg",
                 "target/stm32g4x.cfg"
