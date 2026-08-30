@@ -1,0 +1,33 @@
+name: STM32 Embedded CI/CD Build & Lint
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build-and-lint:
+    name: Cross-Compile STM32 Firmware & Check Formatting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Toolchain Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi ninja-build clang-format
+
+      - name: Check Code Formatting (clang-format)
+        run: |
+          find shared drivers nodes -name "*.c" -o -name "*.h" | xargs clang-format --dry-run --Werror
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake
+
+      - name: Build All STM32 Nodes & Libraries (-Werror)
+        run: |
+          cmake --build build --verbose
