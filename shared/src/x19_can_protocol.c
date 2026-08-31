@@ -5,10 +5,18 @@
  */
 
 #include "x19_can_protocol.h"
+#include "x19_parameters.h"
 #include <string.h>
 
 x19_status_t x19_can_pack_thruster_cmd(const x19_thruster_cmd_t *cmd, uint8_t *buffer, size_t *len) {
     if (!cmd || !buffer || !len) return X19_ERR_INVALID_ARG;
+
+    for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
+        if (cmd->pwm_us[i] < X19_PWM_MIN_US || cmd->pwm_us[i] > X19_PWM_MAX_US) {
+            return X19_ERR_INVALID_ARG;
+        }
+    }
+
     memcpy(buffer, cmd, sizeof(x19_thruster_cmd_t));
     *len = sizeof(x19_thruster_cmd_t);
     return X19_OK;
@@ -18,6 +26,13 @@ x19_status_t x19_can_unpack_thruster_cmd(const uint8_t *buffer, size_t len, x19_
     if (!buffer || !cmd) return X19_ERR_INVALID_ARG;
     if (len < sizeof(x19_thruster_cmd_t)) return X19_ERR_INVALID_ARG;
     memcpy(cmd, buffer, sizeof(x19_thruster_cmd_t));
+
+    for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
+        if (cmd->pwm_us[i] < X19_PWM_MIN_US || cmd->pwm_us[i] > X19_PWM_MAX_US) {
+            return X19_ERR_INVALID_ARG;
+        }
+    }
+
     return X19_OK;
 }
 

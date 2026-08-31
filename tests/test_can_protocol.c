@@ -63,11 +63,46 @@ void test_invalid_arguments(void) {
     printf("[PASS] test_invalid_arguments\n");
 }
 
+void test_thruster_cmd_bounds(void) {
+    x19_thruster_cmd_t invalid_cmd_low;
+    x19_thruster_cmd_t invalid_cmd_high;
+
+    for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
+        invalid_cmd_low.pwm_us[i] = X19_PWM_STOP_US;
+        invalid_cmd_high.pwm_us[i] = X19_PWM_STOP_US;
+    }
+
+    invalid_cmd_low.pwm_us[3] = X19_PWM_MIN_US - 1;
+    invalid_cmd_high.pwm_us[5] = X19_PWM_MAX_US + 1;
+
+    uint8_t buffer[64];
+    size_t len = 0;
+
+    // Test packing bounds
+    assert(x19_can_pack_thruster_cmd(&invalid_cmd_low, buffer, &len) == X19_ERR_INVALID_ARG);
+    assert(x19_can_pack_thruster_cmd(&invalid_cmd_high, buffer, &len) == X19_ERR_INVALID_ARG);
+
+    // Test unpacking bounds
+    // First, craft a valid buffer using manual copy
+    x19_thruster_cmd_t malicious_payload = invalid_cmd_low;
+    memcpy(buffer, &malicious_payload, sizeof(x19_thruster_cmd_t));
+
+    x19_thruster_cmd_t decoded;
+    assert(x19_can_unpack_thruster_cmd(buffer, sizeof(x19_thruster_cmd_t), &decoded) == X19_ERR_INVALID_ARG);
+
+    malicious_payload = invalid_cmd_high;
+    memcpy(buffer, &malicious_payload, sizeof(x19_thruster_cmd_t));
+    assert(x19_can_unpack_thruster_cmd(buffer, sizeof(x19_thruster_cmd_t), &decoded) == X19_ERR_INVALID_ARG);
+
+    printf("[PASS] test_thruster_cmd_bounds\n");
+}
+
 int main(void) {
     printf("Running CAN Protocol Unit Tests...\n");
     test_thruster_cmd_pack_unpack();
     test_nav_telemetry_pack_unpack();
     test_invalid_arguments();
+    test_thruster_cmd_bounds();
     printf("All CAN Protocol Tests Passed Successfully!\n");
     return 0;
 }
