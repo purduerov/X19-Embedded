@@ -1,0 +1,3 @@
+## 2024-05-18 - Branchless GCC Compilation
+**Learning:** For a tight loop function like `x19_pwm_step_ramp` handling 8 thrusters at 1kHz, nested conditional checks generate several branches. Refactoring to calculate differences and bounds via int32_t forces GCC (at `-O3`) to emit branchless `cmov` instruction sets, resulting in much faster linear performance on Cortex-M4. Factoring float algebra in `x19_pwm_apply_expo` to eliminate `cubed` variables reduces intermediate load/stores.
+**Action:** When a high-frequency embedded loop checks multiple limits consecutively, use integer math assignments first (`int32_t diff = ...`) followed by simple assignment `if`s. GCC will transform these directly into `cmov` rather than conditional jumps.
