@@ -18,7 +18,7 @@ jobs:
       - name: Install Toolchain Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi ninja-build clang-format
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi ninja-build clang-format qemu-user qemu-user-binfmt
 
       - name: Check Code Formatting (clang-format)
         run: |
@@ -32,6 +32,8 @@ jobs:
         run: |
           cmake --build build --verbose
 
-      - name: Run Embedded Unit Tests (CTest)
+      - name: Run Embedded Unit Tests Natively (Host GCC)
         run: |
-          ctest --test-dir build --output-on-failure
+          cmake -B build_native -G Ninja
+          cmake --build build_native --target test_can_protocol test_pwm_ramp test_safety test_i2c_recovery
+          ctest --test-dir build_native --output-on-failure
