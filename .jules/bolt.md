@@ -1,0 +1,3 @@
+## 2024-06-25 - Polynomial Factoring for FMA on Cortex-M4 FPU
+**Learning:** The STM32G4 architecture (Cortex-M4 FPU) supports Fused Multiply-Add (FMA) instructions, which map well to mathematical polynomials if factored correctly. Unfactored polynomials like `(A * x^3) + (B * x)` require independent multiplication and addition steps, which take more cycles than `x * (x^2 * A + B)` because the latter can be directly mapped to an FMA instruction.
+**Action:** Always look for opportunities to factor math polynomials when optimizing for STM32G4 / Cortex-M4 FPU to leverage hardware-level FMA operations.
