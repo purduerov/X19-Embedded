@@ -1,0 +1,3 @@
+## 2026-09-04 - Cortex-M4 FMA Polynomial Optimization
+**Learning:** The STM32G4 architecture (Cortex-M4 FPU) supports Fused Multiply-Add (FMA) instructions. Evaluating polynomials like `A*x^3 + B*x` requires multiple dependent instructions. Factoring it to `x * (A*x^2 + B)` allows the compiler to use a single `VMLA` (FMA) instruction for the inner term, significantly reducing execution cycles on this specific hardware architecture.
+**Action:** When implementing mathematical curves (like PWM ramping or expo limits) on the STM32G4, always factor polynomials into nested multiplications (Horner's method) to explicitly utilize FMA for hardware-level optimization.
