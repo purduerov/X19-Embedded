@@ -34,15 +34,27 @@ NODES = {
     "usb_hub":       0x04
 }
 
-def crc16_ccitt(data: bytes) -> int:
-    crc = 0xFFFF
-    for byte in data:
-        crc ^= (byte << 8)
+def _generate_crc16_table():
+    table = []
+    for i in range(256):
+        crc = i << 8
         for _ in range(8):
             if crc & 0x8000:
                 crc = ((crc << 1) ^ 0x1021) & 0xFFFF
             else:
                 crc = (crc << 1) & 0xFFFF
+        table.append(crc)
+    return tuple(table)
+
+
+CRC16_CCITT_TABLE = _generate_crc16_table()
+
+
+def crc16_ccitt(data: bytes) -> int:
+    """Calculates CRC16-CCITT checksum for data using a precomputed 256-entry lookup table."""
+    crc = 0xFFFF
+    for byte in data:
+        crc = ((crc << 8) ^ CRC16_CCITT_TABLE[(crc >> 8) ^ byte]) & 0xFFFF
     return crc
 
 def flash_node(interface: str, target_node: str, bin_path: str):
