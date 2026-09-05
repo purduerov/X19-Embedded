@@ -2,8 +2,11 @@
 build/
 build-native/
 build-test/
+build-host/
 bin/
 obj/
+__pycache__/
+*.pyc
 *.elf
 *.bin
 *.hex
@@ -25,4 +28,3 @@ obj/
 # CubeMX temporary files
 *.bak
 *.tmp
-build-host/

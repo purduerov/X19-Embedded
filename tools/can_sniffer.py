@@ -25,8 +25,22 @@ CAN_ID_ENV_TELEMETRY     = 0x210
 CAN_ID_POWER_TELEMETRY   = 0x300
 CAN_ID_USB_HUB_TELEMETRY = 0x310
 
+_last_sec = None
+_last_ts_str = ""
+
+
+def _format_timestamp(timestamp: float) -> str:
+    """Formats CAN message timestamp into HH:MM:SS string, caching results by integer second."""
+    global _last_sec, _last_ts_str
+    sec = int(timestamp)
+    if sec != _last_sec:
+        _last_sec = sec
+        _last_ts_str = time.strftime("%H:%M:%S", time.localtime(sec))
+    return _last_ts_str
+
+
 def decode_msg(msg: can.Message):
-    ts = time.strftime("%H:%M:%S", time.localtime(msg.timestamp))
+    ts = _format_timestamp(msg.timestamp)
     msg_id = msg.arbitration_id
     data = msg.data
 
