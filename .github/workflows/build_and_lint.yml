@@ -32,6 +32,8 @@ jobs:
         run: |
           cmake --build build --verbose
 
-      - name: Run Embedded Unit Tests (CTest)
+      - name: Build & Run Native Host Unit Tests (CTest)
         run: |
-          ctest --test-dir build --output-on-failure
+          cmake -B build-host -G Ninja -DCMAKE_C_COMPILER=gcc
+          cmake --build build-host
+          ctest --test-dir build-host --output-on-failure
