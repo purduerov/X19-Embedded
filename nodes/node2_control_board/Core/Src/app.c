@@ -13,6 +13,7 @@
 #include "lsm6dsoxtr.h"
 #include "ms5837.h"
 #include "x19_can_protocol.h"
+#include "x19_parameters.h"
 #include "x19_safety.h"
 
 /* Global safety state */
@@ -50,7 +51,7 @@ void app_main(void) {
 
         if (can_receive(&rx_id, rx_data, &rx_len)) {
             if (rx_id == X19_CAN_ID_THRUSTER_CMD && rx_len >= sizeof(x19_thruster_cmd_t)) {
-                x19_safety_feed_watchdog(&g_safety_state);
+                x19_safety_feed_heartbeat(&g_safety_state, time_get_ms());
                 /* Atomic copy to target buffer */
             }
         }
