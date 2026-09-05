@@ -32,6 +32,14 @@ jobs:
         run: |
           cmake --build build --verbose
 
+      - name: Configure Native CMake for Tests
+        run: |
+          cmake -B build-host -G Ninja -DCMAKE_C_COMPILER=gcc
+
+      - name: Build Native Tests
+        run: |
+          cmake --build build-host --target test_can_protocol test_pwm_ramp test_safety test_i2c_recovery --verbose
+
       - name: Run Embedded Unit Tests (CTest)
         run: |
-          ctest --test-dir build --output-on-failure
+          ctest --test-dir build-host --output-on-failure

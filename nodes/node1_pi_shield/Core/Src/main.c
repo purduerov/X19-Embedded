@@ -11,10 +11,10 @@
 #include "ina226.h"
 #include "tcan1044.h"
 
-static x19_safety_state_t g_safety_state;
+static x19_safety_state_t  g_safety_state;
 static x19_env_telemetry_t g_env_telemetry;
-static bme280_dev_t g_bme280_dev;
-static ina226_dev_t g_ina226_dev;
+static bme280_dev_t        g_bme280_dev;
+static ina226_dev_t        g_ina226_dev;
 
 int main(void) {
     x19_safety_init(&g_safety_state);

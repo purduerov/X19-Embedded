@@ -5,15 +5,17 @@
  */
 
 #include "x19_types.h"
-#include <stdbool.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef void (*x19_gpio_write_fn)(bool high);
 typedef bool (*x19_gpio_read_fn)(void);
 typedef void (*x19_delay_us_fn)(uint32_t us);
 
-x19_status_t x19_i2c_recover_bus(x19_gpio_write_fn scl_write, x19_gpio_read_fn sda_read, x19_gpio_write_fn sda_write,
-                                 x19_delay_us_fn delay_us) {
+x19_status_t x19_i2c_recover_bus(x19_gpio_write_fn scl_write,
+                                x19_gpio_read_fn sda_read,
+                                x19_gpio_write_fn sda_write,
+                                x19_delay_us_fn delay_us) {
     if (!scl_write || !sda_read || !sda_write || !delay_us) {
         return X19_ERR_INVALID_ARG;
     }

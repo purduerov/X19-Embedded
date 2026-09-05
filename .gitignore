@@ -23,3 +23,5 @@ obj/
 # CubeMX temporary files
 *.bak
 *.tmp
+build-host/
+build-host/
