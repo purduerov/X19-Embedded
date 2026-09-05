@@ -33,16 +33,16 @@ extern "C" {
 /* SERIALIZATION & DESERIALIZATION API                                       */
 /* ========================================================================== */
 
-x19_status_t x19_can_pack_thruster_cmd(const x19_thruster_cmd_t *cmd, uint8_t *buffer, size_t *len);
+x19_status_t x19_can_pack_thruster_cmd(const x19_thruster_cmd_t *cmd, uint8_t *buffer, size_t max_len, size_t *packed_len);
 x19_status_t x19_can_unpack_thruster_cmd(const uint8_t *buffer, size_t len, x19_thruster_cmd_t *cmd);
 
-x19_status_t x19_can_pack_nav_telemetry(const x19_nav_telemetry_t *nav, uint8_t *buffer, size_t *len);
+x19_status_t x19_can_pack_nav_telemetry(const x19_nav_telemetry_t *nav, uint8_t *buffer, size_t max_len, size_t *packed_len);
 x19_status_t x19_can_unpack_nav_telemetry(const uint8_t *buffer, size_t len, x19_nav_telemetry_t *nav);
 
-x19_status_t x19_can_pack_env_telemetry(const x19_env_telemetry_t *env, uint8_t *buffer, size_t *len);
+x19_status_t x19_can_pack_env_telemetry(const x19_env_telemetry_t *env, uint8_t *buffer, size_t max_len, size_t *packed_len);
 x19_status_t x19_can_unpack_env_telemetry(const uint8_t *buffer, size_t len, x19_env_telemetry_t *env);
 
-x19_status_t x19_can_pack_power_telemetry(const x19_power_telemetry_t *power, uint8_t *buffer, size_t *len);
+x19_status_t x19_can_pack_power_telemetry(const x19_power_telemetry_t *power, uint8_t *buffer, size_t max_len, size_t *packed_len);
 x19_status_t x19_can_unpack_power_telemetry(const uint8_t *buffer, size_t len, x19_power_telemetry_t *power);
 
 #ifdef __cplusplus
