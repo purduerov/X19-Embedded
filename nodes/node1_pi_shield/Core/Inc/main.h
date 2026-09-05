@@ -11,10 +11,10 @@
 extern "C" {
 #endif
 
-#include "x19_parameters.h"
 #include "x19_can_protocol.h"
-#include "x19_types.h"
+#include "x19_parameters.h"
 #include "x19_safety.h"
+#include "x19_types.h"
 
 void Error_Handler(void);
 
