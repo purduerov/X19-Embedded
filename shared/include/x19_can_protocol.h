@@ -8,8 +8,8 @@
 #define X19_CAN_PROTOCOL_H
 
 #include "x19_types.h"
-#include <stddef.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,16 +18,16 @@ extern "C" {
 /* ========================================================================== */
 /* CAN ARBITRATION ID ALLOCATION (11-bit Standard IDs)                        */
 /* ========================================================================== */
-#define X19_CAN_ID_EMERGENCY_BREAK   (0x001) /**< Priority 0: Leak/E-Stop Cutoff */
-#define X19_CAN_ID_EFUSE_FAULT_ALERT (0x005) /**< Priority 0: Power Slab Fault */
-#define X19_CAN_ID_THRUSTER_CMD      (0x100) /**< Priority 1: 8x Thruster PWM */
-#define X19_CAN_ID_SOLENOID_CMD      (0x110) /**< Priority 1: Pneumatic Solenoids */
-#define X19_CAN_ID_NAV_TELEMETRY     (0x200) /**< Priority 2: 100 Hz Nav (IMU+Depth) */
-#define X19_CAN_ID_ENV_TELEMETRY     (0x210) /**< Priority 2: 10 Hz Leak & Temp */
-#define X19_CAN_ID_POWER_TELEMETRY   (0x300) /**< Priority 3: 20 Hz Power Slab */
-#define X19_CAN_ID_USB_HUB_TELEMETRY (0x310) /**< Priority 3: 5 Hz USB Hub */
-#define X19_CAN_ID_BOOTLOADER_CMD    (0x700) /**< Priority 7: Bootloader Control */
-#define X19_CAN_ID_BOOTLOADER_DATA   (0x701) /**< Priority 7: Bootloader Data Chunk */
+#define X19_CAN_ID_EMERGENCY_BREAK          (0x001) /**< Priority 0: Leak/E-Stop Cutoff */
+#define X19_CAN_ID_EFUSE_FAULT_ALERT        (0x005) /**< Priority 0: Power Slab Fault */
+#define X19_CAN_ID_THRUSTER_CMD             (0x100) /**< Priority 1: 8x Thruster PWM */
+#define X19_CAN_ID_SOLENOID_CMD             (0x110) /**< Priority 1: Pneumatic Solenoids */
+#define X19_CAN_ID_NAV_TELEMETRY            (0x200) /**< Priority 2: 100 Hz Nav (IMU+Depth) */
+#define X19_CAN_ID_ENV_TELEMETRY            (0x210) /**< Priority 2: 10 Hz Leak & Temp */
+#define X19_CAN_ID_POWER_TELEMETRY          (0x300) /**< Priority 3: 20 Hz Power Slab */
+#define X19_CAN_ID_USB_HUB_TELEMETRY        (0x310) /**< Priority 3: 5 Hz USB Hub */
+#define X19_CAN_ID_BOOTLOADER_CMD           (0x700) /**< Priority 7: Bootloader Control */
+#define X19_CAN_ID_BOOTLOADER_DATA          (0x701) /**< Priority 7: Bootloader Data Chunk */
 
 /* ========================================================================== */
 /* SERIALIZATION & DESERIALIZATION API                                       */

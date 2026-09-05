@@ -8,8 +8,8 @@
 #define X19_SAFETY_H
 
 #include "x19_types.h"
-#include <stdbool.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {

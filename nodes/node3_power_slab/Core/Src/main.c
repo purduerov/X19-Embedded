@@ -7,12 +7,12 @@
  */
 
 #include "main.h"
-#include "tcan1044.h"
 #include "tps25990.h"
+#include "tcan1044.h"
 
-static x19_safety_state_t g_safety_state;
+static x19_safety_state_t   g_safety_state;
 static x19_power_telemetry_t g_power_telemetry;
-static tps25990_dev_t g_pmbus_bricks[5];
+static tps25990_dev_t       g_pmbus_bricks[5];
 
 int main(void) {
     x19_safety_init(&g_safety_state);
