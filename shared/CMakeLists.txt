@@ -3,6 +3,7 @@ add_library(x19_shared STATIC
     src/x19_pwm_ramp.c
     src/x19_i2c_recovery.c
     src/x19_safety.c
+    src/x19_bsp_stub.c
 )
 
 target_include_directories(x19_shared PUBLIC
