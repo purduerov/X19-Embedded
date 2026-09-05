@@ -1,7 +1,7 @@
-#include "x19_safety.h"
 #include "x19_parameters.h"
-#include <stdio.h>
+#include "x19_safety.h"
 #include <assert.h>
+#include <stdio.h>
 
 void test_safety_initialization(void) {
     x19_safety_state_t state;

@@ -12,7 +12,7 @@ void test_thruster_cmd_pack_unpack(void) {
 
     uint8_t buffer[64];
     size_t len = 0;
-    x19_status_t status = x19_can_pack_thruster_cmd(&original, buffer, &len);
+    x19_status_t status = x19_can_pack_thruster_cmd(&original, buffer, sizeof(buffer), &len);
     assert(status == X19_OK);
     assert(len == sizeof(x19_thruster_cmd_t));
 
@@ -39,7 +39,7 @@ void test_nav_telemetry_pack_unpack(void) {
 
     uint8_t buffer[64];
     size_t len = 0;
-    x19_status_t status = x19_can_pack_nav_telemetry(&original, buffer, &len);
+    x19_status_t status = x19_can_pack_nav_telemetry(&original, buffer, sizeof(buffer), &len);
     assert(status == X19_OK);
     assert(len == sizeof(x19_nav_telemetry_t));
 
@@ -56,8 +56,15 @@ void test_invalid_arguments(void) {
     x19_thruster_cmd_t cmd;
     size_t len = 0;
 
-    assert(x19_can_pack_thruster_cmd(NULL, buffer, &len) == X19_ERR_INVALID_ARG);
+    assert(x19_can_pack_thruster_cmd(NULL, buffer, sizeof(buffer), &len) == X19_ERR_INVALID_ARG);
     assert(x19_can_unpack_thruster_cmd(buffer, 5, &cmd) == X19_ERR_INVALID_ARG);
+
+    /* Negative test cases: Buffer capacity too small */
+    assert(x19_can_pack_thruster_cmd(&cmd, buffer, 5, &len) == X19_ERR_INVALID_ARG);
+
+    x19_nav_telemetry_t nav;
+    assert(x19_can_pack_nav_telemetry(&nav, buffer, 5, &len) == X19_ERR_INVALID_ARG);
+
     printf("[PASS] test_invalid_arguments\n");
 }
 
@@ -72,7 +79,7 @@ void test_security_pwm_bounds(void) {
 
     uint8_t buffer[64];
     size_t len = 0;
-    x19_status_t status = x19_can_pack_thruster_cmd(&original, buffer, &len);
+    x19_status_t status = x19_can_pack_thruster_cmd(&original, buffer, sizeof(buffer), &len);
     assert(status == X19_OK);
 
     x19_thruster_cmd_t decoded;
@@ -86,7 +93,7 @@ void test_security_pwm_bounds(void) {
     // Test out of bounds (too low)
     original.pwm_us[3] = 1500;
     original.pwm_us[5] = 999;
-    status = x19_can_pack_thruster_cmd(&original, buffer, &len);
+    status = x19_can_pack_thruster_cmd(&original, buffer, sizeof(buffer), &len);
     assert(status == X19_OK);
 
     status = x19_can_unpack_thruster_cmd(buffer, len, &decoded);

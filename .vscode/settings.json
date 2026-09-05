@@ -15,5 +15,12 @@
         "*.h": "c",
         "*.c": "c",
         "*.ioc": "xml"
-    }
+    },
+    "cmake.cmakePath": "cube-cmake",
+    "cmake.configureArgs": [
+        "-DCMAKE_COMMAND=cube-cmake"
+    ],
+    "cmake.preferredGenerators": [
+        "Ninja"
+    ]
 }

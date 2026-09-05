@@ -1,5 +1,7 @@
 # Build artifacts
 build/
+build-native/
+build-test/
 bin/
 obj/
 *.elf
