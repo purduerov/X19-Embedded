@@ -39,7 +39,7 @@ def decode_msg(msg: can.Message):
 
     elif msg_id == CAN_ID_THRUSTER_CMD and len(data) >= 16:
         pwms = struct.unpack("<8H", data[:16])
-        pwm_str = " ".join([f"T{i+1}:{pwms[i]}us" for i in range(8)])
+        pwm_str = " ".join(f"T{i+1}:{pwms[i]}us" for i in range(8))
         print(f"[{ts}] [CAN 0x100] Thruster PWMs -> {pwm_str}")
 
     elif msg_id == CAN_ID_SOLENOID_CMD and len(data) >= 2:
