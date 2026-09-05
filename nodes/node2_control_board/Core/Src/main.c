@@ -20,7 +20,7 @@ static x19_thruster_cmd_t g_active_pwms;
 
 /* Sensors */
 static lsm6dsoxtr_dev_t g_imu_dev;
-static ms5837_dev_t     g_depth_dev;
+static ms5837_dev_t g_depth_dev;
 
 void SystemClock_Config(void);
 

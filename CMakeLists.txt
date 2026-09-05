@@ -32,5 +32,7 @@ add_subdirectory(nodes/node1_pi_shield)
 add_subdirectory(nodes/node2_control_board)
 add_subdirectory(nodes/node3_power_slab)
 
-# Add unit tests
-add_subdirectory(tests)
+# Add unit tests (only when natively building for host)
+if(NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory(tests)
+endif()
