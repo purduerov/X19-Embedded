@@ -72,6 +72,7 @@ target_compile_definitions(stm32cubemx INTERFACE ${MX_Defines_Syms})
 # Create STM32_Drivers static library
 add_library(STM32_Drivers OBJECT)
 target_sources(STM32_Drivers PRIVATE ${STM32_Drivers_Src})
+target_compile_options(STM32_Drivers PRIVATE -w)
 target_link_libraries(STM32_Drivers PUBLIC stm32cubemx)
 
 
