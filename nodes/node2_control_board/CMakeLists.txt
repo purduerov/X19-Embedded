@@ -1,5 +1,6 @@
 add_executable(node2_control_board.elf
     Core/Src/main.c
+    Core/Src/app.c
 )
 
 target_include_directories(node2_control_board.elf PRIVATE
