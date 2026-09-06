@@ -114,22 +114,24 @@ if(NOT WIN32 OR MINGW)
 endif()
 add_test(NAME test_multi_node_bus COMMAND test_multi_node_bus)
 
-# Software-in-the-Loop (SIL) Bridge Server
-add_executable(sil_bridge_server
-    sil_bridge_server.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
-)
-target_include_directories(sil_bridge_server PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
-)
-target_link_libraries(sil_bridge_server PRIVATE x19_mocks)
-if(WIN32)
-    target_link_libraries(sil_bridge_server PRIVATE ws2_32)
-endif()
-if(NOT WIN32 OR MINGW)
-    target_link_libraries(sil_bridge_server PRIVATE m)
+# Software-in-the-Loop (SIL) Bridge Server (Host Native Only)
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(sil_bridge_server
+        sil_bridge_server.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    )
+    target_include_directories(sil_bridge_server PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+    )
+    target_link_libraries(sil_bridge_server PRIVATE x19_mocks)
+    if(WIN32)
+        target_link_libraries(sil_bridge_server PRIVATE ws2_32)
+    endif()
+    if(NOT WIN32 OR MINGW)
+        target_link_libraries(sil_bridge_server PRIVATE m)
+    endif()
 endif()
