@@ -83,3 +83,21 @@ ctest --test-dir build --output-on-failure
 cd X19-Embedded
 python tests/sil_companion_bridge/test_full_system_sil.py
 ```
+
+### Interactive Testing Dashboard (Streamlit GUI)
+To interactively test thrusters, toggle pneumatic solenoids, inject fault conditions (e-breaks, leaks), and inspect live 100 Hz navigation, environmental, and power telemetry via browser UI:
+```powershell
+cd X19-Embedded
+python tests/sil_dashboard/run_dashboard.py
+```
+Or run directly via Streamlit:
+```powershell
+cd X19-Embedded
+streamlit run tests/sil_dashboard/dashboard_app.py
+```
+Dashboard features:
+- **One-Click Server Management**: Start/stop the native STM32 SIL simulation binary from the sidebar.
+- **8-Thruster Live Controls**: Real-time PWM sliders with automatic slew-rate ramping and individual effort visualization.
+- **10-Channel Pneumatics**: Toggle switches for all 5 double-acting SMC solenoid valves.
+- **Emergency Break Injection**: Priority 0 `0x001` trigger to test instant motor shutdown and hardware latch.
+- **Live Graphs & Telemetry**: 100 Hz depth and quaternion attitude tracking, BME280 leak detection, and 4x PMBus converter metrics.
