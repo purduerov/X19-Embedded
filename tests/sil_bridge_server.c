@@ -149,7 +149,11 @@ int main(int argc, char **argv) {
 
     /* Accept connection from Pi Core Python Bridge or Test Harness */
     struct sockaddr_in client_addr;
+#ifdef _WIN32
     int addrlen = sizeof(client_addr);
+#else
+    socklen_t addrlen = sizeof(client_addr);
+#endif
     socket_t client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addrlen);
     if (IS_INVALID_SOCKET(client_fd)) {
         fprintf(stderr, "SIL Bridge: Client accept failed.\n");
