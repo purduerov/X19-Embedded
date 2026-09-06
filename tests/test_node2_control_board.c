@@ -131,7 +131,17 @@ void test_node2_emergency_break_cutoff(void) {
     }
     assert(mock_bsp_get_pwm_us(0) == 1700);
 
-    /* Inject Priority 0 Emergency Break (0x001) */
+    /* Inject spoofed/invalid Emergency Break (wrong magic bytes) */
+    uint8_t spoofed_alert[8] = {0xDE, 0xAD, 0x01, 0, 0, 0, 0, 0};
+    mock_can_inject_rx(X19_CAN_ID_EMERGENCY_BREAK, spoofed_alert, sizeof(spoofed_alert));
+    mock_bsp_advance_time_ms(1);
+    node2_app_step();
+
+    /* Thrusters should remain active, emergency break not tripped */
+    assert(mock_bsp_get_pwm_us(0) == 1700);
+    assert(!mock_bsp_is_emergency_brake_tripped());
+
+    /* Inject Valid Priority 0 Emergency Break (0x001) */
     uint8_t alert[8] = {0xAA, 0x55, 0x01, 0, 0, 0, 0, 0};
     mock_can_inject_rx(X19_CAN_ID_EMERGENCY_BREAK, alert, sizeof(alert));
 
