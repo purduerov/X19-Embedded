@@ -46,6 +46,50 @@ void led_toggle(void);
  */
 void led_set(bool state);
 
+/**
+ * @brief Output pulse width to an ESC channel (0 to 7).
+ * @param channel ESC index (0 to 7).
+ * @param pulse_us Pulse width in microseconds (1000 to 2000 us).
+ */
+void bsp_pwm_set_us(uint8_t channel, uint16_t pulse_us);
+
+/**
+ * @brief Get the last commanded pulse width on an ESC channel.
+ * @param channel ESC index (0 to 7).
+ * @return Pulse width in microseconds.
+ */
+uint16_t bsp_pwm_get_us(uint8_t channel);
+
+/**
+ * @brief Set pneumatic solenoid driver states.
+ * @param mask 10-bit bitmask of energized solenoids.
+ */
+void bsp_solenoid_set(uint16_t mask);
+
+/**
+ * @brief Get active pneumatic solenoid driver bitmask.
+ * @return 10-bit bitmask.
+ */
+uint16_t bsp_solenoid_get(void);
+
+/**
+ * @brief Read floor leak probe sensor input.
+ * @param probe_idx Probe index (0 or 1).
+ * @return true if water contact detected (wet), false if dry.
+ */
+bool bsp_leak_probe_read(uint8_t probe_idx);
+
+/**
+ * @brief Hardware Emergency Brake trigger (TIMx_BDTR BKIN cutoff / latch).
+ */
+void bsp_emergency_brake_trip(void);
+
+/**
+ * @brief Check if hardware emergency brake is tripped.
+ * @return true if tripped, false if normal.
+ */
+bool bsp_is_emergency_brake_tripped(void);
+
 #ifdef __cplusplus
 }
 #endif

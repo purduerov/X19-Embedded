@@ -5,7 +5,14 @@
  */
 
 #include "ina226.h"
+#include <stdbool.h>
 #include <string.h>
+
+__attribute__((weak)) bool mock_sensors_get_ina226(float *voltage_v, float *current_a) {
+    (void)voltage_v;
+    (void)current_a;
+    return false;
+}
 
 x19_status_t ina226_init(ina226_dev_t *dev, uint8_t i2c_addr, float shunt_resistor_ohms) {
     if (!dev || shunt_resistor_ohms <= 0.0f)
@@ -19,5 +26,11 @@ x19_status_t ina226_init(ina226_dev_t *dev, uint8_t i2c_addr, float shunt_resist
 x19_status_t ina226_read_power(ina226_dev_t *dev) {
     if (!dev)
         return X19_ERR_INVALID_ARG;
+
+    if (mock_sensors_get_ina226(&dev->voltage_v, &dev->current_a)) {
+        dev->power_w = dev->voltage_v * dev->current_a;
+        return X19_OK;
+    }
+
     return X19_OK;
 }
