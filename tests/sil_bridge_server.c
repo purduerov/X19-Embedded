@@ -193,6 +193,22 @@ int main(int argc, char **argv) {
                     if (pkt->magic == SIL_MAGIC_HEADER) {
                         mock_can_set_current_node(X19_NODE_PI_CORE);
                         can_send(pkt->id, pkt->data, pkt->len);
+
+                        /* Log C-level execution for real-time verification */
+                        if (pkt->id == X19_CAN_ID_THRUSTER_CMD && pkt->len >= 16) {
+                            const uint16_t *pwms = (const uint16_t *)pkt->data;
+                            printf("[C STM32 CAN-RX] ID=0x%03X (THRUSTER_CMD) -> Targets: [%u, %u, %u, %u, %u, %u, %u, %u] us\n",
+                                   pkt->id, pwms[0], pwms[1], pwms[2], pwms[3], pwms[4], pwms[5], pwms[6], pwms[7]);
+                            fflush(stdout);
+                        } else if (pkt->id == X19_CAN_ID_SOLENOID_CMD && pkt->len >= 2) {
+                            const uint16_t *mask = (const uint16_t *)pkt->data;
+                            printf("[C STM32 CAN-RX] ID=0x%03X (SOLENOID_CMD) -> Mask: 0x%04X\n", pkt->id, *mask);
+                            fflush(stdout);
+                        } else if (pkt->id == X19_CAN_ID_EMERGENCY_BREAK) {
+                            printf("[C STM32 CAN-RX] ID=0x%03X (EMERGENCY_BREAK) -> TIMx_BDTR Hardware Clamp Tripped!\n", pkt->id);
+                            fflush(stdout);
+                        }
+
                         size_t consumed = sizeof(sil_can_packet_t);
                         memmove(rx_stream_buf, rx_stream_buf + consumed, rx_stream_len - consumed);
                         rx_stream_len -= consumed;
@@ -249,6 +265,15 @@ int main(int argc, char **argv) {
         }
 
         cycle_count++;
+        if (cycle_count % 200 == 0) {
+            printf("[C Engine Tick] SimTime=%u ms | Active TIMx PWMs: [%u, %u, %u, %u, %u, %u, %u, %u] us\n",
+                   time_get_ms(),
+                   mock_bsp_get_pwm_us(0), mock_bsp_get_pwm_us(1),
+                   mock_bsp_get_pwm_us(2), mock_bsp_get_pwm_us(3),
+                   mock_bsp_get_pwm_us(4), mock_bsp_get_pwm_us(5),
+                   mock_bsp_get_pwm_us(6), mock_bsp_get_pwm_us(7));
+            fflush(stdout);
+        }
         if (max_cycles > 0 && (int)cycle_count >= max_cycles) {
             break;
         }
