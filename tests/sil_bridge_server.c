@@ -157,6 +157,10 @@ int main(int argc, char **argv) {
     uint8_t rx_stream_buf[sizeof(sil_can_packet_t) * 4];
     size_t rx_stream_len = 0;
 
+    static uint32_t s_last_tx_nav = 0;
+    static uint32_t s_last_tx_env = 0;
+    static uint32_t s_last_tx_pwr = 0;
+
     bool running = true;
     while (running) {
         /* Check for new client connections */
@@ -242,24 +246,58 @@ int main(int argc, char **argv) {
         mock_can_set_current_node(X19_NODE_POWER_SLAB);
         node3_app_step();
 
-        /* 6. Drain any frames addressed to or broadcast to Pi Core and forward over TCP */
+        /* 6. Drain frames addressed to Pi Core and forward over TCP (rate-limited telemetry to avoid flooding) */
         mock_can_set_current_node(X19_NODE_PI_CORE);
         uint32_t rx_id;
         uint8_t rx_data[64];
         uint8_t rx_len;
+        uint32_t now_ms = time_get_ms();
+
         while (can_receive(&rx_id, rx_data, &rx_len)) {
             if (!IS_INVALID_SOCKET(client_fd)) {
-                sil_can_packet_t tx_pkt;
-                tx_pkt.magic = SIL_MAGIC_HEADER;
-                tx_pkt.id = rx_id;
-                tx_pkt.len = rx_len;
-                if (rx_len > 0) {
-                    memcpy(tx_pkt.data, rx_data, rx_len);
+                bool should_send = false;
+
+                if (rx_id == X19_CAN_ID_EMERGENCY_BREAK || rx_id == X19_CAN_ID_EFUSE_FAULT_ALERT) {
+                    /* Critical safety alerts: ALWAYS send immediately */
+                    should_send = true;
+                } else if (rx_id == X19_CAN_ID_NAV_TELEMETRY) {
+                    /* Nav telemetry: stream at 5 Hz (every 200 ms) instead of 100 Hz flood */
+                    if (now_ms - s_last_tx_nav >= 200) {
+                        s_last_tx_nav = now_ms;
+                        should_send = true;
+                    }
+                } else if (rx_id == X19_CAN_ID_ENV_TELEMETRY) {
+                    /* Enclosure telemetry: 1 Hz normal, instant if leak detected */
+                    if (rx_len >= 13 && rx_data[12] != 0) {
+                        should_send = true;
+                    } else if (now_ms - s_last_tx_env >= 1000) {
+                        s_last_tx_env = now_ms;
+                        should_send = true;
+                    }
+                } else if (rx_id == X19_CAN_ID_POWER_TELEMETRY) {
+                    /* Power telemetry: stream at 1 Hz */
+                    if (now_ms - s_last_tx_pwr >= 1000) {
+                        s_last_tx_pwr = now_ms;
+                        should_send = true;
+                    }
+                } else {
+                    /* Any command, ACK, or other frame: send immediately */
+                    should_send = true;
                 }
-                int sent = send(client_fd, (const char *)&tx_pkt, sizeof(sil_can_packet_t), 0);
-                if (sent <= 0) {
-                    CLOSE_SOCKET(client_fd);
-                    client_fd = INVALID_SOCKET;
+
+                if (should_send) {
+                    sil_can_packet_t tx_pkt;
+                    tx_pkt.magic = SIL_MAGIC_HEADER;
+                    tx_pkt.id = rx_id;
+                    tx_pkt.len = rx_len;
+                    if (rx_len > 0) {
+                        memcpy(tx_pkt.data, rx_data, rx_len);
+                    }
+                    int sent = send(client_fd, (const char *)&tx_pkt, sizeof(sil_can_packet_t), 0);
+                    if (sent <= 0) {
+                        CLOSE_SOCKET(client_fd);
+                        client_fd = INVALID_SOCKET;
+                    }
                 }
             }
         }

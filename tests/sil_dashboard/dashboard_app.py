@@ -148,6 +148,9 @@ class SilDashboardClient:
         self.history_depth: List[float] = []
         self.history_time: List[float] = []
 
+        self._last_logged_payload: Dict[int, bytes] = {}
+        self._last_logged_time: Dict[int, float] = {}
+
         # End-to-End Pipeline state
         self.pipeline_surface_cmd: Dict[str, Any] = {
             "surge": 0.0, "sway": 0.0, "heave": 0.0,
@@ -310,6 +313,17 @@ class SilDashboardClient:
                 self.connected = False
 
     def _record_packet(self, direction: str, can_id: int, payload: bytes, summary: str):
+        # Deduplicate repetitive telemetry: only log when payload changes or every 2s
+        now = time.monotonic()
+        telemetry_ids = {CAN_ID_NAV_TELEMETRY, CAN_ID_ENV_TELEMETRY, CAN_ID_POWER_TELEMETRY}
+        if can_id in telemetry_ids:
+            last_payload = self._last_logged_payload.get(can_id)
+            last_time = self._last_logged_time.get(can_id, 0.0)
+            if last_payload == payload and (now - last_time) < 2.0:
+                return
+            self._last_logged_payload[can_id] = payload
+            self._last_logged_time[can_id] = now
+
         name = CAN_ID_MAP.get(can_id, ("UNKNOWN", ""))[0]
         rec = CanPacketRecord(
             timestamp=time.strftime("%H:%M:%S") + f".{int(time.time()*1000)%1000:03d}",
@@ -417,14 +431,14 @@ def main():
 
         col_srv1, col_srv2 = st.columns(2)
         with col_srv1:
-            if st.button("Restart Engine", use_container_width=True):
+            if st.button("Restart Engine", width="stretch"):
                 client.stop_server_process()
                 time.sleep(0.3)
                 client.start_server_process()
                 client.connect()
                 st.rerun()
         with col_srv2:
-            if st.button("Stop Engine", use_container_width=True):
+            if st.button("Stop Engine", width="stretch"):
                 client.stop_server_process()
                 st.rerun()
 
@@ -435,13 +449,13 @@ def main():
 
         st.divider()
         st.subheader("Fault & Safety Injection")
-        if st.button("TRIP EMERGENCY BREAK (0x001)", type="primary", use_container_width=True):
+        if st.button("TRIP EMERGENCY BREAK (0x001)", type="primary", width="stretch"):
             client.trigger_emergency_break()
             st.error("Priority 0 Emergency Break Triggered! Thrusters cut to 1500 us neutral.")
 
         if client.emergency_break_tripped:
             st.error("VEHICLE STATE: EMERGENCY LATCHED (TIMx_BDTR Active)")
-            if st.button("Reset E-Break State", use_container_width=True):
+            if st.button("Reset E-Break State", width="stretch"):
                 client.emergency_break_tripped = False
                 st.rerun()
 
@@ -491,29 +505,29 @@ def main():
             st.markdown("**Flight Presets**")
             preset_cols = st.columns(3)
             with preset_cols[0]:
-                if st.button("All Stop (Hover)", use_container_width=True):
+                if st.button("All Stop (Hover)", width="stretch"):
                     client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.0)
                     st.rerun()
             with preset_cols[1]:
-                if st.button("Forward (+0.5 Surge)", use_container_width=True):
+                if st.button("Forward (+0.5 Surge)", width="stretch"):
                     client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
                     st.rerun()
             with preset_cols[2]:
-                if st.button("Reverse (-0.5 Surge)", use_container_width=True):
+                if st.button("Reverse (-0.5 Surge)", width="stretch"):
                     client.send_surface_pilot_command(-0.5, 0.0, 0.0, 0.0)
                     st.rerun()
 
             preset_cols2 = st.columns(3)
             with preset_cols2[0]:
-                if st.button("Strafe Right (+0.5 Sway)", use_container_width=True):
+                if st.button("Strafe Right (+0.5 Sway)", width="stretch"):
                     client.send_surface_pilot_command(0.0, 0.5, 0.0, 0.0)
                     st.rerun()
             with preset_cols2[1]:
-                if st.button("Dive (+0.5 Heave)", use_container_width=True):
+                if st.button("Dive (+0.5 Heave)", width="stretch"):
                     client.send_surface_pilot_command(0.0, 0.0, 0.5, 0.0)
                     st.rerun()
             with preset_cols2[2]:
-                if st.button("Yaw Right (+0.5 Yaw)", use_container_width=True):
+                if st.button("Yaw Right (+0.5 Yaw)", width="stretch"):
                     client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.5)
                     st.rerun()
 
@@ -600,11 +614,11 @@ def main():
 
         col_all1, col_all2, col_all3 = st.columns([1, 1, 2])
         with col_all1:
-            if st.button("All Stop (1500 us)", use_container_width=True, key="btn_all_stop_tab2"):
+            if st.button("All Stop (1500 us)", width="stretch", key="btn_all_stop_tab2"):
                 client.send_pwms([1500] * 8)
                 st.rerun()
         with col_all2:
-            if st.button("All Forward (1650 us)", use_container_width=True, key="btn_all_fwd_tab2"):
+            if st.button("All Forward (1650 us)", width="stretch", key="btn_all_fwd_tab2"):
                 client.send_pwms([1650] * 8)
                 st.rerun()
         with col_all3:
@@ -751,7 +765,7 @@ def main():
         with col_can_filter2:
             st.metric("Total Buffered Frames", len(client.packet_log))
         with col_can_filter3:
-            if st.button("Clear Buffer", use_container_width=True):
+            if st.button("Clear Buffer", width="stretch"):
                 client.packet_log.clear()
                 st.rerun()
 
@@ -774,7 +788,7 @@ def main():
                     "Hex Payload": p.hex_data,
                     "Decoded Summary": p.decoded_summary,
                 })
-            st.dataframe(table_data, use_container_width=True, height=400)
+            st.dataframe(table_data, width="stretch", height=400)
         else:
             st.info("No packets in buffer matching the selected filter.")
 
@@ -824,7 +838,7 @@ def main():
 
     # Auto-refresh loop when connected
     if client.connected:
-        time.sleep(0.1)
+        time.sleep(0.5)
         st.rerun()
 
 if __name__ == "__main__":
