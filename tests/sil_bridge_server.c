@@ -8,6 +8,9 @@
  * Exposes a lightweight TCP framing protocol on 127.0.0.1:8765 allowing the
  * Raspberry Pi companion computer software (ZMQ bridges, Python scripts, or ROS2)
  * to transmit CAN ID 0x100 / 0x110 frames and receive 0x200 / 0x210 / 0x300 telemetry.
+ *
+ * Automatically keeps the simulation running and accepts new client connections
+ * when a client reconnects or a dashboard refreshes.
  */
 
 #include "mocks/mock_bsp.h"
@@ -81,7 +84,7 @@ static void platform_sleep_ms(uint32_t ms) {
 
 int main(int argc, char **argv) {
     int port = SIL_BRIDGE_DEFAULT_PORT;
-    int max_cycles = 0; /* 0 = run indefinitely until client disconnects */
+    int max_cycles = 0; /* 0 = run indefinitely */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -120,15 +123,17 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (listen(server_fd, 1) < 0) {
+    if (listen(server_fd, 5) < 0) {
         fprintf(stderr, "SIL Bridge: Listen failed on port %d\n", port);
         CLOSE_SOCKET(server_fd);
         return 1;
     }
 
+    set_nonblocking(server_fd);
+
     printf("===============================================================\n");
     printf(" X19 Software-in-the-Loop (SIL) Multi-Node Bus Server Active\n");
-    printf(" Listening for Pi Companion / Test Client on 127.0.0.1:%d\n", port);
+    printf(" Listening for Dashboard / Pi Companion on 127.0.0.1:%d\n", port);
     printf("===============================================================\n");
     fflush(stdout);
 
@@ -147,58 +152,66 @@ int main(int argc, char **argv) {
     mock_can_set_current_node(X19_NODE_POWER_SLAB);
     node3_app_init();
 
-    /* Accept connection from Pi Core Python Bridge or Test Harness */
-    struct sockaddr_in client_addr;
-#ifdef _WIN32
-    int addrlen = sizeof(client_addr);
-#else
-    socklen_t addrlen = sizeof(client_addr);
-#endif
-    socket_t client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addrlen);
-    if (IS_INVALID_SOCKET(client_fd)) {
-        fprintf(stderr, "SIL Bridge: Client accept failed.\n");
-        CLOSE_SOCKET(server_fd);
-        return 1;
-    }
-
-    printf("SIL Bridge: Pi Companion Client connected from %s:%d\n",
-           inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-    fflush(stdout);
-
-    set_nonblocking(client_fd);
-
+    socket_t client_fd = INVALID_SOCKET;
     uint32_t cycle_count = 0;
     uint8_t rx_stream_buf[sizeof(sil_can_packet_t) * 4];
     size_t rx_stream_len = 0;
 
     bool running = true;
     while (running) {
+        /* Check for new client connections */
+        struct sockaddr_in client_addr;
+#ifdef _WIN32
+        int addrlen = sizeof(client_addr);
+#else
+        socklen_t addrlen = sizeof(client_addr);
+#endif
+        socket_t new_client = accept(server_fd, (struct sockaddr *)&client_addr, &addrlen);
+        if (!IS_INVALID_SOCKET(new_client)) {
+            if (!IS_INVALID_SOCKET(client_fd)) {
+                CLOSE_SOCKET(client_fd);
+            }
+            client_fd = new_client;
+            set_nonblocking(client_fd);
+            rx_stream_len = 0;
+            printf("SIL Bridge: Client connected from %s:%d\n",
+                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            fflush(stdout);
+        }
+
         /* 1. Advance discrete simulation clock by 10 ms (100 Hz tick) */
         mock_bsp_advance_time_ms(10);
 
-        /* 2. Read any incoming CAN packets from Pi Core companion over TCP */
-        int bytes_read = recv(client_fd, (char *)(rx_stream_buf + rx_stream_len),
-                              (int)(sizeof(rx_stream_buf) - rx_stream_len), 0);
-        if (bytes_read > 0) {
-            rx_stream_len += (size_t)bytes_read;
-            while (rx_stream_len >= sizeof(sil_can_packet_t)) {
-                sil_can_packet_t *pkt = (sil_can_packet_t *)rx_stream_buf;
-                if (pkt->magic == SIL_MAGIC_HEADER) {
-                    /* Injected into CAN bus as if transmitted by Raspberry Pi 5 / Pi Shield */
-                    mock_can_set_current_node(X19_NODE_PI_CORE);
-                    can_send(pkt->id, pkt->data, pkt->len);
-                    size_t consumed = sizeof(sil_can_packet_t);
-                    memmove(rx_stream_buf, rx_stream_buf + consumed, rx_stream_len - consumed);
-                    rx_stream_len -= consumed;
-                } else {
-                    /* Corrupted magic, advance 1 byte */
-                    memmove(rx_stream_buf, rx_stream_buf + 1, rx_stream_len - 1);
-                    rx_stream_len--;
+        /* 2. Read any incoming CAN packets from companion client */
+        if (!IS_INVALID_SOCKET(client_fd)) {
+            int bytes_read = recv(client_fd, (char *)(rx_stream_buf + rx_stream_len),
+                                  (int)(sizeof(rx_stream_buf) - rx_stream_len), 0);
+            if (bytes_read > 0) {
+                rx_stream_len += (size_t)bytes_read;
+                while (rx_stream_len >= sizeof(sil_can_packet_t)) {
+                    sil_can_packet_t *pkt = (sil_can_packet_t *)rx_stream_buf;
+                    if (pkt->magic == SIL_MAGIC_HEADER) {
+                        mock_can_set_current_node(X19_NODE_PI_CORE);
+                        can_send(pkt->id, pkt->data, pkt->len);
+                        size_t consumed = sizeof(sil_can_packet_t);
+                        memmove(rx_stream_buf, rx_stream_buf + consumed, rx_stream_len - consumed);
+                        rx_stream_len -= consumed;
+                    } else {
+                        memmove(rx_stream_buf, rx_stream_buf + 1, rx_stream_len - 1);
+                        rx_stream_len--;
+                    }
+                }
+            } else if (bytes_read == 0) {
+                /* Disconnected */
+                CLOSE_SOCKET(client_fd);
+                client_fd = INVALID_SOCKET;
+                rx_stream_len = 0;
+                printf("SIL Bridge: Client disconnected, waiting for reconnection...\n");
+                fflush(stdout);
+                if (max_cycles > 0) {
+                    break;
                 }
             }
-        } else if (bytes_read == 0) {
-            printf("SIL Bridge: Companion client closed connection.\n");
-            break;
         }
 
         /* 3. Step Node 2 (Control Board): Process CAN commands, execute 1kHz ramp, stream 0x200 */
@@ -219,14 +232,20 @@ int main(int argc, char **argv) {
         uint8_t rx_data[64];
         uint8_t rx_len;
         while (can_receive(&rx_id, rx_data, &rx_len)) {
-            sil_can_packet_t tx_pkt;
-            tx_pkt.magic = SIL_MAGIC_HEADER;
-            tx_pkt.id = rx_id;
-            tx_pkt.len = rx_len;
-            if (rx_len > 0) {
-                memcpy(tx_pkt.data, rx_data, rx_len);
+            if (!IS_INVALID_SOCKET(client_fd)) {
+                sil_can_packet_t tx_pkt;
+                tx_pkt.magic = SIL_MAGIC_HEADER;
+                tx_pkt.id = rx_id;
+                tx_pkt.len = rx_len;
+                if (rx_len > 0) {
+                    memcpy(tx_pkt.data, rx_data, rx_len);
+                }
+                int sent = send(client_fd, (const char *)&tx_pkt, sizeof(sil_can_packet_t), 0);
+                if (sent <= 0) {
+                    CLOSE_SOCKET(client_fd);
+                    client_fd = INVALID_SOCKET;
+                }
             }
-            send(client_fd, (const char *)&tx_pkt, sizeof(sil_can_packet_t), 0);
         }
 
         cycle_count++;
@@ -238,10 +257,11 @@ int main(int argc, char **argv) {
         platform_sleep_ms(10);
     }
 
-    printf("SIL Bridge: Simulation ended after %u cycles (PWM0: %u us, PWM7: %u us).\n",
-           cycle_count, mock_bsp_get_pwm_us(0), mock_bsp_get_pwm_us(7));
+    printf("SIL Bridge: Server exiting after %u cycles.\n", cycle_count);
 
-    CLOSE_SOCKET(client_fd);
+    if (!IS_INVALID_SOCKET(client_fd)) {
+        CLOSE_SOCKET(client_fd);
+    }
     CLOSE_SOCKET(server_fd);
 
 #ifdef _WIN32

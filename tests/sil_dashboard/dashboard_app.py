@@ -218,16 +218,23 @@ def main():
         st.markdown("**Subsea Node Firmware Simulation**")
 
         st.subheader("SIL Server State")
+        # Auto-connect if not already connected
+        if not client.connected:
+            client.start_server_process()
+            client.connect()
+
         col_srv1, col_srv2 = st.columns(2)
         with col_srv1:
-            if st.button("Start SIL Engine", use_container_width=True):
+            if st.button("Restart Engine", use_container_width=True):
+                client.stop_server_process()
+                time.sleep(0.3)
                 client.start_server_process()
                 client.connect()
-                st.success("Server started & connected!")
+                st.rerun()
         with col_srv2:
             if st.button("Stop Engine", use_container_width=True):
                 client.stop_server_process()
-                st.info("Server terminated.")
+                st.rerun()
 
         status_color = "green" if client.connected else "red"
         st.markdown(f"**Connection Status:** :{status_color}[{'ONLINE (127.0.0.1:8765)' if client.connected else 'OFFLINE'}]")
