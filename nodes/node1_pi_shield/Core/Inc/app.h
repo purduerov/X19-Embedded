@@ -1,6 +1,7 @@
 /**
  * @file app.h
- * @brief Node 1 (Pi Shield) Application Entry Point.
+ * @brief Node 1 (Pi Shield) Application Entry Point & Stepping Interface.
+ * @organization Purdue ROV
  */
 
 #ifndef APP_H
@@ -10,6 +11,8 @@
 extern "C" {
 #endif
 
+void node1_app_init(void);
+void node1_app_step(void);
 void app_main(void);
 
 #ifdef __cplusplus

@@ -37,6 +37,28 @@ x19_status_t x19_can_unpack_thruster_cmd(const uint8_t *buffer, size_t len, x19_
     return X19_OK;
 }
 
+x19_status_t x19_can_pack_solenoid_cmd(const x19_solenoid_cmd_t *cmd, uint8_t *buffer, size_t max_len,
+                                       size_t *packed_len) {
+    if (!cmd || !buffer || !packed_len)
+        return X19_ERR_INVALID_ARG;
+    if (max_len < sizeof(x19_solenoid_cmd_t))
+        return X19_ERR_INVALID_ARG;
+    memcpy(buffer, cmd, sizeof(x19_solenoid_cmd_t));
+    *packed_len = sizeof(x19_solenoid_cmd_t);
+    return X19_OK;
+}
+
+x19_status_t x19_can_unpack_solenoid_cmd(const uint8_t *buffer, size_t len, x19_solenoid_cmd_t *cmd) {
+    if (!buffer || !cmd)
+        return X19_ERR_INVALID_ARG;
+    if (len < sizeof(x19_solenoid_cmd_t))
+        return X19_ERR_INVALID_ARG;
+    memcpy(cmd, buffer, sizeof(x19_solenoid_cmd_t));
+    /* Mask to 10 valid channels (bits 0..9) */
+    cmd->solenoid_mask &= 0x03FF;
+    return X19_OK;
+}
+
 x19_status_t x19_can_pack_nav_telemetry(const x19_nav_telemetry_t *nav, uint8_t *buffer, size_t max_len,
                                         size_t *packed_len) {
     if (!nav || !buffer || !packed_len)

@@ -1,6 +1,7 @@
 /**
  * @file app.h
- * @brief Node 3 (Power Slab) Application Entry Point.
+ * @brief Node 3 (Power Slab) Application Entry Point & Stepping Interface.
+ * @organization Purdue ROV
  */
 
 #ifndef APP_H
@@ -10,6 +11,8 @@
 extern "C" {
 #endif
 
+void node3_app_init(void);
+void node3_app_step(void);
 void app_main(void);
 
 #ifdef __cplusplus

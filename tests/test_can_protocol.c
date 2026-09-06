@@ -102,9 +102,30 @@ void test_security_pwm_bounds(void) {
     printf("[PASS] test_security_pwm_bounds\n");
 }
 
+void test_solenoid_cmd_pack_unpack(void) {
+    x19_solenoid_cmd_t original = {.solenoid_mask = 0x0255};
+    uint8_t buffer[64];
+    size_t len = 0;
+    assert(x19_can_pack_solenoid_cmd(&original, buffer, sizeof(buffer), &len) == X19_OK);
+    assert(len == sizeof(x19_solenoid_cmd_t));
+
+    x19_solenoid_cmd_t decoded;
+    assert(x19_can_unpack_solenoid_cmd(buffer, len, &decoded) == X19_OK);
+    assert(decoded.solenoid_mask == 0x0255);
+
+    /* Test 10-bit mask clamping */
+    original.solenoid_mask = 0xFFFF;
+    assert(x19_can_pack_solenoid_cmd(&original, buffer, sizeof(buffer), &len) == X19_OK);
+    assert(x19_can_unpack_solenoid_cmd(buffer, len, &decoded) == X19_OK);
+    assert(decoded.solenoid_mask == 0x03FF);
+
+    printf("[PASS] test_solenoid_cmd_pack_unpack\n");
+}
+
 int main(void) {
     printf("Running CAN Protocol Unit Tests...\n");
     test_thruster_cmd_pack_unpack();
+    test_solenoid_cmd_pack_unpack();
     test_nav_telemetry_pack_unpack();
     test_invalid_arguments();
     test_security_pwm_bounds();
