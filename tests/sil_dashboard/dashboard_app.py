@@ -5,9 +5,10 @@ Powered by Streamlit.
 Enables live hardware-free testing and end-to-end verification:
 - Topside Surface Pilot Station: 6-DOF controls (Surge, Sway, Heave, Yaw) mapped to ZeroMQ Protobuf commands.
 - End-to-End Message Pipeline Tracer:
-    Surface (Protobuf JoystickCommand) -> Core (Thrust Allocation Matrix & CAN Packing)
-    -> STM32 CAN Bus (0x100 / 0x110) -> STM32 C Firmware Execution (app.c, TIM6 ramp, BDTR latch)
-    -> STM32 Telemetry (0x200, 0x210, 0x300) -> Core Topside Translation (Protobuf SensorData).
+    Downlink: Surface (Protobuf JoystickCommand) -> Core (Thrust Allocation Matrix & CAN Packing)
+              -> STM32 CAN Bus (0x100) -> STM32 C Firmware Execution (app.c, TIM6 ramp, BDTR latch)
+    Uplink:   STM32 Telemetry (0x200, 0x210, 0x300) -> Core Topside Translation (Protobuf SensorData)
+              -> Topside Pilot Heads-Up Display (HUD)
 - Raw CAN Bus Monitor & Packet Inspector (Tab 6): Live frame stream, hex inspector, and filtering.
 - Live C Firmware Console & Code Verification (Tab 7): Real-time stdout from sil_bridge_server.exe.
 - Direct Thruster & Solenoid Control (Tab 2).
@@ -136,6 +137,8 @@ class SilDashboardClient:
         # Packet history & C console stream
         self.packet_log = deque(maxlen=250)
         self.c_stdout_log = deque(maxlen=150)
+        self._last_logged_payload: Dict[int, bytes] = {}
+        self._last_logged_time: Dict[int, float] = {}
 
         # Live vehicle state
         self.pwms = [1500] * 8
@@ -148,19 +151,26 @@ class SilDashboardClient:
         self.history_depth: List[float] = []
         self.history_time: List[float] = []
 
-        self._last_logged_payload: Dict[int, bytes] = {}
-        self._last_logged_time: Dict[int, float] = {}
-
         # End-to-End Pipeline state
         self.pipeline_surface_cmd: Dict[str, Any] = {
             "surge": 0.0, "sway": 0.0, "heave": 0.0,
             "yaw": 0.0, "pitch": 0.0, "roll": 0.0,
-            "timestamp_us": 0, "raw_hex": ""
+            "timestamp_us": int(time.time() * 1e6),
+            "raw_hex": "08 00 15 00 00 00 00",
         }
         self.pipeline_core_pwms: List[int] = [1500] * 8
-        self.pipeline_core_can_hex: str = ""
+        self.pipeline_core_can_hex: str = "DC 05 DC 05 DC 05 DC 05 DC 05 DC 05 DC 05 DC 05"
         self.pipeline_core_to_surface: Dict[str, Any] = {
-            "depth": 0.0, "temp": 0.0, "raw_hex": ""
+            "timestamp_us": int(time.time() * 1e6),
+            "depth": 0.0,
+            "temp": 22.5,
+            "gyro_x": 0.0,
+            "gyro_y": 0.0,
+            "gyro_z": 0.0,
+            "accel_x": 0.0,
+            "accel_y": 0.0,
+            "accel_z": 9.81,
+            "raw_hex": "08 00 1D 00 00 00 00 25 00 00 B4 41",
         }
 
     def start_server_process(self) -> bool:
@@ -238,6 +248,7 @@ class SilDashboardClient:
         3. Encodes CAN ID 0x100 and sends to STM32 over SIL bus.
         """
         timestamp_us = int(time.time() * 1e6)
+        raw_pb_bytes = b""
         raw_pb_hex = ""
 
         if HAVE_PROTOBUF and telemetry_pb2:
@@ -252,44 +263,53 @@ class SilDashboardClient:
                     yaw=float(yaw),
                 )
                 raw_pb_bytes = cmd_proto.SerializeToString()
-                raw_pb_hex = raw_pb_bytes.hex()
+                raw_pb_hex = " ".join(f"{b:02X}" for b in raw_pb_bytes)
             except Exception:
-                raw_pb_hex = f"surge={surge:.2f}, sway={sway:.2f}, heave={heave:.2f}, yaw={yaw:.2f}"
+                raw_pb_hex = f"Surge={surge:+.2f} Sway={sway:+.2f} Heave={heave:+.2f} Yaw={yaw:+.2f}"
         else:
             raw_pb_hex = f"Surge={surge:+.2f} Sway={sway:+.2f} Heave={heave:+.2f} Yaw={yaw:+.2f}"
 
         pwms = compute_thrust_allocation(surge, sway, heave, yaw, pitch, roll)
+        cmd = ThrusterCommand(pwm_us=pwms)
+        can_payload = cmd.pack()
+        can_hex = " ".join(f"{b:02X}" for b in can_payload)
 
         with self.lock:
             self.pipeline_surface_cmd = {
                 "surge": surge, "sway": sway, "heave": heave,
                 "yaw": yaw, "pitch": pitch, "roll": roll,
-                "timestamp_us": timestamp_us, "raw_hex": raw_pb_hex
+                "timestamp_us": timestamp_us,
+                "raw_hex": raw_pb_hex or "08 00 15 00 00 00 00",
+                "raw_bytes": raw_pb_bytes,
             }
-            self.pipeline_core_pwms = pwms
+            self.pipeline_core_pwms = list(pwms)
+            self.pipeline_core_can_hex = can_hex
+            self.pwms = list(pwms)
 
         self.send_pwms(pwms)
 
     def send_pwms(self, pwms: List[int]):
         with self.lock:
-            if not self.connected or not self.sock:
-                return
             self.pwms = list(pwms)
             cmd = ThrusterCommand(pwm_us=self.pwms)
             payload = cmd.pack()
+            self.pipeline_core_can_hex = " ".join(f"{b:02X}" for b in payload)
+
+            if not self.connected or not self.sock:
+                return
+
             frame = pack_sil_can_frame(CAN_ID_THRUSTER_CMD, payload)
             try:
                 self.sock.sendall(frame)
-                self.pipeline_core_can_hex = payload.hex()
                 self._record_packet("Core -> STM32", CAN_ID_THRUSTER_CMD, payload, f"PWMs: {self.pwms}")
             except OSError:
                 self.connected = False
 
     def send_solenoids(self, mask: int):
         with self.lock:
+            self.solenoid_mask = mask & 0x03FF
             if not self.connected or not self.sock:
                 return
-            self.solenoid_mask = mask & 0x03FF
             cmd = SolenoidCommand(solenoid_mask=self.solenoid_mask)
             payload = cmd.pack()
             frame = pack_sil_can_frame(CAN_ID_SOLENOID_CMD, payload)
@@ -301,13 +321,13 @@ class SilDashboardClient:
 
     def trigger_emergency_break(self):
         with self.lock:
+            payload = b"\x01"
+            self.emergency_break_tripped = True
             if not self.connected or not self.sock:
                 return
-            payload = b"\x01"
             frame = pack_sil_can_frame(CAN_ID_EMERGENCY_BREAK, payload)
             try:
                 self.sock.sendall(frame)
-                self.emergency_break_tripped = True
                 self._record_packet("Core -> STM32", CAN_ID_EMERGENCY_BREAK, payload, "EMERGENCY CUTOFF TRIGGERED")
             except OSError:
                 self.connected = False
@@ -367,21 +387,41 @@ class SilDashboardClient:
                             self.history_time.pop(0)
 
                         # Update pipeline Core -> Surface translation
+                        raw_bytes = b""
+                        raw_hex = ""
+                        depth_val = nav.depth_meters
+                        temp_val = self.env_data.temperature_c if self.env_data else 22.5
+                        gx, gy, gz = nav.gyro_x_rad_s, nav.gyro_y_rad_s, nav.gyro_z_rad_s
+                        ts_us = int(time.time() * 1e6)
+
                         if HAVE_PROTOBUF and telemetry_pb2:
                             try:
                                 sdata = telemetry_pb2.SensorData(
-                                    timestamp_us=int(time.time() * 1e6),
-                                    depth=nav.depth_meters,
-                                    temperature=self.env_data.temperature_c if self.env_data else 22.0,
-                                    angular_velocity=telemetry_pb2.Vector3D(x=nav.gyro_x_rad_s, y=nav.gyro_y_rad_s, z=nav.gyro_z_rad_s)
+                                    timestamp_us=ts_us,
+                                    depth=depth_val,
+                                    temperature=temp_val,
+                                    angular_velocity=telemetry_pb2.Vector3D(x=gx, y=gy, z=gz),
+                                    acceleration=telemetry_pb2.Vector3D(x=0.0, y=0.0, z=9.81),
                                 )
-                                self.pipeline_core_to_surface = {
-                                    "depth": nav.depth_meters,
-                                    "temp": self.env_data.temperature_c if self.env_data else 22.0,
-                                    "raw_hex": sdata.SerializeToString().hex(),
-                                }
+                                raw_bytes = sdata.SerializeToString()
+                                raw_hex = " ".join(f"{b:02X}" for b in raw_bytes)
                             except Exception:
                                 pass
+
+                        with self.lock:
+                            self.pipeline_core_to_surface = {
+                                "timestamp_us": ts_us,
+                                "depth": depth_val,
+                                "temp": temp_val,
+                                "gyro_x": gx,
+                                "gyro_y": gy,
+                                "gyro_z": gz,
+                                "accel_x": 0.0,
+                                "accel_y": 0.0,
+                                "accel_z": 9.81,
+                                "raw_hex": raw_hex or "08 00 1D 00 00 00 00 25 00 00 B4 41",
+                                "raw_bytes": raw_bytes,
+                            }
 
                     elif can_id == CAN_ID_ENV_TELEMETRY:
                         env = EnvTelemetry.unpack(payload)
@@ -448,6 +488,13 @@ def main():
         st.metric("Logged CAN Frames", len(client.packet_log))
 
         st.divider()
+        st.subheader("Live Telemetry Streaming")
+        auto_refresh = st.toggle("Auto-Refresh Telemetry", value=True, help="Periodically re-renders live gauges and sensor plots.")
+        refresh_rate = 0.5
+        if auto_refresh:
+            refresh_rate = st.select_slider("Refresh Interval", options=[0.2, 0.5, 1.0, 2.0], value=0.5, format_func=lambda x: f"{x}s")
+
+        st.divider()
         st.subheader("Fault & Safety Injection")
         if st.button("TRIP EMERGENCY BREAK (0x001)", type="primary", width="stretch"):
             client.trigger_emergency_break()
@@ -460,7 +507,7 @@ def main():
                 st.rerun()
 
         st.divider()
-        st.markdown("### Simulated Nodes")
+        st.markdown("### Subsea Nodes")
         st.markdown("- **Node 1**: Pi Shield (STM32C5)")
         st.markdown("- **Node 2**: Control Board (STM32C5 + FPU)")
         st.markdown("- **Node 3**: Power Slab (STM32C5)")
@@ -486,20 +533,43 @@ def main():
     with tab1:
         st.subheader("Topside Pilot Station & End-to-End Communication Tracer")
         st.markdown(
-            "Control the ROV from the surface and trace every transformation: "
-            "**Surface (ZeroMQ Protobuf)** -> **Core (Thrust Matrix & CAN ID 0x100)** -> "
-            "**STM32 C Code (`app.c` TIM6 ramp)** -> **CAN Telemetry (0x200)** -> **Core to Surface (Protobuf SensorData)**."
+            "Trace every boundary of the Purdue ROV distributed system in real time: "
+            "from **Surface Pilot Gamepad Input** down through the **Pi 5 Companion Engine** "
+            "to **STM32 C Microcontroller Timers**, and all the way back up to the **Topside Pilot HUD**."
         )
 
-        st.markdown("### 1. Pilot Control Flight Deck")
+        # High-level architecture banner
+        with st.expander("System Architecture Overview (Click to expand)", expanded=False):
+            st.markdown(
+                """
+```
+DOWNLINK (Control Flow: Surface -> Vehicle):
+  [Topside Pilot Station] ──(ZeroMQ PUB: JoystickCommand Protobuf)──> [Pi 5 Companion Engine]
+                                                                             │
+                                                                 (8-Thruster Allocation)
+                                                                             │
+                                                                             ▼
+  [Physical ESC Timers] <──(TIM6 Slew-Rate Limiter)── [STM32 Control Board] <──(CAN FD 0x100)
+
+UPLINK (Telemetry Flow: Subsea Sensors -> Pilot Screen):
+  [IMU & Depth Sensors] ──> [STM32 Control Board] ──(CAN FD 0x200 @ 100 Hz)──> [Pi 5 Companion Engine]
+  [Leak & Enclosure]    ──> [STM32 Pi Shield]    ──(CAN FD 0x210 @ 10 Hz) ──>          │
+  [48V/12V Power Slab]  ──> [STM32 Power Slab]   ──(CAN FD 0x300 @ 20 Hz) ──> (Telemetry Aggregator)
+                                                                                       │
+  [Surface Pilot HUD] <──(ZeroMQ SUB: SensorData Protobuf)─────────────────────────────┘
+```
+                """
+            )
+
+        st.markdown("### 1. Topside Pilot Flight Deck")
         col_ctrl1, col_ctrl2 = st.columns([1, 1])
 
         with col_ctrl1:
-            st.markdown("**6-DOF Flight Axes**")
-            surge = st.slider("Surge (Forward / Reverse)", -1.0, 1.0, float(client.pipeline_surface_cmd["surge"]), 0.05)
-            sway = st.slider("Sway (Strafe Left / Right)", -1.0, 1.0, float(client.pipeline_surface_cmd["sway"]), 0.05)
-            heave = st.slider("Heave (Dive / Ascend)", -1.0, 1.0, float(client.pipeline_surface_cmd["heave"]), 0.05)
-            yaw = st.slider("Yaw (Turn Left / Right)", -1.0, 1.0, float(client.pipeline_surface_cmd["yaw"]), 0.05)
+            st.markdown("**6-DOF Flight Axes** (Drag to pilot vehicle)")
+            surge = st.slider("Surge (Forward / Reverse)", -1.0, 1.0, float(client.pipeline_surface_cmd["surge"]), 0.05, key="slider_surge")
+            sway = st.slider("Sway (Strafe Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["sway"]), 0.05, key="slider_sway")
+            heave = st.slider("Heave (Dive / Ascend)", -1.0, 1.0, float(client.pipeline_surface_cmd["heave"]), 0.05, key="slider_heave")
+            yaw = st.slider("Yaw (Turn Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["yaw"]), 0.05, key="slider_yaw")
 
         with col_ctrl2:
             st.markdown("**Flight Presets**")
@@ -540,70 +610,165 @@ def main():
         st.divider()
         st.markdown("### 2. Live End-to-End Message Flow Inspector")
 
-        p_col1, p_col2, p_col3 = st.columns(3)
+        # ---------------------------------------------------------------------
+        # PART A: DOWNLINK COMMAND PATH
+        # ---------------------------------------------------------------------
+        st.markdown("#### Part A: Downlink Command Path (Pilot Input -> Physical Thrusters)")
+        st.caption("How your joystick stick movements are transformed across software boundaries to spin vehicle motors.")
 
-        with p_col1:
-            st.markdown("#### [Stage 1] Surface -> Core")
+        col_stg1, col_stg2, col_stg3 = st.columns(3)
+
+        # STAGE 1
+        with col_stg1:
+            st.markdown("##### [Stage 1] Surface -> Core")
             st.caption("Topside ZeroMQ PUB (`tcp://127.0.0.1:5555`) topic `joystick`")
             st.info(
-                f"**Protobuf Message: `JoystickCommand`**\n"
-                f"- `forward (surge)`: {client.pipeline_surface_cmd['surge']:+.2f}\n"
-                f"- `strafe (sway)`: {client.pipeline_surface_cmd['sway']:+.2f}\n"
-                f"- `vertical (heave)`: {client.pipeline_surface_cmd['heave']:+.2f}\n"
-                f"- `yaw`: {client.pipeline_surface_cmd['yaw']:+.2f}\n"
-                f"- `timestamp_us`: {client.pipeline_surface_cmd['timestamp_us']}"
+                "**Purpose of Stage 1 (`JoystickCommand`):**\n"
+                "Captures the pilot's raw controller input. Instead of sending motor pulse widths over "
+                "the tether, the topside pilot interface speaks in vehicle-centric 6-DOF coordinates "
+                "(Surge, Sway, Heave, Yaw)."
             )
-            st.code(f"Serialized Hex:\n{client.pipeline_surface_cmd['raw_hex'] or '(none)'}", language="text")
 
-        with p_col2:
-            st.markdown("#### [Stage 2] Core -> STM32")
-            st.caption("CAN FD Arbitration ID `0x100` (`THRUSTER_CMD`)")
+            ts_us = client.pipeline_surface_cmd.get("timestamp_us", 0)
+            st.dataframe(
+                [
+                    {"Field": "forward (Surge)", "Value": f"{client.pipeline_surface_cmd['surge']:+.2f}", "Description": "Forward/Reverse throttle (-1 to +1)"},
+                    {"Field": "strafe (Sway)", "Value": f"{client.pipeline_surface_cmd['sway']:+.2f}", "Description": "Lateral strafe Right/Left"},
+                    {"Field": "vertical (Heave)", "Value": f"{client.pipeline_surface_cmd['heave']:+.2f}", "Description": "Vertical Dive/Ascend"},
+                    {"Field": "yaw", "Value": f"{client.pipeline_surface_cmd['yaw']:+.2f}", "Description": "Heading rotation Right/Left"},
+                    {"Field": "timestamp_us", "Value": f"{ts_us}", "Description": "Microsecond timestamp for latency tracking"},
+                ],
+                width="stretch",
+                hide_index=True
+            )
+            st.markdown("**Protobuf Wire Serialization (Hex):**")
+            st.code(client.pipeline_surface_cmd.get("raw_hex", "08 00 15 00 00 00 00"), language="text")
+
+        # STAGE 2
+        with col_stg2:
+            st.markdown("##### [Stage 2] Core -> STM32")
+            st.caption("CAN FD Arbitration ID `0x100` (`THRUSTER_CMD`, DLC: 16 Bytes)")
             st.info(
-                f"**Thrust Allocation Matrix Output:**\n"
-                f"- T0..T3 (Horiz): {client.pipeline_core_pwms[0:4]} us\n"
-                f"- T4..T7 (Vert):  {client.pipeline_core_pwms[4:8]} us\n"
-                f"- DLC: 16 Bytes (8x uint16_t LE)"
+                "**Purpose of Stage 2 (`THRUSTER_CMD`):**\n"
+                "The Pi 5 receives `JoystickCommand`. It solves the Purdue ROV 8-thruster allocation geometry matrix "
+                "(4 vectored horizontal @ 45°, 4 vertical) to convert 6-DOF motion into 8 discrete motor pulse widths."
             )
-            st.code(f"CAN Frame 0x100 Hex:\n{client.pipeline_core_can_hex or '(waiting)'}", language="text")
 
-        with p_col3:
-            st.markdown("#### [Stage 3] STM32 C Firmware")
-            st.caption("Control Board Node 2 (`Src/app.c`) Native Execution")
-            e_status = "LATCHED (E-Break Tripped)" if client.emergency_break_tripped else "ARMED & RUNNING"
-            st.success(
-                f"**C Firmware Engine Status:**\n"
-                f"- Safety State: `{e_status}`\n"
-                f"- Slew Limiter: 1 kHz `TIM6` ramping (1000 us/s max)\n"
-                f"- Target PWMs: {client.pwms}\n"
-                f"- Sensor Sampling: LSM6DSOXTR IMU (100 Hz), MS5837 Depth (100 Hz)"
+            pwms = client.pipeline_core_pwms
+            thruster_meta = [
+                ("T0", "Front-Left Horiz (45°)", "Surge + Sway + Yaw", pwms[0]),
+                ("T1", "Front-Right Horiz (45°)", "Surge - Sway - Yaw", pwms[1]),
+                ("T2", "Aft-Left Horiz (45°)", "Surge - Sway + Yaw", pwms[2]),
+                ("T3", "Aft-Right Horiz (45°)", "Surge + Sway - Yaw", pwms[3]),
+                ("T4", "Front-Left Vert", "-Heave + Pitch - Roll", pwms[4]),
+                ("T5", "Front-Right Vert", "-Heave + Pitch + Roll", pwms[5]),
+                ("T6", "Aft-Left Vert", "-Heave - Pitch - Roll", pwms[6]),
+                ("T7", "Aft-Right Vert", "-Heave - Pitch + Roll", pwms[7]),
+            ]
+            matrix_table = []
+            for tid, name, formula, pwm in thruster_meta:
+                effort = pwm - 1500
+                effort_str = f"{effort:+d} us ({'Fwd' if effort > 0 else 'Rev' if effort < 0 else 'Stop'})"
+                hex_le = f"{(pwm & 0xFF):02X} {((pwm >> 8) & 0xFF):02X}"
+                matrix_table.append({
+                    "Thruster": tid,
+                    "Position": name,
+                    "Target PWM": f"{pwm} us",
+                    "Effort": effort_str,
+                    "LE Hex": hex_le,
+                })
+            st.dataframe(matrix_table, width="stretch", hide_index=True)
+
+            st.markdown("**CAN FD ID 0x100 Payload (8x uint16_t Little-Endian):**")
+            st.code(client.pipeline_core_can_hex or "DC 05 DC 05 DC 05 DC 05 DC 05 DC 05 DC 05 DC 05", language="text")
+
+        # STAGE 3
+        with col_stg3:
+            st.markdown("##### [Stage 3] STM32 C Firmware")
+            st.caption("Control Board Node 2 (`Src/app.c`) Native C Execution")
+            st.info(
+                "**Purpose of Stage 3 (STM32 Control Board Firmware):**\n"
+                "The physical STM32 microcontroller receives CAN ID 0x100, enforces safety checks (emergency break, "
+                "leak kill switch), and applies a 1 kHz TIM6 slew-rate filter (1000 us/s max ramp rate). "
+                "This smooths out abrupt joystick moves so the 12V 300W DC-DC converters don't brown out."
             )
-            st.code(f"Binary Symbol: sil_bridge_server.exe -> app_step_100hz()", language="text")
 
-        p_col4, p_col5 = st.columns(2)
-        with p_col4:
-            st.markdown("#### [Stage 4] STM32 -> Core Telemetry")
-            st.caption("CAN Arbitration IDs `0x200` (Nav), `0x210` (Leak), `0x300` (Power)")
-            if client.nav_data:
-                st.info(
-                    f"**CAN ID 0x200 (33 Bytes):**\n"
-                    f"- Depth: `{client.nav_data.depth_meters:.2f} m` | Yaw Rate: `{client.nav_data.gyro_z_rad_s:.3f} rad/s`\n"
-                    f"- Quaternions: `({client.nav_data.q_w:.2f}, {client.nav_data.q_x:.2f}, {client.nav_data.q_y:.2f}, {client.nav_data.q_z:.2f})`\n"
-                    f"- Status: IMU High Precision Mode ({client.nav_data.imu_status})"
-                )
-            else:
-                st.warning("Awaiting CAN 0x200 Navigation Telemetry stream...")
+            e_status = "LATCHED: TIMx_BDTR HARDWARE CUTOFF" if client.emergency_break_tripped else "ARMED & RUNNING"
+            st.dataframe(
+                [
+                    {"Parameter": "Safety State", "Status": e_status, "Detail": "Emergency Break / Leak Interlock"},
+                    {"Parameter": "Slew Limiter (TIM6)", "Status": "1000 us/s Active", "Detail": "Limits inrush current on 12V rail"},
+                    {"Parameter": "Active PWM Output", "Status": f"T0={pwms[0]} us, T1={pwms[1]} us", "Detail": "Loaded into TIM1/TIM8 compare registers"},
+                    {"Parameter": "Hardware Output", "Status": "8x Basic ESCs", "Detail": "TIM1_CH1..CH4, TIM8_CH1..CH4 pins"},
+                ],
+                width="stretch",
+                hide_index=True
+            )
+            st.markdown("**Compiled Machine Code:**")
+            st.code("Target: build/tests/sil_bridge_server.exe\nModule: nodes/node2_control_board/Core/Src/app.c", language="text")
 
-        with p_col5:
-            st.markdown("#### [Stage 5] Core -> Surface Telemetry")
+        st.divider()
+
+        # ---------------------------------------------------------------------
+        # PART B: UPLINK TELEMETRY PATH
+        # ---------------------------------------------------------------------
+        st.markdown("#### Part B: Uplink Telemetry Path (Vehicle Sensors -> Pilot Heads-Up Display)")
+        st.caption("How physical subsea sensor measurements are gathered, packed, and streamed to the pilot's Primary Flight Display (HUD).")
+
+        col_stg4, col_stg5 = st.columns(2)
+
+        # STAGE 4
+        with col_stg4:
+            st.markdown("##### [Stage 4] STM32 -> Core Telemetry")
+            st.caption("CAN Arbitration IDs `0x200` (Nav @ 100 Hz), `0x210` (Env @ 10 Hz), `0x300` (Power @ 20 Hz)")
+            st.info(
+                "**Purpose of Stage 4 (Subsea Sensor Acquisition):**\n"
+                "The subsea microcontrollers read their physical onboard sensors and stream data back onto the vehicle's "
+                "internal CAN FD bus. Node 2 streams 100 Hz Navigation (BMI270 IMU + MS5837 Depth), Node 1 streams 10 Hz "
+                "Enclosure health (BME280 pressure/temp/humidity and leak probes), and Node 3 streams 20 Hz Power distribution."
+            )
+
+            nav = client.nav_data
+            env = client.env_data
+            pwr = client.power_data
+
+            sensor_rows = [
+                {"Node & Board": "Node 2: Control Board", "CAN ID": "0x200 (Nav)", "Sensor": "MS5837 Depth", "Live Value": f"{nav.depth_meters:.2f} m" if nav else "0.00 m"},
+                {"Node & Board": "Node 2: Control Board", "CAN ID": "0x200 (Nav)", "Sensor": "LSM6DSOX Gyro", "Live Value": f"Yaw={nav.gyro_z_rad_s:.3f} rad/s" if nav else "0.000 rad/s"},
+                {"Node & Board": "Node 2: Control Board", "CAN ID": "0x200 (Nav)", "Sensor": "LSM6DSOX Quaternions", "Live Value": f"({nav.q_w:.2f}, {nav.q_x:.2f}, {nav.q_y:.2f}, {nav.q_z:.2f})" if nav else "(1.00, 0.00, 0.00, 0.00)"},
+                {"Node & Board": "Node 1: Pi Shield", "CAN ID": "0x210 (Env)", "Sensor": "BME280 Pressure", "Live Value": f"{env.pressure_hpa:.1f} hPa" if env else "1013.2 hPa"},
+                {"Node & Board": "Node 1: Pi Shield", "CAN ID": "0x210 (Env)", "Sensor": "Leak Probes", "Live Value": f"0x{env.leak_flags:02X} ({'INGRESS' if env and env.leak_flags else 'DRY/OK'})" if env else "0x00 (DRY/OK)"},
+                {"Node & Board": "Node 3: Power Slab", "CAN ID": "0x300 (Pwr)", "Sensor": "INA228 48V Rail", "Live Value": f"{pwr.tether_voltage_mv/1000:.1f}V @ {pwr.tether_current_ma/1000:.1f}A" if pwr else "48.0V @ 2.2A"},
+            ]
+            st.dataframe(sensor_rows, width="stretch", hide_index=True)
+
+        # STAGE 5
+        with col_stg5:
+            st.markdown("##### [Stage 5] Core -> Surface Telemetry")
             st.caption("Topside ZeroMQ SUB (`tcp://127.0.0.1:5556`) topic `telemetry`")
             st.info(
-                f"**Protobuf Message: `SensorData`**\n"
-                f"- Depth: `{client.pipeline_core_to_surface['depth']:.2f} m`\n"
-                f"- Temperature: `{client.pipeline_core_to_surface['temp']:.1f} °C`\n"
-                f"- Angular Velocity: `Vector3D (x, y, z)`\n"
-                f"- Serialization: Protobuf v3 encoded"
+                "**What is this supposed to show me?**\n"
+                "Stage 5 is the primary telemetry packet sent from the ROV across the tether to your topside Surface Laptop "
+                "over ZeroMQ topic `telemetry`. It aggregates the subsea CAN frames into a clean Protobuf message (`SensorData`) "
+                "so the pilot's UI doesn't have to deal with raw CAN bus protocols.\n\n"
+                "The pilot software uses this exact message to draw the **Primary Flight Display (PFD) / Heads-Up Display (HUD)**: "
+                "the artificial horizon, depth gauge, compass tape, and battery/leak warning indicators on the pilot screen."
             )
-            st.code(f"Serialized Hex:\n{client.pipeline_core_to_surface['raw_hex'] or '(none)'}", language="text")
+
+            p_srf = client.pipeline_core_to_surface
+            st.dataframe(
+                [
+                    {"Field": "depth", "Decoded Value": f"{p_srf['depth']:.2f} meters", "Role on Pilot Heads-Up Display (HUD)": "Vertical depth tape & auto-depth PID target"},
+                    {"Field": "temperature", "Decoded Value": f"{p_srf['temp']:.1f} °C", "Role on Pilot Heads-Up Display (HUD)": "Hull overheating alarm indicator"},
+                    {"Field": "angular_velocity", "Decoded Value": f"X:{p_srf['gyro_x']:.2f}, Y:{p_srf['gyro_y']:.2f}, Z:{p_srf['gyro_z']:.2f} rad/s", "Role on Pilot Heads-Up Display (HUD)": "Rate-of-turn indicator & gyro stabilization"},
+                    {"Field": "acceleration", "Decoded Value": f"X:{p_srf['accel_x']:.2f}, Y:{p_srf['accel_y']:.2f}, Z:{p_srf['accel_z']:.2f} m/s²", "Role on Pilot Heads-Up Display (HUD)": "Gravity vector, tilt estimator, collision detector"},
+                    {"Field": "timestamp_us", "Decoded Value": f"{p_srf['timestamp_us']}", "Role on Pilot Heads-Up Display (HUD)": "Tether latency & packet freshness heartbeat"},
+                ],
+                width="stretch",
+                hide_index=True
+            )
+            st.markdown("**Protobuf Wire Serialization (Hex):**")
+            st.code(p_srf.get("raw_hex", "08 00 1D 00 00 00 00 25 00 00 B4 41"), language="text")
 
     # =========================================================================
     # TAB 2: DIRECT THRUSTERS & SOLENOIDS
@@ -823,7 +988,7 @@ def main():
             1. Open `nodes/node2_control_board/Core/Src/app.c` in your editor.
             2. Add any custom debug statement, for example:
                ```c
-               printf(">>> MY CUSTOM C CODE: Target T0=%u us, Current Depth=%.2f m\\n",
+               printf(">>> MY CUSTOM C CODE: Target T0=%u us, Current Depth=%.2f m\n",
                       g_target_pwms.pwm_us[0], g_depth_dev.depth_m);
                fflush(stdout);
                ```
@@ -836,9 +1001,9 @@ def main():
             """
         )
 
-    # Auto-refresh loop when connected
-    if client.connected:
-        time.sleep(0.5)
+    # Controlled auto-refresh loop
+    if client.connected and auto_refresh:
+        time.sleep(refresh_rate)
         st.rerun()
 
 if __name__ == "__main__":
