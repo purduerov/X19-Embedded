@@ -35,6 +35,17 @@ static void mock_delay_us(uint32_t us) {
     (void)us;
 }
 
+static void mock_scl_write_locked(bool high) {
+    if (high) {
+        g_clock_toggle_count++;
+    }
+}
+
+static void mock_sda_write_locked(bool high) {
+    (void)high;
+    g_mock_sda = false;  // SDA is held low by external device
+}
+
 void test_i2c_bus_recovery_success(void) {
     g_mock_sda = false;  // Initially locked LOW by slave
     g_clock_toggle_count = 0;
@@ -45,9 +56,21 @@ void test_i2c_bus_recovery_success(void) {
     printf("[PASS] test_i2c_bus_recovery_success\n");
 }
 
+void test_i2c_bus_recovery_locked(void) {
+    g_mock_sda = false;  // Initially locked LOW by slave and never releases
+    g_clock_toggle_count = 0;
+
+    x19_status_t status =
+        x19_i2c_recover_bus(mock_scl_write_locked, mock_sda_read, mock_sda_write_locked, mock_delay_us);
+    assert(status == X19_ERR_BUS_LOCKED);
+    assert(g_clock_toggle_count == 10);
+    printf("[PASS] test_i2c_bus_recovery_locked\n");
+}
+
 int main(void) {
     printf("Running I2C Bus Recovery Unit Tests...\n");
     test_i2c_bus_recovery_success();
+    test_i2c_bus_recovery_locked();
     printf("All I2C Recovery Tests Passed Successfully!\n");
     return 0;
 }
