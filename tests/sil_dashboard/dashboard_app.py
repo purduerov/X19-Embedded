@@ -322,14 +322,15 @@ class SilDashboardClient:
 
     def trigger_emergency_break(self):
         with self.lock:
-            payload = b"\x01"
+            # Magic signature (0xAA, 0x55) required by Node 2 authorization check (PR #46)
+            payload = b"\xAA\x55\x01"
             self.emergency_break_tripped = True
             if not self.connected or not self.sock:
                 return
             frame = pack_sil_can_frame(CAN_ID_EMERGENCY_BREAK, payload)
             try:
                 self.sock.sendall(frame)
-                self._record_packet("Core -> STM32", CAN_ID_EMERGENCY_BREAK, payload, "EMERGENCY CUTOFF TRIGGERED")
+                self._record_packet("Core -> STM32", CAN_ID_EMERGENCY_BREAK, payload, "EMERGENCY CUTOFF TRIGGERED (Authorized)")
             except OSError:
                 self.connected = False
 
