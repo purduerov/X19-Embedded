@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-X19 Remote CAN FD Bootloader Flashing Utility.
+Purdue ROV Remote CAN FD Bootloader Flashing Utility.
 Streams firmware binaries over CAN FD (5 Mbps data phase) to target STM32G4 nodes.
 Purdue ROV 2026-2027.
 """
@@ -124,7 +124,7 @@ def flash_node(interface: str, target_node: str, bin_path: str):
     return True
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="X19 CAN FD Remote Bootloader Flasher")
+    parser = argparse.ArgumentParser(description="Purdue ROV CAN FD Remote Bootloader Flasher")
     parser.add_argument("--interface", default="can0", help="SocketCAN interface (default: can0)")
     parser.add_argument("--target", required=True, choices=list(NODES.keys()), help="Target node name")
     parser.add_argument("--bin", required=True, help="Path to compiled firmware .bin file")

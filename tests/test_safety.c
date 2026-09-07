@@ -1,11 +1,11 @@
-#include "x19_parameters.h"
-#include "x19_safety.h"
+#include "rov_parameters.h"
+#include "rov_safety.h"
 #include <assert.h>
 #include <stdio.h>
 
 void test_safety_initialization(void) {
-    x19_safety_state_t state;
-    x19_safety_init(&state);
+    rov_safety_state_t state;
+    rov_safety_init(&state);
 
     assert(state.emergency_break_active == false);
     assert(state.leak_detected == false);
@@ -15,25 +15,25 @@ void test_safety_initialization(void) {
 }
 
 void test_heartbeat_watchdog(void) {
-    x19_safety_state_t state;
-    x19_safety_init(&state);
+    rov_safety_state_t state;
+    rov_safety_init(&state);
 
     uint32_t current_time_ms = 1000;
-    x19_safety_feed_heartbeat(&state, current_time_ms);
+    rov_safety_feed_heartbeat(&state, current_time_ms);
 
     // 50ms later -> heartbeat valid
-    assert(x19_safety_is_heartbeat_lost(&state, 1050) == false);
+    assert(rov_safety_is_heartbeat_lost(&state, 1050) == false);
 
     // 150ms later -> heartbeat expired (> 100ms)
-    assert(x19_safety_is_heartbeat_lost(&state, 1150) == true);
+    assert(rov_safety_is_heartbeat_lost(&state, 1150) == true);
     printf("[PASS] test_heartbeat_watchdog\n");
 }
 
 void test_emergency_break_trigger(void) {
-    x19_safety_state_t state;
-    x19_safety_init(&state);
+    rov_safety_state_t state;
+    rov_safety_init(&state);
 
-    x19_safety_trigger_emergency_break(&state);
+    rov_safety_trigger_emergency_break(&state);
     assert(state.emergency_break_active == true);
     printf("[PASS] test_emergency_break_trigger\n");
 }

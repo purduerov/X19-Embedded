@@ -16,29 +16,29 @@
 #include "mocks/mock_bsp.h"
 #include "mocks/mock_can.h"
 #include "mocks/mock_sensors.h"
-#include "x19_can_protocol.h"
-#include "x19_parameters.h"
+#include "rov_can_protocol.h"
+#include "rov_parameters.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 
 #ifdef _WIN32
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-  typedef SOCKET socket_t;
-  #define IS_INVALID_SOCKET(s) ((s) == INVALID_SOCKET)
-  #define CLOSE_SOCKET(s) closesocket(s)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SOCKET socket_t;
+#define IS_INVALID_SOCKET(s) ((s) == INVALID_SOCKET)
+#define CLOSE_SOCKET(s)      closesocket(s)
 #else
-  #include <sys/socket.h>
-  #include <netinet/in.h>
-  #include <arpa/inet.h>
-  #include <unistd.h>
-  #include <fcntl.h>
-  typedef int socket_t;
-  #define INVALID_SOCKET (-1)
-  #define IS_INVALID_SOCKET(s) ((s) < 0)
-  #define CLOSE_SOCKET(s) close(s)
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+typedef int socket_t;
+#define INVALID_SOCKET       (-1)
+#define IS_INVALID_SOCKET(s) ((s) < 0)
+#define CLOSE_SOCKET(s)      close(s)
 #endif
 
 /* Forward declarations of node lifecycle functions */
@@ -52,15 +52,16 @@ extern void node3_app_init(void);
 extern void node3_app_step(void);
 
 #define SIL_BRIDGE_DEFAULT_PORT 8765
-#define SIL_MAGIC_HEADER        0x58313943 /* "X19C" in ASCII */
+#define SIL_MAGIC_HEADER_LEGACY 0x58313943 /* "X19C" in ASCII */
+#define SIL_MAGIC_HEADER        0x524F5643 /* "ROVC" in ASCII */
 
 /* Frame packet: 4 bytes magic, 4 bytes id, 1 byte len, up to 64 bytes data */
 #pragma pack(push, 1)
 typedef struct {
     uint32_t magic;
     uint32_t id;
-    uint8_t  len;
-    uint8_t  data[64];
+    uint8_t len;
+    uint8_t data[64];
 } sil_can_packet_t;
 #pragma pack(pop)
 
@@ -143,13 +144,13 @@ int main(int argc, char **argv) {
     mock_can_reset();
     mock_sensors_reset();
 
-    mock_can_set_current_node(X19_NODE_PI_SHIELD);
+    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
     node1_app_init();
 
-    mock_can_set_current_node(X19_NODE_CONTROL_BOARD);
+    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
     node2_app_init();
 
-    mock_can_set_current_node(X19_NODE_POWER_SLAB);
+    mock_can_set_current_node(ROV_NODE_POWER_SLAB);
     node3_app_init();
 
     socket_t client_fd = INVALID_SOCKET;
@@ -178,8 +179,8 @@ int main(int argc, char **argv) {
             client_fd = new_client;
             set_nonblocking(client_fd);
             rx_stream_len = 0;
-            printf("SIL Bridge: Client connected from %s:%d\n",
-                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            printf("SIL Bridge: Client connected from %s:%d\n", inet_ntoa(client_addr.sin_addr),
+                   ntohs(client_addr.sin_port));
             fflush(stdout);
         }
 
@@ -194,22 +195,25 @@ int main(int argc, char **argv) {
                 rx_stream_len += (size_t)bytes_read;
                 while (rx_stream_len >= sizeof(sil_can_packet_t)) {
                     sil_can_packet_t *pkt = (sil_can_packet_t *)rx_stream_buf;
-                    if (pkt->magic == SIL_MAGIC_HEADER) {
-                        mock_can_set_current_node(X19_NODE_PI_CORE);
+                    if (pkt->magic == SIL_MAGIC_HEADER || pkt->magic == SIL_MAGIC_HEADER_LEGACY) {
+                        mock_can_set_current_node(ROV_NODE_PI_CORE);
                         can_send(pkt->id, pkt->data, pkt->len);
 
                         /* Log C-level execution for real-time verification */
-                        if (pkt->id == X19_CAN_ID_THRUSTER_CMD && pkt->len >= 16) {
+                        if (pkt->id == ROV_CAN_ID_THRUSTER_CMD && pkt->len >= 16) {
                             const uint16_t *pwms = (const uint16_t *)pkt->data;
-                            printf("[C STM32 CAN-RX] ID=0x%03X (THRUSTER_CMD) -> Targets: [%u, %u, %u, %u, %u, %u, %u, %u] us\n",
+                            printf("[C STM32 CAN-RX] ID=0x%03X (THRUSTER_CMD) -> Targets: [%u, %u, %u, %u, %u, %u, %u, "
+                                   "%u] us\n",
                                    pkt->id, pwms[0], pwms[1], pwms[2], pwms[3], pwms[4], pwms[5], pwms[6], pwms[7]);
                             fflush(stdout);
-                        } else if (pkt->id == X19_CAN_ID_SOLENOID_CMD && pkt->len >= 2) {
+                        } else if (pkt->id == ROV_CAN_ID_SOLENOID_CMD && pkt->len >= 2) {
                             const uint16_t *mask = (const uint16_t *)pkt->data;
                             printf("[C STM32 CAN-RX] ID=0x%03X (SOLENOID_CMD) -> Mask: 0x%04X\n", pkt->id, *mask);
                             fflush(stdout);
-                        } else if (pkt->id == X19_CAN_ID_EMERGENCY_BREAK) {
-                            printf("[C STM32 CAN-RX] ID=0x%03X (EMERGENCY_BREAK) -> TIMx_BDTR Hardware Clamp Tripped!\n", pkt->id);
+                        } else if (pkt->id == ROV_CAN_ID_EMERGENCY_BREAK) {
+                            printf(
+                                "[C STM32 CAN-RX] ID=0x%03X (EMERGENCY_BREAK) -> TIMx_BDTR Hardware Clamp Tripped!\n",
+                                pkt->id);
                             fflush(stdout);
                         }
 
@@ -235,19 +239,19 @@ int main(int argc, char **argv) {
         }
 
         /* 3. Step Node 2 (Control Board): Process CAN commands, execute 1kHz ramp, stream 0x200 */
-        mock_can_set_current_node(X19_NODE_CONTROL_BOARD);
+        mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
         node2_app_step();
 
         /* 4. Step Node 1 (Pi Shield): Evaluate environmental sensors, stream 0x210, leak safety */
-        mock_can_set_current_node(X19_NODE_PI_SHIELD);
+        mock_can_set_current_node(ROV_NODE_PI_SHIELD);
         node1_app_step();
 
         /* 5. Step Node 3 (Power Slab): Evaluate PMBus converter telemetry, stream 0x300 */
-        mock_can_set_current_node(X19_NODE_POWER_SLAB);
+        mock_can_set_current_node(ROV_NODE_POWER_SLAB);
         node3_app_step();
 
         /* 6. Drain frames addressed to Pi Core and forward over TCP (rate-limited telemetry to avoid flooding) */
-        mock_can_set_current_node(X19_NODE_PI_CORE);
+        mock_can_set_current_node(ROV_NODE_PI_CORE);
         uint32_t rx_id;
         uint8_t rx_data[64];
         uint8_t rx_len;
@@ -257,16 +261,16 @@ int main(int argc, char **argv) {
             if (!IS_INVALID_SOCKET(client_fd)) {
                 bool should_send = false;
 
-                if (rx_id == X19_CAN_ID_EMERGENCY_BREAK || rx_id == X19_CAN_ID_EFUSE_FAULT_ALERT) {
+                if (rx_id == ROV_CAN_ID_EMERGENCY_BREAK || rx_id == ROV_CAN_ID_EFUSE_FAULT_ALERT) {
                     /* Critical safety alerts: ALWAYS send immediately */
                     should_send = true;
-                } else if (rx_id == X19_CAN_ID_NAV_TELEMETRY) {
+                } else if (rx_id == ROV_CAN_ID_NAV_TELEMETRY) {
                     /* Nav telemetry: stream at 5 Hz (every 200 ms) instead of 100 Hz flood */
                     if (now_ms - s_last_tx_nav >= 200) {
                         s_last_tx_nav = now_ms;
                         should_send = true;
                     }
-                } else if (rx_id == X19_CAN_ID_ENV_TELEMETRY) {
+                } else if (rx_id == ROV_CAN_ID_ENV_TELEMETRY) {
                     /* Enclosure telemetry: 1 Hz normal, instant if leak detected */
                     if (rx_len >= 13 && rx_data[12] != 0) {
                         should_send = true;
@@ -274,7 +278,7 @@ int main(int argc, char **argv) {
                         s_last_tx_env = now_ms;
                         should_send = true;
                     }
-                } else if (rx_id == X19_CAN_ID_POWER_TELEMETRY) {
+                } else if (rx_id == ROV_CAN_ID_POWER_TELEMETRY) {
                     /* Power telemetry: stream at 1 Hz */
                     if (now_ms - s_last_tx_pwr >= 1000) {
                         s_last_tx_pwr = now_ms;
@@ -305,11 +309,9 @@ int main(int argc, char **argv) {
         cycle_count++;
         if (cycle_count % 200 == 0) {
             printf("[C Engine Tick] SimTime=%u ms | Active TIMx PWMs: [%u, %u, %u, %u, %u, %u, %u, %u] us\n",
-                   time_get_ms(),
-                   mock_bsp_get_pwm_us(0), mock_bsp_get_pwm_us(1),
-                   mock_bsp_get_pwm_us(2), mock_bsp_get_pwm_us(3),
-                   mock_bsp_get_pwm_us(4), mock_bsp_get_pwm_us(5),
-                   mock_bsp_get_pwm_us(6), mock_bsp_get_pwm_us(7));
+                   time_get_ms(), mock_bsp_get_pwm_us(0), mock_bsp_get_pwm_us(1), mock_bsp_get_pwm_us(2),
+                   mock_bsp_get_pwm_us(3), mock_bsp_get_pwm_us(4), mock_bsp_get_pwm_us(5), mock_bsp_get_pwm_us(6),
+                   mock_bsp_get_pwm_us(7));
             fflush(stdout);
         }
         if (max_cycles > 0 && (int)cycle_count >= max_cycles) {

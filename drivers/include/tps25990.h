@@ -7,7 +7,7 @@
 #ifndef TPS25990_H
 #define TPS25990_H
 
-#include "x19_types.h"
+#include "rov_types.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -22,8 +22,8 @@ typedef struct {
     uint16_t status_word;
 } tps25990_dev_t;
 
-x19_status_t tps25990_init(tps25990_dev_t *dev, uint8_t pmbus_addr);
-x19_status_t tps25990_read_telemetry(tps25990_dev_t *dev);
+rov_status_t tps25990_init(tps25990_dev_t *dev, uint8_t pmbus_addr);
+rov_status_t tps25990_read_telemetry(tps25990_dev_t *dev);
 
 #ifdef __cplusplus
 }

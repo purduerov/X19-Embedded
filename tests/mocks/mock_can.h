@@ -8,7 +8,7 @@
 #define MOCK_CAN_H
 
 #include "can_interface.h"
-#include "x19_types.h"
+#include "rov_types.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -26,7 +26,7 @@ typedef struct {
     uint32_t id;
     uint8_t data[MOCK_CAN_MAX_FRAME_SIZE];
     uint8_t len;
-    x19_node_id_t sender;
+    rov_node_id_t sender;
     uint32_t timestamp_ms;
 } mock_can_frame_t;
 
@@ -38,12 +38,12 @@ void mock_can_reset(void);
 /**
  * @brief Set which node context is currently executing (Node 1, Node 2, Node 3, or Pi Core).
  */
-void mock_can_set_current_node(x19_node_id_t node_id);
+void mock_can_set_current_node(rov_node_id_t node_id);
 
 /**
  * @brief Get the currently active node context.
  */
-x19_node_id_t mock_can_get_current_node(void);
+rov_node_id_t mock_can_get_current_node(void);
 
 /**
  * @brief Inject a frame into the RX queue of the currently active node.
@@ -53,7 +53,7 @@ bool mock_can_inject_rx(uint32_t id, const uint8_t *data, uint8_t len);
 /**
  * @brief Inject a frame into a specific node's RX queue.
  */
-bool mock_can_inject_node_rx(x19_node_id_t target_node, uint32_t id, const uint8_t *data, uint8_t len);
+bool mock_can_inject_node_rx(rov_node_id_t target_node, uint32_t id, const uint8_t *data, uint8_t len);
 
 /**
  * @brief Total number of frames transmitted across the virtual bus.

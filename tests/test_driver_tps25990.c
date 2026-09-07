@@ -13,18 +13,18 @@ void test_tps25990_driver(void) {
     tps25990_dev_t dev;
 
     /* Negative tests */
-    assert(tps25990_init(NULL, 0x40) == X19_ERR_INVALID_ARG);
-    assert(tps25990_read_telemetry(NULL) == X19_ERR_INVALID_ARG);
+    assert(tps25990_init(NULL, 0x40) == ROV_ERR_INVALID_ARG);
+    assert(tps25990_read_telemetry(NULL) == ROV_ERR_INVALID_ARG);
 
     /* Initialization */
-    assert(tps25990_init(&dev, 0x41) == X19_OK);
+    assert(tps25990_init(&dev, 0x41) == ROV_OK);
     assert(dev.pmbus_addr == 0x41);
 
     /* Test mock telemetry read */
     mock_sensors_reset();
     mock_sensors_set_tps25990(1, 48.0f, 12.05f, 8.4f, 42.5f, 0x0000);
 
-    assert(tps25990_read_telemetry(&dev) == X19_OK);
+    assert(tps25990_read_telemetry(&dev) == ROV_OK);
     assert(dev.output_voltage_v > 12.0f && dev.output_voltage_v < 12.1f);
     assert(dev.output_current_a > 8.3f && dev.output_current_a < 8.5f);
     assert(dev.temperature_c > 42.0f && dev.temperature_c < 43.0f);

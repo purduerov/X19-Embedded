@@ -1,5 +1,5 @@
 """
-X19 Software-in-the-Loop (SIL) Interactive Testing Dashboard.
+Purdue ROV Software-in-the-Loop (SIL) Interactive Testing Dashboard.
 Powered by Streamlit.
 
 Enables live hardware-free testing and end-to-end verification strictly within X19-Embedded:
@@ -453,7 +453,7 @@ def get_sil_client() -> SilDashboardClient:
 
 def main():
     st.set_page_config(
-        page_title="X19 ROV - Embedded SIL Testing Station",
+        page_title="Purdue ROV - Embedded SIL Testing Station",
         layout="wide",
         initial_sidebar_state="expanded",
     )
@@ -462,7 +462,7 @@ def main():
 
     # --- SIDEBAR: Master Controls & System State ---
     with st.sidebar:
-        st.title("X19 SIL Master Hub")
+        st.title("ROV Embedded SIL Master Hub")
         st.markdown("**Subsea Node Firmware Simulation**")
 
         st.subheader("SIL Server State")
@@ -515,7 +515,7 @@ def main():
         st.markdown("- **Node 4**: USB Camera Hub (PCIe)")
 
     # --- MAIN DASHBOARD INTERFACE ---
-    st.title("Purdue ROV — X19 Embedded SIL Testing Station")
+    st.title("Purdue ROV — Embedded SIL Testing Station")
     st.caption("Live hardware-free simulation for propulsion, actuation, active control, and complete communication tracing.")
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
@@ -980,7 +980,7 @@ UPLINK (Telemetry Flow: Subsea Sensors -> Pilot Screen):
             - `nodes/node2_control_board/Core/Src/app.c`
             - `nodes/node1_pi_shield/Core/Src/app.c`
             - `nodes/node3_power_slab/Core/Src/app.c`
-            - `shared/src/x19_pwm_ramp.c`, `shared/src/x19_safety.c`, `shared/src/can_interface.c`
+            - `shared/src/rov_pwm_ramp.c`, `shared/src/rov_safety.c`, `shared/src/can_interface.c`
             - `drivers/src/lsm6dsoxtr.c`, `drivers/src/ms5837.c`, `drivers/src/bme280.c`
 
             **To test and prove your own C code modifications:**

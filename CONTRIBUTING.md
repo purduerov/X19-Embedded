@@ -1,6 +1,6 @@
-# X19 Embedded Firmware Contribution Guidelines
+# ROV Embedded Firmware Contribution Guidelines
 
-Welcome to the Purdue ROV **X19-Embedded** team. Follow these standards to maintain safe, reliable subsea vehicle operation.
+Welcome to the Purdue ROV **Embedded Firmware** team (configured for the X19 subsea vehicle). Follow these standards to maintain safe, reliable subsea vehicle operation.
 
 ---
 
@@ -24,4 +24,4 @@ Welcome to the Purdue ROV **X19-Embedded** team. Follow these standards to maint
 - **No Blocking Delays**: Never use `HAL_Delay()` inside telemetry loops, sensor poll loops, or timer callbacks. Use non-blocking millisecond tick comparisons (`HAL_GetTick()`) or hardware timer interrupts.
 - **Fail-Safe Motor Neutral**: Thruster outputs must initialize to stopped neutral (`1500 us`) and revert to neutral immediately if the heartbeat watchdog expires or leak is detected.
 - **Memory Safety**: No dynamic memory allocation (`malloc`, `free`) in embedded flight firmware. Use static allocations and compile-time arrays.
-- **I2C Bus Recovery**: All I2C peripherals must implement bus timeout handling and automated 9-clock bus clear recovery via `x19_i2c_recover_bus()`.
+- **I2C Bus Recovery**: All I2C peripherals must implement bus timeout handling and automated 9-clock bus clear recovery via `rov_i2c_recover_bus()`.

@@ -14,23 +14,23 @@ __attribute__((weak)) bool mock_sensors_get_ina226(float *voltage_v, float *curr
     return false;
 }
 
-x19_status_t ina226_init(ina226_dev_t *dev, uint8_t i2c_addr, float shunt_resistor_ohms) {
+rov_status_t ina226_init(ina226_dev_t *dev, uint8_t i2c_addr, float shunt_resistor_ohms) {
     if (!dev || shunt_resistor_ohms <= 0.0f)
-        return X19_ERR_INVALID_ARG;
+        return ROV_ERR_INVALID_ARG;
     memset(dev, 0, sizeof(ina226_dev_t));
     dev->i2c_addr = i2c_addr;
     dev->shunt_resistor_ohms = shunt_resistor_ohms;
-    return X19_OK;
+    return ROV_OK;
 }
 
-x19_status_t ina226_read_power(ina226_dev_t *dev) {
+rov_status_t ina226_read_power(ina226_dev_t *dev) {
     if (!dev)
-        return X19_ERR_INVALID_ARG;
+        return ROV_ERR_INVALID_ARG;
 
     if (mock_sensors_get_ina226(&dev->voltage_v, &dev->current_a)) {
         dev->power_w = dev->voltage_v * dev->current_a;
-        return X19_OK;
+        return ROV_OK;
     }
 
-    return X19_OK;
+    return ROV_OK;
 }

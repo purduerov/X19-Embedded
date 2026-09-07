@@ -21,19 +21,19 @@ static mock_node_bus_state_t g_nodes[MOCK_CAN_MAX_NODES];
 static mock_can_frame_t g_bus_history[MOCK_CAN_HISTORY_SIZE];
 static uint32_t g_total_tx_count = 0;
 static uint32_t g_drop_counter = 0;
-static x19_node_id_t g_current_node = X19_NODE_CONTROL_BOARD;
+static rov_node_id_t g_current_node = ROV_NODE_CONTROL_BOARD;
 
-static uint8_t node_to_index(x19_node_id_t node) {
+static uint8_t node_to_index(rov_node_id_t node) {
     switch (node) {
-    case X19_NODE_PI_CORE:
+    case ROV_NODE_PI_CORE:
         return 0;
-    case X19_NODE_PI_SHIELD:
+    case ROV_NODE_PI_SHIELD:
         return 1;
-    case X19_NODE_CONTROL_BOARD:
+    case ROV_NODE_CONTROL_BOARD:
         return 2;
-    case X19_NODE_POWER_SLAB:
+    case ROV_NODE_POWER_SLAB:
         return 3;
-    case X19_NODE_USB_HUB:
+    case ROV_NODE_USB_HUB:
         return 4;
     default:
         return 0;
@@ -45,14 +45,14 @@ void mock_can_reset(void) {
     memset(g_bus_history, 0, sizeof(g_bus_history));
     g_total_tx_count = 0;
     g_drop_counter = 0;
-    g_current_node = X19_NODE_CONTROL_BOARD;
+    g_current_node = ROV_NODE_CONTROL_BOARD;
 }
 
-void mock_can_set_current_node(x19_node_id_t node_id) {
+void mock_can_set_current_node(rov_node_id_t node_id) {
     g_current_node = node_id;
 }
 
-x19_node_id_t mock_can_get_current_node(void) {
+rov_node_id_t mock_can_get_current_node(void) {
     return g_current_node;
 }
 
@@ -67,7 +67,7 @@ static bool enqueue_node_frame(uint8_t node_idx, const mock_can_frame_t *frame) 
     return true;
 }
 
-bool mock_can_inject_node_rx(x19_node_id_t target_node, uint32_t id, const uint8_t *data, uint8_t len) {
+bool mock_can_inject_node_rx(rov_node_id_t target_node, uint32_t id, const uint8_t *data, uint8_t len) {
     if (len > MOCK_CAN_MAX_FRAME_SIZE) {
         return false;
     }
@@ -75,7 +75,7 @@ bool mock_can_inject_node_rx(x19_node_id_t target_node, uint32_t id, const uint8
     memset(&frame, 0, sizeof(frame));
     frame.id = id;
     frame.len = len;
-    frame.sender = X19_NODE_BROADCAST;
+    frame.sender = ROV_NODE_BROADCAST;
     frame.timestamp_ms = time_get_ms();
     if (data && len > 0) {
         memcpy(frame.data, data, len);

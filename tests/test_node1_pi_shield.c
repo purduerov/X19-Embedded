@@ -8,8 +8,8 @@
 #include "mocks/mock_bsp.h"
 #include "mocks/mock_can.h"
 #include "mocks/mock_sensors.h"
-#include "x19_can_protocol.h"
-#include "x19_parameters.h"
+#include "rov_can_protocol.h"
+#include "rov_parameters.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,7 +18,7 @@ void test_node1_nominal_telemetry(void) {
     mock_bsp_reset();
     mock_can_reset();
     mock_sensors_reset();
-    mock_can_set_current_node(X19_NODE_PI_SHIELD);
+    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
 
     mock_sensors_set_bme280(1013.25f, 42.0f, 26.5f);
     mock_sensors_set_ina226(5.21f, 1.35f);
@@ -38,10 +38,10 @@ void test_node1_nominal_telemetry(void) {
     uint8_t data[64];
     uint8_t len = 0;
     assert(mock_can_get_last_tx(&tx_id, data, &len));
-    assert(tx_id == X19_CAN_ID_ENV_TELEMETRY);
+    assert(tx_id == ROV_CAN_ID_ENV_TELEMETRY);
 
-    x19_env_telemetry_t env;
-    assert(x19_can_unpack_env_telemetry(data, len, &env) == X19_OK);
+    rov_env_telemetry_t env;
+    assert(rov_can_unpack_env_telemetry(data, len, &env) == ROV_OK);
     assert(env.pressure_hpa > 1013.0f && env.pressure_hpa < 1014.0f);
     assert(env.humidity_pct > 41.0f && env.humidity_pct < 43.0f);
     assert(env.leak_flags == 0);
@@ -55,7 +55,7 @@ void test_node1_vacuum_loss_leak_trigger(void) {
     mock_bsp_reset();
     mock_can_reset();
     mock_sensors_reset();
-    mock_can_set_current_node(X19_NODE_PI_SHIELD);
+    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
 
     /* Start with a sealed enclosure pulled to 750 hPa vacuum */
     mock_sensors_set_bme280(750.0f, 30.0f, 22.0f);
@@ -73,11 +73,11 @@ void test_node1_vacuum_loss_leak_trigger(void) {
 
     /* Emergency break should have been fired and hardware brake tripped */
     assert(mock_bsp_is_emergency_brake_tripped());
-    assert(mock_can_count_tx_by_id(X19_CAN_ID_EMERGENCY_BREAK) >= 1);
+    assert(mock_can_count_tx_by_id(ROV_CAN_ID_EMERGENCY_BREAK) >= 1);
 
     uint8_t alert_data[64];
     uint8_t alert_len = 0;
-    assert(mock_can_find_latest_tx(X19_CAN_ID_EMERGENCY_BREAK, alert_data, &alert_len));
+    assert(mock_can_find_latest_tx(ROV_CAN_ID_EMERGENCY_BREAK, alert_data, &alert_len));
     assert(alert_len == 8);
     assert(alert_data[0] == 0xAA && alert_data[1] == 0x55);
 
@@ -88,7 +88,7 @@ void test_node1_humidity_spike_leak_trigger(void) {
     mock_bsp_reset();
     mock_can_reset();
     mock_sensors_reset();
-    mock_can_set_current_node(X19_NODE_PI_SHIELD);
+    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
 
     mock_sensors_set_bme280(1013.25f, 35.0f, 24.0f);
     node1_app_init();
@@ -102,7 +102,7 @@ void test_node1_humidity_spike_leak_trigger(void) {
     node1_app_step();
 
     assert(mock_bsp_is_emergency_brake_tripped());
-    assert(mock_can_count_tx_by_id(X19_CAN_ID_EMERGENCY_BREAK) >= 1);
+    assert(mock_can_count_tx_by_id(ROV_CAN_ID_EMERGENCY_BREAK) >= 1);
 
     printf("[PASS] test_node1_humidity_spike_leak_trigger\n");
 }
@@ -111,7 +111,7 @@ void test_node1_floor_probe_leak_trigger(void) {
     mock_bsp_reset();
     mock_can_reset();
     mock_sensors_reset();
-    mock_can_set_current_node(X19_NODE_PI_SHIELD);
+    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
 
     mock_sensors_set_bme280(1013.25f, 35.0f, 24.0f);
     node1_app_init();
@@ -125,7 +125,7 @@ void test_node1_floor_probe_leak_trigger(void) {
     node1_app_step();
 
     assert(mock_bsp_is_emergency_brake_tripped());
-    assert(mock_can_count_tx_by_id(X19_CAN_ID_EMERGENCY_BREAK) >= 1);
+    assert(mock_can_count_tx_by_id(ROV_CAN_ID_EMERGENCY_BREAK) >= 1);
 
     printf("[PASS] test_node1_floor_probe_leak_trigger\n");
 }

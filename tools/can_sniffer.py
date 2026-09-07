@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-X19 Vehicle CAN FD Telemetry Sniffer & Live Dashboard.
+Purdue ROV CAN FD Telemetry Sniffer & Live Dashboard.
 Decodes 100 Hz Nav, 10 Hz Leak, 20 Hz Power, and Thruster PWM streams.
 Purdue ROV 2026-2027.
 """
@@ -75,7 +75,7 @@ def decode_msg(msg: can.Message):
         print(f"[{ts}] [CAN 0x300] Power: Tether={v_tether/1000.0:4.1f}V @ {i_tether/1000.0:4.1f}A | 5V Rail={v5/1000.0:4.2f}V | Bricks=[{b1}mA, {b2}mA, {b3}mA, {b4}mA] | Temp={temp/10.0:.1f}C")
 
 def main():
-    parser = argparse.ArgumentParser(description="X19 CAN FD Telemetry Sniffer")
+    parser = argparse.ArgumentParser(description="Purdue ROV CAN FD Telemetry Sniffer")
     parser.add_argument("--interface", default="can0", help="CAN interface (default: can0 or vcan0)")
     args = parser.parse_args()
 

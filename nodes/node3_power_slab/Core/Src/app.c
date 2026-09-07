@@ -12,20 +12,20 @@
 #include "app.h"
 #include "bsp.h"
 #include "can_interface.h"
+#include "rov_can_protocol.h"
+#include "rov_parameters.h"
+#include "rov_safety.h"
 #include "tps25990.h"
-#include "x19_can_protocol.h"
-#include "x19_parameters.h"
-#include "x19_safety.h"
 #include <string.h>
 
-static x19_safety_state_t g_safety_state;
-static x19_power_telemetry_t g_power_telemetry;
+static rov_safety_state_t g_safety_state;
+static rov_power_telemetry_t g_power_telemetry;
 static tps25990_dev_t g_pmbus_bricks[5];
 static uint32_t g_last_power_time = 0;
 
 void node3_app_init(void) {
     bsp_init();
-    x19_safety_init(&g_safety_state);
+    rov_safety_init(&g_safety_state);
 
     for (int i = 0; i < 5; i++) {
         tps25990_init(&g_pmbus_bricks[i], (uint8_t)(0x40 + i));
@@ -41,7 +41,7 @@ void node3_app_step(void) {
     uint32_t current_time = time_get_ms();
 
     /* 20 Hz Power Telemetry and Protection Loop */
-    if (current_time - g_last_power_time >= (1000 / X19_POWER_TELEMETRY_FREQ_HZ)) {
+    if (current_time - g_last_power_time >= (1000 / ROV_POWER_TELEMETRY_FREQ_HZ)) {
         g_last_power_time = current_time;
 
         float total_tether_current_a = 0.0f;
@@ -63,7 +63,7 @@ void node3_app_step(void) {
                     (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a) / 48.0f;
 
                 /* Overcurrent protection: 25A max per brick */
-                if (g_pmbus_bricks[i].output_current_a > X19_BRICK_MAX_CURRENT_A) {
+                if (g_pmbus_bricks[i].output_current_a > ROV_BRICK_MAX_CURRENT_A) {
                     fault_detected = true;
                 }
             }
@@ -72,7 +72,7 @@ void node3_app_step(void) {
             if (brick_temp_tenths > max_temp_c_tenths) {
                 max_temp_c_tenths = brick_temp_tenths;
             }
-            if (g_pmbus_bricks[i].temperature_c > X19_PCB_MAX_SAFE_TEMP_C) {
+            if (g_pmbus_bricks[i].temperature_c > ROV_PCB_MAX_SAFE_TEMP_C) {
                 fault_detected = true;
             }
         }
@@ -87,14 +87,14 @@ void node3_app_step(void) {
 
             /* Broadcast Priority 0 eFuse Fault Alert (0x005) */
             uint8_t alert[8] = {0xEF, 0x01, (uint8_t)(g_power_telemetry.status_flags & 0xFF), 0, 0, 0, 0, 0};
-            can_send(X19_CAN_ID_EFUSE_FAULT_ALERT, alert, sizeof(alert));
+            can_send(ROV_CAN_ID_EFUSE_FAULT_ALERT, alert, sizeof(alert));
         }
 
         /* Stream 0x300 Power Telemetry over CAN FD */
         uint8_t tx_buf[64];
         size_t packed_len = 0;
-        if (x19_can_pack_power_telemetry(&g_power_telemetry, tx_buf, sizeof(tx_buf), &packed_len) == X19_OK) {
-            can_send(X19_CAN_ID_POWER_TELEMETRY, tx_buf, (uint8_t)packed_len);
+        if (rov_can_pack_power_telemetry(&g_power_telemetry, tx_buf, sizeof(tx_buf), &packed_len) == ROV_OK) {
+            can_send(ROV_CAN_ID_POWER_TELEMETRY, tx_buf, (uint8_t)packed_len);
         }
 
         led_toggle();
@@ -103,7 +103,7 @@ void node3_app_step(void) {
     delay_ms(5);
 }
 
-#ifndef X19_UNIT_TEST
+#ifndef ROV_UNIT_TEST
 void app_main(void) {
     node3_app_init();
     while (1) {

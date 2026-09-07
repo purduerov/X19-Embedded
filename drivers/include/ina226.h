@@ -7,7 +7,7 @@
 #ifndef INA226_H
 #define INA226_H
 
-#include "x19_types.h"
+#include "rov_types.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -22,8 +22,8 @@ typedef struct {
     float power_w;
 } ina226_dev_t;
 
-x19_status_t ina226_init(ina226_dev_t *dev, uint8_t i2c_addr, float shunt_resistor_ohms);
-x19_status_t ina226_read_power(ina226_dev_t *dev);
+rov_status_t ina226_init(ina226_dev_t *dev, uint8_t i2c_addr, float shunt_resistor_ohms);
+rov_status_t ina226_read_power(ina226_dev_t *dev);
 
 #ifdef __cplusplus
 }

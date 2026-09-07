@@ -10,8 +10,8 @@ target_include_directories(node1_pi_shield.elf PRIVATE
 )
 
 target_link_libraries(node1_pi_shield.elf PRIVATE
-    x19_shared
-    x19_drivers
+    rov_shared
+    rov_drivers
 )
 
 target_compile_features(node1_pi_shield.elf PUBLIC c_std_11)

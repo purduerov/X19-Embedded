@@ -14,12 +14,12 @@
 #include "bsp.h"
 #include "can_interface.h"
 #include "ina226.h"
-#include "x19_can_protocol.h"
-#include "x19_parameters.h"
-#include "x19_safety.h"
+#include "rov_can_protocol.h"
+#include "rov_parameters.h"
+#include "rov_safety.h"
 
-static x19_safety_state_t g_safety_state;
-static x19_env_telemetry_t g_env_telemetry;
+static rov_safety_state_t g_safety_state;
+static rov_env_telemetry_t g_env_telemetry;
 static bme280_dev_t g_bme280_dev;
 static ina226_dev_t g_ina226_dev;
 static uint32_t g_last_telemetry_time = 0;
@@ -27,7 +27,7 @@ static float g_baseline_pressure_hpa = 0.0f;
 
 void node1_app_init(void) {
     bsp_init();
-    x19_safety_init(&g_safety_state);
+    rov_safety_init(&g_safety_state);
 
     bme280_init(&g_bme280_dev);
     ina226_init(&g_ina226_dev, 0x40, 0.002f);
@@ -44,7 +44,7 @@ void node1_app_step(void) {
     uint32_t current_time = time_get_ms();
 
     /* Sample sensors and evaluate leak state at 10 Hz */
-    if (current_time - g_last_telemetry_time >= (1000 / X19_ENV_TELEMETRY_FREQ_HZ)) {
+    if (current_time - g_last_telemetry_time >= (1000 / ROV_ENV_TELEMETRY_FREQ_HZ)) {
         g_last_telemetry_time = current_time;
 
         bme280_read_all(&g_bme280_dev);
@@ -58,13 +58,13 @@ void node1_app_step(void) {
         uint8_t leak_bits = 0;
 
         /* Check BME280 humidity threshold (> 80%) */
-        if (g_bme280_dev.humidity_pct >= X19_LEAK_HUMIDITY_MAX_PCT) {
+        if (g_bme280_dev.humidity_pct >= ROV_LEAK_HUMIDITY_MAX_PCT) {
             leak_bits |= 0x01;
         }
 
         /* Check vacuum decay: if enclosure was pulled to vacuum (<900 hPa) and rises toward atmosphere */
         if (g_baseline_pressure_hpa > 0.0f &&
-            (g_bme280_dev.pressure_hpa - g_baseline_pressure_hpa) >= X19_LEAK_PRESSURE_DROP_THRESHOLD_HPA) {
+            (g_bme280_dev.pressure_hpa - g_baseline_pressure_hpa) >= ROV_LEAK_PRESSURE_DROP_THRESHOLD_HPA) {
             leak_bits |= 0x01;
         }
 
@@ -83,19 +83,19 @@ void node1_app_step(void) {
 
         if (leak_bits != 0) {
             g_safety_state.leak_detected = true;
-            x19_safety_trigger_emergency_break(&g_safety_state);
+            rov_safety_trigger_emergency_break(&g_safety_state);
             bsp_emergency_brake_trip();
 
             /* Immediately broadcast Priority 0 Emergency Break (0x001) */
             uint8_t alert_payload[8] = {0xAA, 0x55, leak_bits, 0x00, 0x00, 0x00, 0x00, 0x00};
-            can_send(X19_CAN_ID_EMERGENCY_BREAK, alert_payload, sizeof(alert_payload));
+            can_send(ROV_CAN_ID_EMERGENCY_BREAK, alert_payload, sizeof(alert_payload));
         }
 
         /* Stream 0x210 Environment & Leak Telemetry over CAN FD */
         uint8_t tx_buf[64];
         size_t packed_len = 0;
-        if (x19_can_pack_env_telemetry(&g_env_telemetry, tx_buf, sizeof(tx_buf), &packed_len) == X19_OK) {
-            can_send(X19_CAN_ID_ENV_TELEMETRY, tx_buf, (uint8_t)packed_len);
+        if (rov_can_pack_env_telemetry(&g_env_telemetry, tx_buf, sizeof(tx_buf), &packed_len) == ROV_OK) {
+            can_send(ROV_CAN_ID_ENV_TELEMETRY, tx_buf, (uint8_t)packed_len);
         }
 
         led_toggle();
@@ -104,7 +104,7 @@ void node1_app_step(void) {
     delay_ms(5);
 }
 
-#ifndef X19_UNIT_TEST
+#ifndef ROV_UNIT_TEST
 void app_main(void) {
     node1_app_init();
     while (1) {

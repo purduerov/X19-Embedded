@@ -7,7 +7,7 @@
 #ifndef BME280_H
 #define BME280_H
 
-#include "x19_types.h"
+#include "rov_types.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -20,8 +20,8 @@ typedef struct {
     float temperature_c;
 } bme280_dev_t;
 
-x19_status_t bme280_init(bme280_dev_t *dev);
-x19_status_t bme280_read_all(bme280_dev_t *dev);
+rov_status_t bme280_init(bme280_dev_t *dev);
+rov_status_t bme280_read_all(bme280_dev_t *dev);
 
 #ifdef __cplusplus
 }

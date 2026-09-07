@@ -1,4 +1,4 @@
-# X19 Remote CAN Bootloader Suite
+# ROV Remote CAN Bootloader Suite
 
 > **Purdue ROV — High-Speed Underwater CAN FD Bootloading & Firmware Flashing System**  
 > *Operates at 1 Mbps Arbitration / 5 Mbps Data Phase over CAN ID `0x700`/`0x701`*
@@ -7,7 +7,7 @@
 
 ## 1. Overview & Architecture
 
-The **X19 CAN Bootloader** allows the Raspberry Pi 5 (`X19-Core`) or surface computer to reflash firmware binaries into any subsea STM32G4 microcontroller without unsealing the aluminum enclosure tube.
+The **ROV CAN Bootloader** allows the Raspberry Pi 5 (`X19-Core`) or surface computer to reflash firmware binaries into any subsea STM32G4 microcontroller without unsealing the aluminum enclosure tube.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐

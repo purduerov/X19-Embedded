@@ -7,7 +7,7 @@
 #ifndef MS5837_H
 #define MS5837_H
 
-#include "x19_types.h"
+#include "rov_types.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -21,8 +21,8 @@ typedef struct {
     uint16_t cal_coeffs[8];
 } ms5837_dev_t;
 
-x19_status_t ms5837_init(ms5837_dev_t *dev);
-x19_status_t ms5837_read_pressure_depth(ms5837_dev_t *dev, float fluid_density_kg_m3);
+rov_status_t ms5837_init(ms5837_dev_t *dev);
+rov_status_t ms5837_read_pressure_depth(ms5837_dev_t *dev, float fluid_density_kg_m3);
 
 #ifdef __cplusplus
 }

@@ -1,6 +1,6 @@
 """
-X19 Software-in-the-Loop (SIL) Protocol Definitions for Python.
-Matches the C framing used in x19_can_protocol.h and sil_bridge_server.c.
+Purdue ROV Software-in-the-Loop (SIL) Protocol Definitions for Python.
+Matches the C framing used in rov_can_protocol.h and sil_bridge_server.c.
 """
 
 import struct
@@ -17,7 +17,8 @@ CAN_ID_ENV_TELEMETRY     = 0x210
 CAN_ID_POWER_TELEMETRY   = 0x300
 CAN_ID_USB_HUB_TELEMETRY = 0x310
 
-SIL_MAGIC_HEADER = 0x58313943  # "X19C"
+SIL_MAGIC_HEADER = 0x524F5643  # "ROVC"
+SIL_MAGIC_HEADER_LEGACY = 0x58313943  # "X19C"
 SIL_PACKET_FMT = "<IIB64s"
 SIL_PACKET_SIZE = struct.calcsize(SIL_PACKET_FMT)
 
@@ -108,6 +109,6 @@ def pack_sil_can_frame(can_id: int, payload: bytes) -> bytes:
 def unpack_sil_can_frame(chunk: bytes) -> Tuple[int, bytes]:
     """Unpacks a SIL TCP frame into (can_id, payload_bytes)."""
     magic, can_id, length, data = struct.unpack(SIL_PACKET_FMT, chunk[:SIL_PACKET_SIZE])
-    if magic != SIL_MAGIC_HEADER:
+    if magic != SIL_MAGIC_HEADER and magic != SIL_MAGIC_HEADER_LEGACY:
         raise ValueError(f"Invalid magic header: {hex(magic)}")
     return can_id, data[:length]

@@ -1,6 +1,6 @@
-# X19-Embedded Firmware Repository
+# ROV-Embedded Firmware Repository
 
-> **Purdue ROV — 2026-2027 Subsea Microcontroller Firmware Architecture**  
+> **Purdue ROV — Modular Subsea Microcontroller Firmware Platform (Configured for X19 Subsea Vehicle)**  
 > *Standardized across 100% of nodes on STM32C542CCT6 (Cortex-M33 @ 144 MHz with single-precision FPU, 2x FDCAN) running CAN FD @ 1 Mbps / 5 Mbps*
 
 ---
@@ -74,9 +74,9 @@ ctest --test-dir build --output-on-failure
 
 ## 3. Communication, Safety & Hardware Abstraction Contracts
 
-- **Master Parameters**: All physical bounds, vehicle power caps (1200W tether, 12.5A thruster cap), timing intervals, and CAN bitrates are strictly defined in [`shared/include/x19_parameters.h`](shared/include/x19_parameters.h).
-- **Packet Serialization**: Standard packet packing and unpacking routines are in [`shared/include/x19_can_protocol.h`](shared/include/x19_can_protocol.h).
-- **Safety State Machine**: Watchdog tracking and emergency break routines are in [`shared/include/x19_safety.h`](shared/include/x19_safety.h).
+- **Master Parameters**: All physical bounds, vehicle power caps (1200W tether, 12.5A thruster cap), timing intervals, and CAN bitrates are strictly defined in [`shared/include/rov_parameters.h`](shared/include/rov_parameters.h).
+- **Packet Serialization**: Standard packet packing and unpacking routines are in [`shared/include/rov_can_protocol.h`](shared/include/rov_can_protocol.h).
+- **Safety State Machine**: Watchdog tracking and emergency break routines are in [`shared/include/rov_safety.h`](shared/include/rov_safety.h).
 - **Unified Hardware Abstraction Layer (HAL Wrapper / BSP)**:
   - Application code (`app.c`, control loops, state machines) **must NOT** invoke low-level vendor HAL functions (`HAL_CAN_...`, `HAL_FDCAN_...`, `HAL_GPIO_...`) directly.
   - All communication must use the shared transport interface defined in [`shared/include/can_interface.h`](shared/include/can_interface.h) (`can_send()`, `can_receive()`, `can_init()`).

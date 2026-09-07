@@ -7,7 +7,7 @@
 #ifndef LSM6DSOXTR_H
 #define LSM6DSOXTR_H
 
-#include "x19_types.h"
+#include "rov_types.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -28,9 +28,9 @@ typedef struct {
     uint8_t status_flags;
 } lsm6dsoxtr_dev_t;
 
-x19_status_t lsm6dsoxtr_init(lsm6dsoxtr_dev_t *dev);
-x19_status_t lsm6dsoxtr_read_raw(lsm6dsoxtr_dev_t *dev);
-x19_status_t lsm6dsoxtr_update_madgwick(lsm6dsoxtr_dev_t *dev, float dt_sec);
+rov_status_t lsm6dsoxtr_init(lsm6dsoxtr_dev_t *dev);
+rov_status_t lsm6dsoxtr_read_raw(lsm6dsoxtr_dev_t *dev);
+rov_status_t lsm6dsoxtr_update_madgwick(lsm6dsoxtr_dev_t *dev, float dt_sec);
 
 #ifdef __cplusplus
 }

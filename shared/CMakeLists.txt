@@ -1,13 +1,15 @@
-add_library(x19_shared STATIC
-    src/x19_can_protocol.c
-    src/x19_pwm_ramp.c
-    src/x19_i2c_recovery.c
-    src/x19_safety.c
-    src/x19_bsp_stub.c
+add_library(rov_shared STATIC
+    src/rov_can_protocol.c
+    src/rov_pwm_ramp.c
+    src/rov_i2c_recovery.c
+    src/rov_safety.c
+    src/rov_bsp_stub.c
 )
 
-target_include_directories(x19_shared PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+add_library(x19_shared ALIAS rov_shared)
+
+target_include_directories(rov_shared PUBLIC
+    \/include
 )
 
-target_compile_features(x19_shared PUBLIC c_std_11)
+target_compile_features(rov_shared PUBLIC c_std_11)

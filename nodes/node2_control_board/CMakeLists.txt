@@ -10,8 +10,8 @@ target_include_directories(node2_control_board.elf PRIVATE
 )
 
 target_link_libraries(node2_control_board.elf PRIVATE
-    x19_shared
-    x19_drivers
+    rov_shared
+    rov_drivers
 )
 
 target_compile_features(node2_control_board.elf PUBLIC c_std_11)

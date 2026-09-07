@@ -6,16 +6,16 @@
 
 #include "tcan1044.h"
 
-x19_status_t tcan1044_init(tcan1044_dev_t *dev) {
+rov_status_t tcan1044_init(tcan1044_dev_t *dev) {
     if (!dev)
-        return X19_ERR_INVALID_ARG;
+        return ROV_ERR_INVALID_ARG;
     dev->standby_mode = false;
-    return X19_OK;
+    return ROV_OK;
 }
 
-x19_status_t tcan1044_set_standby(tcan1044_dev_t *dev, bool enable) {
+rov_status_t tcan1044_set_standby(tcan1044_dev_t *dev, bool enable) {
     if (!dev)
-        return X19_ERR_INVALID_ARG;
+        return ROV_ERR_INVALID_ARG;
     dev->standby_mode = enable;
-    return X19_OK;
+    return ROV_OK;
 }

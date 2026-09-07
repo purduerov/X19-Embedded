@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-X19 Hardware-In-The-Loop (HIL) Automated CAN FD Test Bench.
+Purdue ROV Hardware-In-The-Loop (HIL) Automated CAN FD Test Bench.
 Executes physical bus timing, telemetry frequency, and safety trip tests against live STM32 nodes.
 Purdue ROV 2026-2027.
 """
@@ -18,7 +18,7 @@ except ImportError:
 
 def run_hil_test(interface: str):
     print(f"==================================================")
-    print(f"   X19 SUBSEA EMBEDDED HIL TEST BENCH RUNNER     ")
+    print(f"   PURDUE ROV SUBSEA EMBEDDED HIL TEST BENCH RUNNER     ")
     print(f"   Interface: {interface} (CAN FD @ 1M/5M)       ")
     print(f"==================================================")
 
@@ -66,7 +66,7 @@ def run_hil_test(interface: str):
     return True
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="X19 Embedded HIL Test Runner")
+    parser = argparse.ArgumentParser(description="Purdue ROV Embedded HIL Test Runner")
     parser.add_argument("--interface", default="can0", help="CAN interface (default: can0 or vcan0)")
     args = parser.parse_args()
 

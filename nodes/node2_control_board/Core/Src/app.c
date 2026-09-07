@@ -13,15 +13,15 @@
 #include "can_interface.h"
 #include "lsm6dsoxtr.h"
 #include "ms5837.h"
-#include "x19_can_protocol.h"
-#include "x19_parameters.h"
-#include "x19_pwm_ramp.h"
-#include "x19_safety.h"
+#include "rov_can_protocol.h"
+#include "rov_parameters.h"
+#include "rov_pwm_ramp.h"
+#include "rov_safety.h"
 #include <string.h>
 
-static x19_safety_state_t g_safety_state;
-static x19_thruster_cmd_t g_target_pwms;
-static x19_thruster_cmd_t g_active_pwms;
+static rov_safety_state_t g_safety_state;
+static rov_thruster_cmd_t g_target_pwms;
+static rov_thruster_cmd_t g_active_pwms;
 static lsm6dsoxtr_dev_t g_imu_dev;
 static ms5837_dev_t g_depth_dev;
 static uint32_t g_last_nav_time = 0;
@@ -29,12 +29,12 @@ static uint32_t g_last_ramp_time = 0;
 
 void node2_app_init(void) {
     bsp_init();
-    x19_safety_init(&g_safety_state);
+    rov_safety_init(&g_safety_state);
 
-    for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
-        g_target_pwms.pwm_us[i] = X19_PWM_STOP_US;
-        g_active_pwms.pwm_us[i] = X19_PWM_STOP_US;
-        bsp_pwm_set_us((uint8_t)i, X19_PWM_STOP_US);
+    for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+        g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+        g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+        bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
     }
     bsp_solenoid_set(0);
 
@@ -54,42 +54,42 @@ void node2_app_step(void) {
     uint8_t rx_len;
 
     while (can_receive(&rx_id, rx_data, &rx_len)) {
-        if (rx_id == X19_CAN_ID_EMERGENCY_BREAK) {
+        if (rx_id == ROV_CAN_ID_EMERGENCY_BREAK) {
             /* Emergency break received: verify magic signature (0xAA, 0x55) for authorization */
             if (rx_len >= 2 && rx_data[0] == 0xAA && rx_data[1] == 0x55) {
                 /* Instant hardware and software shutdown */
-                x19_safety_trigger_emergency_break(&g_safety_state);
+                rov_safety_trigger_emergency_break(&g_safety_state);
                 bsp_emergency_brake_trip();
-                for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
-                    g_target_pwms.pwm_us[i] = X19_PWM_STOP_US;
-                    g_active_pwms.pwm_us[i] = X19_PWM_STOP_US;
-                    bsp_pwm_set_us((uint8_t)i, X19_PWM_STOP_US);
+                for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+                    g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+                    g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+                    bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
                 }
             }
-        } else if (rx_id == X19_CAN_ID_THRUSTER_CMD) {
+        } else if (rx_id == ROV_CAN_ID_THRUSTER_CMD) {
             /* Only accept thruster commands if emergency break is not active */
             if (!g_safety_state.emergency_break_active) {
-                x19_thruster_cmd_t cmd;
-                if (x19_can_unpack_thruster_cmd(rx_data, rx_len, &cmd) == X19_OK) {
-                    x19_safety_feed_heartbeat(&g_safety_state, current_time);
-                    for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
+                rov_thruster_cmd_t cmd;
+                if (rov_can_unpack_thruster_cmd(rx_data, rx_len, &cmd) == ROV_OK) {
+                    rov_safety_feed_heartbeat(&g_safety_state, current_time);
+                    for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
                         g_target_pwms.pwm_us[i] = cmd.pwm_us[i];
                     }
                 }
             }
-        } else if (rx_id == X19_CAN_ID_SOLENOID_CMD) {
-            x19_solenoid_cmd_t sol;
-            if (x19_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == X19_OK) {
+        } else if (rx_id == ROV_CAN_ID_SOLENOID_CMD) {
+            rov_solenoid_cmd_t sol;
+            if (rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) {
                 bsp_solenoid_set(sol.solenoid_mask);
             }
         }
     }
 
     /* Check heartbeat timeout: if no thruster command in 100 ms, drop to neutral */
-    bool heartbeat_lost = x19_safety_is_heartbeat_lost(&g_safety_state, current_time);
+    bool heartbeat_lost = rov_safety_is_heartbeat_lost(&g_safety_state, current_time);
     if (heartbeat_lost || g_safety_state.emergency_break_active) {
-        for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
-            g_target_pwms.pwm_us[i] = X19_PWM_STOP_US;
+        for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+            g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
         }
     }
 
@@ -98,25 +98,25 @@ void node2_app_step(void) {
         uint32_t dt_ms = current_time - g_last_ramp_time;
         g_last_ramp_time = current_time;
 
-        for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
+        for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
             if (g_safety_state.emergency_break_active) {
-                g_active_pwms.pwm_us[i] = X19_PWM_STOP_US;
+                g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
             } else {
-                uint16_t max_step = (uint16_t)(X19_PWM_MAX_SLEW_RATE_US_PER_MS * dt_ms);
-                g_active_pwms.pwm_us[i] = x19_pwm_step_ramp(g_active_pwms.pwm_us[i], g_target_pwms.pwm_us[i], max_step);
+                uint16_t max_step = (uint16_t)(ROV_PWM_MAX_SLEW_RATE_US_PER_MS * dt_ms);
+                g_active_pwms.pwm_us[i] = rov_pwm_step_ramp(g_active_pwms.pwm_us[i], g_target_pwms.pwm_us[i], max_step);
             }
             bsp_pwm_set_us((uint8_t)i, g_active_pwms.pwm_us[i]);
         }
     }
 
     /* 100 Hz Navigation Telemetry Stream (0x200) */
-    if (current_time - g_last_nav_time >= (1000 / X19_NAV_TELEMETRY_FREQ_HZ)) {
+    if (current_time - g_last_nav_time >= (1000 / ROV_NAV_TELEMETRY_FREQ_HZ)) {
         g_last_nav_time = current_time;
 
         lsm6dsoxtr_read_raw(&g_imu_dev);
         ms5837_read_pressure_depth(&g_depth_dev, 1000.0f);
 
-        x19_nav_telemetry_t nav;
+        rov_nav_telemetry_t nav;
         nav.q_w = g_imu_dev.q_w;
         nav.q_x = g_imu_dev.q_x;
         nav.q_y = g_imu_dev.q_y;
@@ -129,8 +129,8 @@ void node2_app_step(void) {
 
         uint8_t tx_buf[64];
         size_t packed_len = 0;
-        if (x19_can_pack_nav_telemetry(&nav, tx_buf, sizeof(tx_buf), &packed_len) == X19_OK) {
-            can_send(X19_CAN_ID_NAV_TELEMETRY, tx_buf, (uint8_t)packed_len);
+        if (rov_can_pack_nav_telemetry(&nav, tx_buf, sizeof(tx_buf), &packed_len) == ROV_OK) {
+            can_send(ROV_CAN_ID_NAV_TELEMETRY, tx_buf, (uint8_t)packed_len);
         }
 
         led_toggle();
@@ -139,7 +139,7 @@ void node2_app_step(void) {
     delay_ms(1);
 }
 
-#ifndef X19_UNIT_TEST
+#ifndef ROV_UNIT_TEST
 void app_main(void) {
     node2_app_init();
     while (1) {

@@ -22,31 +22,31 @@ __attribute__((weak)) bool mock_sensors_get_imu(float *qw, float *qx, float *qy,
     return false;
 }
 
-x19_status_t lsm6dsoxtr_init(lsm6dsoxtr_dev_t *dev) {
+rov_status_t lsm6dsoxtr_init(lsm6dsoxtr_dev_t *dev) {
     if (!dev)
-        return X19_ERR_INVALID_ARG;
+        return ROV_ERR_INVALID_ARG;
     memset(dev, 0, sizeof(lsm6dsoxtr_dev_t));
     dev->q_w = 1.0f;
-    return X19_OK;
+    return ROV_OK;
 }
 
-x19_status_t lsm6dsoxtr_read_raw(lsm6dsoxtr_dev_t *dev) {
+rov_status_t lsm6dsoxtr_read_raw(lsm6dsoxtr_dev_t *dev) {
     if (!dev)
-        return X19_ERR_INVALID_ARG;
+        return ROV_ERR_INVALID_ARG;
 
     uint8_t status = 0;
     if (mock_sensors_get_imu(&dev->q_w, &dev->q_x, &dev->q_y, &dev->q_z, &dev->gyro_x_dps, &dev->gyro_y_dps,
                              &dev->gyro_z_dps, &status)) {
         dev->status_flags = status;
-        return X19_OK;
+        return ROV_OK;
     }
 
-    return X19_OK;
+    return ROV_OK;
 }
 
-x19_status_t lsm6dsoxtr_update_madgwick(lsm6dsoxtr_dev_t *dev, float dt_sec) {
+rov_status_t lsm6dsoxtr_update_madgwick(lsm6dsoxtr_dev_t *dev, float dt_sec) {
     if (!dev || dt_sec <= 0.0f)
-        return X19_ERR_INVALID_ARG;
+        return ROV_ERR_INVALID_ARG;
 
     /* Normalize quaternion */
     float norm = sqrtf((dev->q_w * dev->q_w) + (dev->q_x * dev->q_x) + (dev->q_y * dev->q_y) + (dev->q_z * dev->q_z));
@@ -60,5 +60,5 @@ x19_status_t lsm6dsoxtr_update_madgwick(lsm6dsoxtr_dev_t *dev, float dt_sec) {
         dev->q_z *= inv_norm;
     }
 
-    return X19_OK;
+    return ROV_OK;
 }

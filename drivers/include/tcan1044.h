@@ -7,7 +7,7 @@
 #ifndef TCAN1044_H
 #define TCAN1044_H
 
-#include "x19_types.h"
+#include "rov_types.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -18,8 +18,8 @@ typedef struct {
     bool standby_mode;
 } tcan1044_dev_t;
 
-x19_status_t tcan1044_init(tcan1044_dev_t *dev);
-x19_status_t tcan1044_set_standby(tcan1044_dev_t *dev, bool enable);
+rov_status_t tcan1044_init(tcan1044_dev_t *dev);
+rov_status_t tcan1044_set_standby(tcan1044_dev_t *dev, bool enable);
 
 #ifdef __cplusplus
 }
