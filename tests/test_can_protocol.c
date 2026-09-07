@@ -51,6 +51,26 @@ void test_nav_telemetry_pack_unpack(void) {
     printf("[PASS] test_nav_telemetry_pack_unpack\n");
 }
 
+void test_env_telemetry_pack_unpack(void) {
+    rov_env_telemetry_t original = {
+        .pressure_hpa = 1013.25f, .humidity_pct = 45.5f, .temperature_c = 22.1f, .leak_flags = 1};
+
+    uint8_t buffer[64];
+    size_t len = 0;
+    rov_status_t status = rov_can_pack_env_telemetry(&original, buffer, sizeof(buffer), &len);
+    assert(status == ROV_OK);
+    assert(len == sizeof(rov_env_telemetry_t));
+
+    rov_env_telemetry_t decoded;
+    status = rov_can_unpack_env_telemetry(buffer, len, &decoded);
+    assert(status == ROV_OK);
+    assert(decoded.pressure_hpa == original.pressure_hpa);
+    assert(decoded.humidity_pct == original.humidity_pct);
+    assert(decoded.temperature_c == original.temperature_c);
+    assert(decoded.leak_flags == original.leak_flags);
+    printf("[PASS] test_env_telemetry_pack_unpack\n");
+}
+
 void test_invalid_arguments(void) {
     uint8_t buffer[10];
     rov_thruster_cmd_t cmd;
@@ -64,6 +84,9 @@ void test_invalid_arguments(void) {
 
     rov_nav_telemetry_t nav;
     assert(rov_can_pack_nav_telemetry(&nav, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
+
+    rov_env_telemetry_t env;
+    assert(rov_can_pack_env_telemetry(&env, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
 
     printf("[PASS] test_invalid_arguments\n");
 }
@@ -127,6 +150,7 @@ int main(void) {
     test_thruster_cmd_pack_unpack();
     test_solenoid_cmd_pack_unpack();
     test_nav_telemetry_pack_unpack();
+    test_env_telemetry_pack_unpack();
     test_invalid_arguments();
     test_security_pwm_bounds();
     printf("All CAN Protocol Tests Passed Successfully!\n");
