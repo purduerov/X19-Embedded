@@ -97,6 +97,10 @@ def flash_node(interface: str, target_node: str, bin_path: str):
     chunk_size = 60
     total_chunks = (total_bytes + chunk_size - 1) // chunk_size
 
+    if total_chunks > 65535:
+        print(f"Error: Firmware requires {total_chunks} chunks, exceeding maximum of 65535.")
+        return False
+
     for i in range(total_chunks):
         chunk = firmware_data[i * chunk_size : (i + 1) * chunk_size]
         if len(chunk) < chunk_size:
