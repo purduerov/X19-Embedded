@@ -14,3 +14,7 @@
 ## 2026-09-07 - Optimize MS5837 Depth Calculation
 **Learning:** FPU division on Cortex-M4 takes ~14 cycles compared to 1 cycle for multiplication. For high-frequency calculations where the divisor is static (like fluid density in depth formulas), caching the inverse avoids repetitive division penalties.
 **Action:** Always precompute inverses for static divisors in embedded loops to utilize hardware multiplication.
+
+## 2026-09-07 - Hoisting Loop Invariants in High-Frequency Loops
+**Learning:** In high-frequency control loops (e.g., 1kHz PWM updaters), moving invariant calculations (like constants multiplied by loop variables that don't depend on the iterator) outside the `for` loop saves redundant CPU cycles (multiplications).
+**Action:** Always identify variables and mathematical operations inside `for` or `while` loops that do not change during iterations. Hoist them to a temporary variable outside the loop.

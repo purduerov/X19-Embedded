@@ -35,7 +35,7 @@ bool can_init(void) {
 
 bool can_send(uint32_t id, const uint8_t *data, uint8_t len) {
     if (len > 8) {
-        len = 8;
+        return false;
     }
 
     CAN_TxHeaderTypeDef tx_header;
