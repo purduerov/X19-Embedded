@@ -55,13 +55,16 @@ void node2_app_step(void) {
 
     while (can_receive(&rx_id, rx_data, &rx_len)) {
         if (rx_id == X19_CAN_ID_EMERGENCY_BREAK) {
-            /* Emergency break received: instant hardware and software shutdown */
-            x19_safety_trigger_emergency_break(&g_safety_state);
-            bsp_emergency_brake_trip();
-            for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
-                g_target_pwms.pwm_us[i] = X19_PWM_STOP_US;
-                g_active_pwms.pwm_us[i] = X19_PWM_STOP_US;
-                bsp_pwm_set_us((uint8_t)i, X19_PWM_STOP_US);
+            /* Emergency break received: verify magic signature (0xAA, 0x55) for authorization */
+            if (rx_len >= 2 && rx_data[0] == 0xAA && rx_data[1] == 0x55) {
+                /* Instant hardware and software shutdown */
+                x19_safety_trigger_emergency_break(&g_safety_state);
+                bsp_emergency_brake_trip();
+                for (int i = 0; i < X19_NUM_THRUSTERS; i++) {
+                    g_target_pwms.pwm_us[i] = X19_PWM_STOP_US;
+                    g_active_pwms.pwm_us[i] = X19_PWM_STOP_US;
+                    bsp_pwm_set_us((uint8_t)i, X19_PWM_STOP_US);
+                }
             }
         } else if (rx_id == X19_CAN_ID_THRUSTER_CMD) {
             /* Only accept thruster commands if emergency break is not active */
