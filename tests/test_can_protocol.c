@@ -51,6 +51,26 @@ void test_nav_telemetry_pack_unpack(void) {
     printf("[PASS] test_nav_telemetry_pack_unpack\n");
 }
 
+void test_env_telemetry_pack_unpack(void) {
+    x19_env_telemetry_t original = {
+        .pressure_hpa = 1013.25f, .humidity_pct = 45.5f, .temperature_c = 22.1f, .leak_flags = 5};
+
+    uint8_t buffer[64];
+    size_t len = 0;
+    x19_status_t status = x19_can_pack_env_telemetry(&original, buffer, sizeof(buffer), &len);
+    assert(status == X19_OK);
+    assert(len == sizeof(x19_env_telemetry_t));
+
+    x19_env_telemetry_t decoded;
+    status = x19_can_unpack_env_telemetry(buffer, len, &decoded);
+    assert(status == X19_OK);
+    assert(decoded.pressure_hpa == original.pressure_hpa);
+    assert(decoded.humidity_pct == original.humidity_pct);
+    assert(decoded.temperature_c == original.temperature_c);
+    assert(decoded.leak_flags == original.leak_flags);
+    printf("[PASS] test_env_telemetry_pack_unpack\n");
+}
+
 void test_invalid_arguments(void) {
     uint8_t buffer[10];
     x19_thruster_cmd_t cmd;
@@ -64,6 +84,12 @@ void test_invalid_arguments(void) {
 
     x19_nav_telemetry_t nav;
     assert(x19_can_pack_nav_telemetry(&nav, buffer, 5, &len) == X19_ERR_INVALID_ARG);
+
+    x19_env_telemetry_t env;
+    assert(x19_can_pack_env_telemetry(&env, buffer, 5, &len) == X19_ERR_INVALID_ARG);
+    assert(x19_can_unpack_env_telemetry(buffer, 5, &env) == X19_ERR_INVALID_ARG);
+    assert(x19_can_unpack_env_telemetry(NULL, sizeof(x19_env_telemetry_t), &env) == X19_ERR_INVALID_ARG);
+    assert(x19_can_unpack_env_telemetry(buffer, sizeof(x19_env_telemetry_t), NULL) == X19_ERR_INVALID_ARG);
 
     printf("[PASS] test_invalid_arguments\n");
 }
@@ -127,6 +153,7 @@ int main(void) {
     test_thruster_cmd_pack_unpack();
     test_solenoid_cmd_pack_unpack();
     test_nav_telemetry_pack_unpack();
+    test_env_telemetry_pack_unpack();
     test_invalid_arguments();
     test_security_pwm_bounds();
     printf("All CAN Protocol Tests Passed Successfully!\n");
