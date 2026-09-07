@@ -45,6 +45,19 @@ def crc16_ccitt(data: bytes) -> int:
                 crc = (crc << 1) & 0xFFFF
     return crc
 
+def wait_for_ack(bus: can.Bus, expected_node_id: int, timeout: float = 2.0) -> bool:
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        msg = bus.recv(timeout=0.1)
+        if msg is not None:
+            if msg.arbitration_id == CAN_ID_BOOT_CMD and len(msg.data) >= 2:
+                if msg.data[0] == ACK and msg.data[1] == expected_node_id:
+                    return True
+                elif msg.data[0] == NACK and msg.data[1] == expected_node_id:
+                    print(f"Received NACK from node 0x{expected_node_id:02X}")
+                    return False
+    return False
+
 def flash_node(interface: str, target_node: str, bin_path: str):
     node_id = NODES.get(target_node)
     if node_id is None:
@@ -68,6 +81,9 @@ def flash_node(interface: str, target_node: str, bin_path: str):
         is_fd=True
     )
     bus.send(ping_msg)
+    if not wait_for_ack(bus, node_id):
+        print(f"Error: Failed to receive ACK for Ping from node {target_node}")
+        return False
 
     print(f"Starting Flash: {total_bytes} bytes, CRC32: 0x{crc32_val:08X}...")
     start_msg = can.Message(
@@ -77,7 +93,9 @@ def flash_node(interface: str, target_node: str, bin_path: str):
         is_fd=True
     )
     bus.send(start_msg)
-    time.sleep(0.1)
+    if not wait_for_ack(bus, node_id, timeout=3.0):
+        print(f"Error: Failed to receive ACK for Start Flash from node {target_node}")
+        return False
 
     chunk_size = 60
     total_chunks = (total_bytes + chunk_size - 1) // chunk_size
@@ -105,6 +123,9 @@ def flash_node(interface: str, target_node: str, bin_path: str):
         is_fd=True
     )
     bus.send(jump_msg)
+    if not wait_for_ack(bus, node_id, timeout=5.0):
+        print(f"Warning: Did not receive ACK for Jump App, but node might have already booted.")
+
     print("Application launched successfully!")
     return True
 
