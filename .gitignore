@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+build-host/
 bin/
 obj/
 *.elf
@@ -10,6 +11,10 @@ obj/
 *.obj
 *.d
 *.a
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
 
 # VS Code & IDE caches
 .vscode/*
