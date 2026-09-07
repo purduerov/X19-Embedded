@@ -10,3 +10,7 @@
 
 **Learning:** On Cortex-M microcontrollers with single-precision FPUs (like STM32 Cortex-M33 / M4F), floating-point division is computationally expensive (often taking ~14 cycles), whereas multiplication is very fast (1-3 cycles). Also, when formatting C code recursively (`find ... | xargs clang-format`), it is extremely important to exclude third-party vendor SDKs (e.g., `Drivers/CMSIS`, `Drivers/STM32F4xx_HAL_Driver`), as modifying these creates large diffs and breaks upstream update compatibility.
 **Action:** When performing repeated math operations (e.g., quaternion normalization), compute the inverse of the divisor once (using 1 division) and multiply it for the remaining components. When formatting, apply `clang-format` only to first-party source files (e.g., specific files like `drivers/src/lsm6dsoxtr.c`) to avoid accidentally modifying external libraries.
+
+## 2024-10-26 - Loop Invariant Code Motion
+**Learning:** Checking constant conditions or performing calculations that do not change inside high-frequency loops (like thruster PWM updates) results in redundant work (e.g., redundant multiplications).
+**Action:** Always hoist loop-invariant checks and calculations outside the loop to improve performance, especially in inner loops.
