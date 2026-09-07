@@ -51,10 +51,13 @@ x19_status_t lsm6dsoxtr_update_madgwick(lsm6dsoxtr_dev_t *dev, float dt_sec) {
     /* Normalize quaternion */
     float norm = sqrtf((dev->q_w * dev->q_w) + (dev->q_x * dev->q_x) + (dev->q_y * dev->q_y) + (dev->q_z * dev->q_z));
     if (norm > 0.00001f) {
-        dev->q_w /= norm;
-        dev->q_x /= norm;
-        dev->q_y /= norm;
-        dev->q_z /= norm;
+        /* Performance optimization: FPU division is slow (~14 cycles).
+           1 division + 4 multiplications is much faster than 4 divisions. */
+        float inv_norm = 1.0f / norm;
+        dev->q_w *= inv_norm;
+        dev->q_x *= inv_norm;
+        dev->q_y *= inv_norm;
+        dev->q_z *= inv_norm;
     }
 
     return X19_OK;
