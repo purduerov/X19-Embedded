@@ -18,6 +18,7 @@ rov_status_t ms5837_init(ms5837_dev_t *dev) {
     if (!dev)
         return ROV_ERR_INVALID_ARG;
     memset(dev, 0, sizeof(ms5837_dev_t));
+    dev->cached_fluid_density = -1.0f; /* Force calculation on first run */
     return ROV_OK;
 }
 
@@ -31,8 +32,14 @@ rov_status_t ms5837_read_pressure_depth(ms5837_dev_t *dev, float fluid_density_k
         if (delta_p_pa <= 0.0f) {
             dev->depth_meters = 0.0f;
         } else {
-            /* Hydrostatic formula: depth = Delta_P / (rho * g) */
-            dev->depth_meters = delta_p_pa / (fluid_density_kg_m3 * 9.80665f);
+            /* Performance optimization: FPU division is slow (~14 cycles).
+               Cache and precompute the inverse of the divisor to use multiplication instead. */
+            if (dev->cached_fluid_density != fluid_density_kg_m3) {
+                dev->cached_fluid_density = fluid_density_kg_m3;
+                dev->inv_rho_g = 1.0f / (fluid_density_kg_m3 * 9.80665f);
+            }
+            /* Hydrostatic formula: depth = Delta_P * (1 / (rho * g)) */
+            dev->depth_meters = delta_p_pa * dev->inv_rho_g;
         }
         return ROV_OK;
     }

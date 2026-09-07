@@ -48,6 +48,22 @@ void test_cubic_expo_mapping(void) {
     // 0.5 mid-stick should be softened by cubic curve (< 0.5)
     float out_mid = rov_pwm_apply_expo(0.5f);
     assert(out_mid < 0.5f && out_mid > 0.0f);
+
+    // -1.0 full reverse stick should output -1.0
+    float out_neg_full = rov_pwm_apply_expo(-1.0f);
+    assert(fabsf(out_neg_full - (-1.0f)) < 0.0001f);
+
+    // -0.5 mid-stick reverse should be softened by cubic curve (> -0.5)
+    float out_neg_mid = rov_pwm_apply_expo(-0.5f);
+    assert(out_neg_mid > -0.5f && out_neg_mid < 0.0f);
+
+    // Out of bounds cases
+    float out_high = rov_pwm_apply_expo(1.5f);
+    assert(fabsf(out_high - 1.0f) < 0.0001f);
+
+    float out_low = rov_pwm_apply_expo(-1.5f);
+    assert(fabsf(out_low - (-1.0f)) < 0.0001f);
+
     printf("[PASS] test_cubic_expo_mapping\n");
 }
 
