@@ -1,8 +1,8 @@
 #include "x19_parameters.h"
 #include "x19_types.h"
-#include <stdio.h>
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
 
 extern float x19_pwm_apply_expo(float raw_norm);
 extern uint16_t x19_pwm_step_ramp(uint16_t current_us, uint16_t target_us, uint16_t max_step_us);
@@ -10,7 +10,7 @@ extern uint16_t x19_pwm_step_ramp(uint16_t current_us, uint16_t target_us, uint1
 void test_pwm_slew_rate_limiting(void) {
     uint16_t current_pwm = 1500;
     uint16_t target_pwm = 1900;
-    uint16_t max_step = X19_PWM_MAX_SLEW_RATE_US_PER_MS; // 2 us/ms
+    uint16_t max_step = X19_PWM_MAX_SLEW_RATE_US_PER_MS;  // 2 us/ms
 
     // Step 1: should increase by exactly 2 us
     current_pwm = x19_pwm_step_ramp(current_pwm, target_pwm, max_step);
@@ -20,7 +20,7 @@ void test_pwm_slew_rate_limiting(void) {
     for (int i = 0; i < 49; i++) {
         current_pwm = x19_pwm_step_ramp(current_pwm, target_pwm, max_step);
     }
-    assert(current_pwm == 1600); // 1500 + 50*2 = 1600
+    assert(current_pwm == 1600);  // 1500 + 50*2 = 1600
     printf("[PASS] test_pwm_slew_rate_limiting\n");
 }
 

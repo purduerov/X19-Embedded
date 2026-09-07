@@ -1,7 +1,7 @@
 #include "x19_can_protocol.h"
 #include "x19_parameters.h"
-#include <stdio.h>
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 
 void test_thruster_cmd_pack_unpack(void) {
@@ -12,7 +12,7 @@ void test_thruster_cmd_pack_unpack(void) {
 
     uint8_t buffer[64];
     size_t len = 0;
-    x19_status_t status = x19_can_pack_thruster_cmd(&original, buffer, &len);
+    x19_status_t status = x19_can_pack_thruster_cmd(&original, buffer, sizeof(buffer), &len);
     assert(status == X19_OK);
     assert(len == sizeof(x19_thruster_cmd_t));
 
@@ -27,21 +27,19 @@ void test_thruster_cmd_pack_unpack(void) {
 }
 
 void test_nav_telemetry_pack_unpack(void) {
-    x19_nav_telemetry_t original = {
-        .q_w = 0.7071f,
-        .q_x = 0.0f,
-        .q_y = 0.7071f,
-        .q_z = 0.0f,
-        .gyro_x_rad_s = 0.05f,
-        .gyro_y_rad_s = -0.12f,
-        .gyro_z_rad_s = 0.01f,
-        .depth_meters = 12.45f,
-        .imu_status = 3
-    };
+    x19_nav_telemetry_t original = {.q_w = 0.7071f,
+                                    .q_x = 0.0f,
+                                    .q_y = 0.7071f,
+                                    .q_z = 0.0f,
+                                    .gyro_x_rad_s = 0.05f,
+                                    .gyro_y_rad_s = -0.12f,
+                                    .gyro_z_rad_s = 0.01f,
+                                    .depth_meters = 12.45f,
+                                    .imu_status = 3};
 
     uint8_t buffer[64];
     size_t len = 0;
-    x19_status_t status = x19_can_pack_nav_telemetry(&original, buffer, &len);
+    x19_status_t status = x19_can_pack_nav_telemetry(&original, buffer, sizeof(buffer), &len);
     assert(status == X19_OK);
     assert(len == sizeof(x19_nav_telemetry_t));
 
@@ -58,16 +56,79 @@ void test_invalid_arguments(void) {
     x19_thruster_cmd_t cmd;
     size_t len = 0;
 
-    assert(x19_can_pack_thruster_cmd(NULL, buffer, &len) == X19_ERR_INVALID_ARG);
+    assert(x19_can_pack_thruster_cmd(NULL, buffer, sizeof(buffer), &len) == X19_ERR_INVALID_ARG);
     assert(x19_can_unpack_thruster_cmd(buffer, 5, &cmd) == X19_ERR_INVALID_ARG);
+
+    /* Negative test cases: Buffer capacity too small */
+    assert(x19_can_pack_thruster_cmd(&cmd, buffer, 5, &len) == X19_ERR_INVALID_ARG);
+
+    x19_nav_telemetry_t nav;
+    assert(x19_can_pack_nav_telemetry(&nav, buffer, 5, &len) == X19_ERR_INVALID_ARG);
+
     printf("[PASS] test_invalid_arguments\n");
+}
+
+void test_security_pwm_bounds(void) {
+    x19_thruster_cmd_t original;
+    for (int i = 0; i < 8; i++) {
+        original.pwm_us[i] = 1500;  // Safe value
+    }
+
+    // Set one value out of bounds (too high)
+    original.pwm_us[3] = 2001;
+
+    uint8_t buffer[64];
+    size_t len = 0;
+    x19_status_t status = x19_can_pack_thruster_cmd(&original, buffer, sizeof(buffer), &len);
+    assert(status == X19_OK);
+
+    x19_thruster_cmd_t decoded;
+    status = x19_can_unpack_thruster_cmd(buffer, len, &decoded);
+    assert(status == X19_ERR_INVALID_ARG);
+    // Ensure it fails securely (cleared to zeros)
+    for (int i = 0; i < 8; i++) {
+        assert(decoded.pwm_us[i] == 0);
+    }
+
+    // Test out of bounds (too low)
+    original.pwm_us[3] = 1500;
+    original.pwm_us[5] = 999;
+    status = x19_can_pack_thruster_cmd(&original, buffer, sizeof(buffer), &len);
+    assert(status == X19_OK);
+
+    status = x19_can_unpack_thruster_cmd(buffer, len, &decoded);
+    assert(status == X19_ERR_INVALID_ARG);
+
+    printf("[PASS] test_security_pwm_bounds\n");
+}
+
+void test_solenoid_cmd_pack_unpack(void) {
+    x19_solenoid_cmd_t original = {.solenoid_mask = 0x0255};
+    uint8_t buffer[64];
+    size_t len = 0;
+    assert(x19_can_pack_solenoid_cmd(&original, buffer, sizeof(buffer), &len) == X19_OK);
+    assert(len == sizeof(x19_solenoid_cmd_t));
+
+    x19_solenoid_cmd_t decoded;
+    assert(x19_can_unpack_solenoid_cmd(buffer, len, &decoded) == X19_OK);
+    assert(decoded.solenoid_mask == 0x0255);
+
+    /* Test 10-bit mask clamping */
+    original.solenoid_mask = 0xFFFF;
+    assert(x19_can_pack_solenoid_cmd(&original, buffer, sizeof(buffer), &len) == X19_OK);
+    assert(x19_can_unpack_solenoid_cmd(buffer, len, &decoded) == X19_OK);
+    assert(decoded.solenoid_mask == 0x03FF);
+
+    printf("[PASS] test_solenoid_cmd_pack_unpack\n");
 }
 
 int main(void) {
     printf("Running CAN Protocol Unit Tests...\n");
     test_thruster_cmd_pack_unpack();
+    test_solenoid_cmd_pack_unpack();
     test_nav_telemetry_pack_unpack();
     test_invalid_arguments();
+    test_security_pwm_bounds();
     printf("All CAN Protocol Tests Passed Successfully!\n");
     return 0;
 }

@@ -1,5 +1,7 @@
 # Build artifacts
 build/
+build-native/
+build-test/
 bin/
 obj/
 *.elf
@@ -23,3 +25,4 @@ obj/
 # CubeMX temporary files
 *.bak
 *.tmp
+build-host/

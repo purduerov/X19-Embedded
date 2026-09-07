@@ -27,10 +27,13 @@ include_directories(
 add_subdirectory(shared)
 add_subdirectory(drivers)
 
-# Add application nodes
-add_subdirectory(nodes/node1_pi_shield)
-add_subdirectory(nodes/node2_control_board)
-add_subdirectory(nodes/node3_power_slab)
+# Add application nodes (only when cross-compiling for embedded targets)
+if(CMAKE_CROSSCOMPILING)
+    add_subdirectory(nodes/node1_pi_shield)
+    add_subdirectory(nodes/node2_control_board)
+    add_subdirectory(nodes/node3_power_slab)
+    add_subdirectory(nodes/testing_and_rnd)
+endif()
 
 # Add unit tests
 add_subdirectory(tests)

@@ -1,0 +1,22 @@
+/**
+ * @file app.h
+ * @brief Node 1 (Pi Shield) Application Entry Point & Stepping Interface.
+ * @organization Purdue ROV
+ */
+
+#ifndef APP_H
+#define APP_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void node1_app_init(void);
+void node1_app_step(void);
+void app_main(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* APP_H */
