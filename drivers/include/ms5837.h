@@ -19,6 +19,8 @@ typedef struct {
     float temperature_c;
     float depth_meters;
     uint16_t cal_coeffs[8];
+    float cached_fluid_density; /* Performance optimization cache */
+    float inv_rho_g;            /* Precomputed inverse to avoid FPU division */
 } ms5837_dev_t;
 
 rov_status_t ms5837_init(ms5837_dev_t *dev);

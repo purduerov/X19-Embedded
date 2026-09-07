@@ -51,6 +51,57 @@ void test_nav_telemetry_pack_unpack(void) {
     printf("[PASS] test_nav_telemetry_pack_unpack\n");
 }
 
+void test_env_telemetry_pack_unpack(void) {
+    rov_env_telemetry_t original = {
+        .pressure_hpa = 1013.25f, .humidity_pct = 45.5f, .temperature_c = 22.1f, .leak_flags = 5};
+
+    uint8_t buffer[64];
+    size_t len = 0;
+    rov_status_t status = rov_can_pack_env_telemetry(&original, buffer, sizeof(buffer), &len);
+    assert(status == ROV_OK);
+    assert(len == sizeof(rov_env_telemetry_t));
+
+    rov_env_telemetry_t decoded;
+    status = rov_can_unpack_env_telemetry(buffer, len, &decoded);
+    assert(status == ROV_OK);
+    assert(decoded.pressure_hpa == original.pressure_hpa);
+    assert(decoded.humidity_pct == original.humidity_pct);
+    assert(decoded.temperature_c == original.temperature_c);
+    assert(decoded.leak_flags == original.leak_flags);
+    printf("[PASS] test_env_telemetry_pack_unpack\n");
+}
+
+void test_power_telemetry_pack_unpack(void) {
+    rov_power_telemetry_t original = {.tether_voltage_mv = 48000,
+                                      .tether_current_ma = 1500,
+                                      .v5_voltage_mv = 5200,
+                                      .v5_current_ma = 500,
+                                      .v12_current_ma = {100, 200, 300, 400},
+                                      .pcb_temp_c = 450,
+                                      .status_flags = 0x01};
+
+    uint8_t buffer[64];
+    size_t len = 0;
+    rov_status_t status = rov_can_pack_power_telemetry(&original, buffer, sizeof(buffer), &len);
+    assert(status == ROV_OK);
+    assert(len == sizeof(rov_power_telemetry_t));
+
+    rov_power_telemetry_t decoded;
+    status = rov_can_unpack_power_telemetry(buffer, len, &decoded);
+    assert(status == ROV_OK);
+    assert(decoded.tether_voltage_mv == original.tether_voltage_mv);
+    assert(decoded.tether_current_ma == original.tether_current_ma);
+    assert(decoded.v5_voltage_mv == original.v5_voltage_mv);
+    assert(decoded.v5_current_ma == original.v5_current_ma);
+    for (int i = 0; i < 4; i++) {
+        assert(decoded.v12_current_ma[i] == original.v12_current_ma[i]);
+    }
+    assert(decoded.pcb_temp_c == original.pcb_temp_c);
+    assert(decoded.status_flags == original.status_flags);
+
+    printf("[PASS] test_power_telemetry_pack_unpack\n");
+}
+
 void test_invalid_arguments(void) {
     uint8_t buffer[10];
     rov_thruster_cmd_t cmd;
@@ -64,6 +115,18 @@ void test_invalid_arguments(void) {
 
     rov_nav_telemetry_t nav;
     assert(rov_can_pack_nav_telemetry(&nav, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
+
+    rov_env_telemetry_t env;
+    assert(rov_can_pack_env_telemetry(&env, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
+    assert(rov_can_unpack_env_telemetry(buffer, 5, &env) == ROV_ERR_INVALID_ARG);
+    assert(rov_can_unpack_env_telemetry(NULL, sizeof(buffer), &env) == ROV_ERR_INVALID_ARG);
+    assert(rov_can_unpack_env_telemetry(buffer, sizeof(buffer), NULL) == ROV_ERR_INVALID_ARG);
+
+    rov_power_telemetry_t power;
+    assert(rov_can_pack_power_telemetry(NULL, buffer, sizeof(buffer), &len) == ROV_ERR_INVALID_ARG);
+    assert(rov_can_unpack_power_telemetry(buffer, 5, &power) == ROV_ERR_INVALID_ARG);
+    assert(rov_can_pack_power_telemetry(&power, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
+    assert(rov_can_unpack_power_telemetry(NULL, sizeof(buffer), &power) == ROV_ERR_INVALID_ARG);
 
     printf("[PASS] test_invalid_arguments\n");
 }
@@ -127,6 +190,8 @@ int main(void) {
     test_thruster_cmd_pack_unpack();
     test_solenoid_cmd_pack_unpack();
     test_nav_telemetry_pack_unpack();
+    test_env_telemetry_pack_unpack();
+    test_power_telemetry_pack_unpack();
     test_invalid_arguments();
     test_security_pwm_bounds();
     printf("All CAN Protocol Tests Passed Successfully!\n");
