@@ -12,3 +12,8 @@
 **Vulnerability:** A `struct.error` could be raised, causing a Denial of Service, when attempting to pack integer values that exceed the format string limits (e.g., packing a value > 65535 using `<H`).
 **Learning:** Python `struct.pack` enforces strict bounds. Unvalidated input affecting loops or mathematical derivations used in packing must be checked beforehand.
 **Prevention:** Always validate and bound check derived integer values (like calculating chunk counts from file size) before passing them to `struct.pack` if they are constrained by type limits.
+
+## 2026-09-08 - Prevent struct.unpack Denial of Service on Truncated Payloads
+**Vulnerability:** Python scripts parsing binary SIL network payloads (`tests/sil_companion_bridge/sil_protocol.py`) lacked exact payload length validations prior to using `struct.unpack`.
+**Learning:** `struct.unpack` enforces strict input sizes. A malformed or truncated CAN frame sent over the network (e.g., from a noisy bus) can immediately crash the topside bridge and UI with a `struct.error`, creating a Denial of Service.
+**Prevention:** Python scripts parsing binary CAN/network payloads (e.g., can_sniffer.py, sil_protocol.py) must explicitly validate the byte buffer length before calling struct.unpack to gracefully handle malformed frames without crashing.
