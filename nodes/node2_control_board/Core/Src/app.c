@@ -104,13 +104,16 @@ void node2_app_step(void) {
             max_step = (uint16_t)(ROV_PWM_MAX_SLEW_RATE_US_PER_MS * dt_ms);
         }
 
-        for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
-            if (g_safety_state.emergency_break_active) {
+        if (g_safety_state.emergency_break_active) {
+            for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
                 g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
-            } else {
-                g_active_pwms.pwm_us[i] = rov_pwm_step_ramp(g_active_pwms.pwm_us[i], g_target_pwms.pwm_us[i], max_step);
+                bsp_pwm_set_us((uint8_t)i, g_active_pwms.pwm_us[i]);
             }
-            bsp_pwm_set_us((uint8_t)i, g_active_pwms.pwm_us[i]);
+        } else {
+            for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+                g_active_pwms.pwm_us[i] = rov_pwm_step_ramp(g_active_pwms.pwm_us[i], g_target_pwms.pwm_us[i], max_step);
+                bsp_pwm_set_us((uint8_t)i, g_active_pwms.pwm_us[i]);
+            }
         }
     }
 
