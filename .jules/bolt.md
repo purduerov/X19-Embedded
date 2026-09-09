@@ -18,3 +18,7 @@
 ## 2026-09-07 - Hoisting Loop Invariants in High-Frequency Loops
 **Learning:** In high-frequency control loops (e.g., 1kHz PWM updaters), moving invariant calculations (like constants multiplied by loop variables that don't depend on the iterator) outside the `for` loop saves redundant CPU cycles (multiplications).
 **Action:** Always identify variables and mathematical operations inside `for` or `while` loops that do not change during iterations. Hoist them to a temporary variable outside the loop.
+
+## 2026-09-09 - Safely Hoisting Loop Invariants with Conditional Execution
+**Learning:** When hoisting a loop invariant that determines which path an entire loop should take (e.g., stopping all thrusters vs. stepping all thrusters), branching the loop outside based on the condition prevents redundant branching at each iteration.
+**Action:** If a high-frequency loop's execution path strictly depends on a state that does not change during the loop, hoist the condition out and duplicate the loop structure for each path to eliminate branching overhead.
