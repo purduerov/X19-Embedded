@@ -22,3 +22,6 @@
 ## 2026-09-09 - Safely Hoisting Loop Invariants with Conditional Execution
 **Learning:** When hoisting a loop invariant that determines which path an entire loop should take (e.g., stopping all thrusters vs. stepping all thrusters), branching the loop outside based on the condition prevents redundant branching at each iteration.
 **Action:** If a high-frequency loop's execution path strictly depends on a state that does not change during the loop, hoist the condition out and duplicate the loop structure for each path to eliminate branching overhead.
+## 2026-09-09 - Drift-Free Async Sleep for Periodic Tasks
+**Learning:** When using `asyncio.sleep()` for high-frequency periodic tasks (e.g., 100Hz CAN transmission), using a fixed sleep duration (like `await asyncio.sleep(0.01)`) inside a loop causes cumulative execution drift due to the overhead of the loop and I/O operations (like `bus.send()`).
+**Action:** Calculate absolute target wake times using `loop.time()` (e.g., `target = start + i * interval`) and sleep the difference (`await asyncio.sleep(max(0, target - loop.time()))`) to eliminate drift.
