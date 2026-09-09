@@ -25,3 +25,6 @@
 ## 2024-05-15 - Asyncio for HIL Tester
 **Learning:** Synchronous sleep calls in the main thread (like `time.sleep()`) block the entire process, preventing other events from being handled and causing potential jitter in time-sensitive applications like CAN FD testing. Using an asynchronous event loop (`asyncio`) allows the script to yield control during wait periods.
 **Action:** When writing or optimizing Python test scripts that involve waiting (e.g., polling, timeouts, periodic sending), default to using `asyncio` and `await asyncio.sleep()` rather than synchronous sleep.
+## 2024-05-15 - Fixing CI Formatting Errors
+**Learning:** The CI "Check Formatting" job strictly enforces `clang-format` on all C/C++ files. If it fails with "code should be clang-formatted", you can quickly resolve the failure by finding the files mentioned in the logs and running `clang-format -i <file>` on them.
+**Action:** When a CI formatting check fails, run `clang-format -i <file>` locally on the flagged files and re-verify with the CI command `find shared drivers nodes -not -path "*/Drivers/*" \( -name "*.c" -o -name "*.h" \) | xargs clang-format --dry-run --Werror` before submitting.
