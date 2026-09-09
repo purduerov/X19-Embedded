@@ -17,3 +17,7 @@
 **Vulnerability:** Python scripts parsing binary SIL network payloads (`tests/sil_companion_bridge/sil_protocol.py`) lacked exact payload length validations prior to using `struct.unpack`.
 **Learning:** `struct.unpack` enforces strict input sizes. A malformed or truncated CAN frame sent over the network (e.g., from a noisy bus) can immediately crash the topside bridge and UI with a `struct.error`, creating a Denial of Service.
 **Prevention:** Python scripts parsing binary CAN/network payloads (e.g., can_sniffer.py, sil_protocol.py) must explicitly validate the byte buffer length before calling struct.unpack to gracefully handle malformed frames without crashing.
+## 2025-02-28 - Incomplete Cryptographic Upgrade in Protocol Boundary
+**Vulnerability:** Weak Firmware Validation using CRC32 in Bootloader
+**Learning:** When upgrading a checksum (like CRC32) to a cryptographic hash (like SHA-256) in a cross-boundary communication payload (e.g., a CAN FD message sent from a Python script to an STM32 C firmware), both the sender and the receiver must be updated to expect the new payload size and format. If the counterpart source code (in this case, the STM32 bootloader firmware) is not present in the repository, updating only the Python script will break the flashing system entirely.
+**Prevention:** Always verify the existence and modify the receiving end of a protocol message when changing its size or structure. If the counterpart cannot be updated, do not commit partial changes that break backward compatibility.

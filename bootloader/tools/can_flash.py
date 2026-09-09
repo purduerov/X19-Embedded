@@ -9,7 +9,7 @@ import argparse
 import sys
 import time
 import struct
-import zlib
+import hashlib
 
 try:
     import can
@@ -83,7 +83,7 @@ def flash_node(interface: str, target_node: str, bin_path: str):
         firmware_data = f.read()
 
     total_bytes = len(firmware_data)
-    crc32_val = zlib.crc32(firmware_data)
+    sha256_hash = hashlib.sha256(firmware_data).digest()
 
     print(f"Opening CAN interface {interface} (CAN FD)...")
     bus = can.Bus(channel=interface, interface="socketcan", fd=True)
@@ -100,10 +100,10 @@ def flash_node(interface: str, target_node: str, bin_path: str):
         print(f"Error: Failed to receive ACK for Ping from node {target_node}")
         return False
 
-    print(f"Starting Flash: {total_bytes} bytes, CRC32: 0x{crc32_val:08X}...")
+    print(f"Starting Flash: {total_bytes} bytes, SHA256: {sha256_hash.hex()}...")
     start_msg = can.Message(
         arbitration_id=CAN_ID_BOOT_CMD,
-        data=struct.pack("<BBI I", CMD_START_FLASH, node_id, total_bytes, crc32_val),
+        data=struct.pack("<BBI32s", CMD_START_FLASH, node_id, total_bytes, sha256_hash),
         is_extended_id=False,
         is_fd=True
     )
