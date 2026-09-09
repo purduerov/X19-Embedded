@@ -25,3 +25,6 @@
 ## 2024-05-14 - Prevent synchronous sleep jitter in Python CAN transmissions
 **Learning:** Manual `for` loops utilizing synchronous `time.sleep()` for high-frequency CAN transmissions (e.g. 100Hz) in Python introduce unnecessary main-thread blocking and timing jitter.
 **Action:** Utilize the native `send_periodic` method provided by `python-can` (`can.Bus.send_periodic`), which leverages a background scheduler to send messages non-blockingly and strictly consistently.
+## 2024-05-14 - Fix CI formatting failures
+**Learning:** The CI formatting check will fail if C files are poorly formatted. This includes even minor alignment errors in long parameter lists.
+**Action:** The CI 'Check Formatting' job enforces code formatting across the repository using `clang-format`. If the job fails with 'code should be clang-formatted', identify the specific C/C++ files from the GitHub Actions annotations/logs and run `clang-format-18 -i <file>` on them to resolve the build failure.
