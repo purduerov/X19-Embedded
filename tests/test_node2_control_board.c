@@ -194,7 +194,15 @@ void test_node2_nav_telemetry_stream(void) {
     mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
 
     /* Set synthetic IMU orientation and depth (12.5 meters in seawater) */
-    mock_sensors_set_imu(0.7071f, 0.0f, 0.7071f, 0.0f, 2.86f, -1.15f, 5.73f, 3);
+    imu_data_t mock_imu = {.qw = 0.7071f,
+                           .qx = 0.0f,
+                           .qy = 0.7071f,
+                           .qz = 0.0f,
+                           .gx_dps = 2.86f,
+                           .gy_dps = -1.15f,
+                           .gz_dps = 5.73f,
+                           .status = 3};
+    mock_sensors_set_imu(&mock_imu);
     /* 12.5 meters in seawater (~1000 kg/m^3) corresponds to approx 2239 mbar absolute */
     mock_sensors_set_ms5837(2239.0f, 15.0f);
 

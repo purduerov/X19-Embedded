@@ -125,39 +125,33 @@ bool mock_sensors_get_ms5837(float *pressure_mbar, float *temp_c) {
     return true;
 }
 
-void mock_sensors_set_imu(float qw, float qx, float qy, float qz, float gx_dps, float gy_dps, float gz_dps,
-                          uint8_t status) {
-    g_mock_imu.qw = qw;
-    g_mock_imu.qx = qx;
-    g_mock_imu.qy = qy;
-    g_mock_imu.qz = qz;
-    g_mock_imu.gx = gx_dps;
-    g_mock_imu.gy = gy_dps;
-    g_mock_imu.gz = gz_dps;
-    g_mock_imu.status = status;
+void mock_sensors_set_imu(const imu_data_t *imu_data) {
+    if (!imu_data)
+        return;
+    g_mock_imu.qw = imu_data->qw;
+    g_mock_imu.qx = imu_data->qx;
+    g_mock_imu.qy = imu_data->qy;
+    g_mock_imu.qz = imu_data->qz;
+    g_mock_imu.gx = imu_data->gx_dps;
+    g_mock_imu.gy = imu_data->gy_dps;
+    g_mock_imu.gz = imu_data->gz_dps;
+    g_mock_imu.status = imu_data->status;
     g_mock_imu.valid = true;
 }
 
-bool mock_sensors_get_imu(float *qw, float *qx, float *qy, float *qz, float *gx_dps, float *gy_dps, float *gz_dps,
-                          uint8_t *status) {
-    if (!g_mock_imu.valid)
+bool mock_sensors_get_imu(imu_data_t *imu_data) {
+    if (!g_mock_imu.valid || !imu_data)
         return false;
-    if (qw)
-        *qw = g_mock_imu.qw;
-    if (qx)
-        *qx = g_mock_imu.qx;
-    if (qy)
-        *qy = g_mock_imu.qy;
-    if (qz)
-        *qz = g_mock_imu.qz;
-    if (gx_dps)
-        *gx_dps = g_mock_imu.gx;
-    if (gy_dps)
-        *gy_dps = g_mock_imu.gy;
-    if (gz_dps)
-        *gz_dps = g_mock_imu.gz;
-    if (status)
-        *status = g_mock_imu.status;
+
+    imu_data->qw = g_mock_imu.qw;
+    imu_data->qx = g_mock_imu.qx;
+    imu_data->qy = g_mock_imu.qy;
+    imu_data->qz = g_mock_imu.qz;
+    imu_data->gx_dps = g_mock_imu.gx;
+    imu_data->gy_dps = g_mock_imu.gy;
+    imu_data->gz_dps = g_mock_imu.gz;
+    imu_data->status = g_mock_imu.status;
+
     return true;
 }
 
@@ -217,4 +211,3 @@ bool mock_sensors_get_tmp1075(float *temp_c) {
         *temp_c = g_mock_tmp1075.temp_c;
     return true;
 }
-

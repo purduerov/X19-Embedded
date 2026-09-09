@@ -107,6 +107,20 @@ typedef struct __attribute__((packed)) {
 } rov_usb_hub_telemetry_t;
 
 /**
+ * @brief IMU Sensor Data Structure.
+ */
+typedef struct {
+    float qw;
+    float qx;
+    float qy;
+    float qz;
+    float gx_dps;
+    float gy_dps;
+    float gz_dps;
+    uint8_t status;
+} imu_data_t;
+
+/**
  * @brief Bootloader Control Command Identifiers.
  */
 typedef enum {

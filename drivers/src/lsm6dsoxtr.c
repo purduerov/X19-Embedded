@@ -9,16 +9,8 @@
 #include <stdbool.h>
 #include <string.h>
 
-__attribute__((weak)) bool mock_sensors_get_imu(float *qw, float *qx, float *qy, float *qz, float *gx_rad_s,
-                                                float *gy_rad_s, float *gz_rad_s, uint8_t *status) {
-    (void)qw;
-    (void)qx;
-    (void)qy;
-    (void)qz;
-    (void)gx_rad_s;
-    (void)gy_rad_s;
-    (void)gz_rad_s;
-    (void)status;
+__attribute__((weak)) bool mock_sensors_get_imu(imu_data_t *imu_data) {
+    (void)imu_data;
     return false;
 }
 
@@ -34,10 +26,16 @@ rov_status_t lsm6dsoxtr_read_raw(lsm6dsoxtr_dev_t *dev) {
     if (!dev)
         return ROV_ERR_INVALID_ARG;
 
-    uint8_t status = 0;
-    if (mock_sensors_get_imu(&dev->q_w, &dev->q_x, &dev->q_y, &dev->q_z, &dev->gyro_x_dps, &dev->gyro_y_dps,
-                             &dev->gyro_z_dps, &status)) {
-        dev->status_flags = status;
+    imu_data_t imu_data = {0};
+    if (mock_sensors_get_imu(&imu_data)) {
+        dev->q_w = imu_data.qw;
+        dev->q_x = imu_data.qx;
+        dev->q_y = imu_data.qy;
+        dev->q_z = imu_data.qz;
+        dev->gyro_x_dps = imu_data.gx_dps;
+        dev->gyro_y_dps = imu_data.gy_dps;
+        dev->gyro_z_dps = imu_data.gz_dps;
+        dev->status_flags = imu_data.status;
         return ROV_OK;
     }
 

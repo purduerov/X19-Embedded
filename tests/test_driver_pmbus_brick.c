@@ -4,8 +4,8 @@
  * @organization Purdue ROV
  */
 
-#include "pmbus_brick.h"
 #include "mocks/mock_sensors.h"
+#include "pmbus_brick.h"
 #include <assert.h>
 #include <stdio.h>
 

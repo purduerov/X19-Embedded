@@ -4,8 +4,8 @@
  * @organization Purdue ROV
  */
 
-#include "tmp1075.h"
 #include "mocks/mock_sensors.h"
+#include "tmp1075.h"
 #include <assert.h>
 #include <stdio.h>
 
