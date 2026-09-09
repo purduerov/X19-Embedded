@@ -8,8 +8,8 @@
 #include <stdbool.h>
 #include <string.h>
 
-__attribute__((weak)) bool mock_sensors_get_tps25990(uint8_t index, float *v_in, float *v_out,
-                                                     float *i_out, float *temp_c, uint16_t *status) {
+__attribute__((weak)) bool mock_sensors_get_tps25990(uint8_t index, float *v_in, float *v_out, float *i_out,
+                                                     float *temp_c, uint16_t *status) {
     (void)index;
     (void)v_in;
     (void)v_out;
@@ -51,9 +51,8 @@ rov_status_t pmbus_brick_read_telemetry(pmbus_brick_dev_t *dev) {
     if (!dev)
         return ROV_ERR_INVALID_ARG;
     uint8_t idx = (dev->pmbus_addr >= 0x40) ? (uint8_t)(dev->pmbus_addr - 0x40) : 0;
-    if (mock_sensors_get_tps25990(idx, &dev->input_voltage_v, &dev->output_voltage_v,
-                                 &dev->output_current_a, &dev->temperature_c,
-                                 &dev->status_word)) {
+    if (mock_sensors_get_tps25990(idx, &dev->input_voltage_v, &dev->output_voltage_v, &dev->output_current_a,
+                                  &dev->temperature_c, &dev->status_word)) {
         return ROV_OK;
     }
     return ROV_OK;
