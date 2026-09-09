@@ -23,6 +23,17 @@
 extern "C" {
 #endif
 
+typedef struct {
+    float qw;
+    float qx;
+    float qy;
+    float qz;
+    float gx_dps;
+    float gy_dps;
+    float gz_dps;
+    uint8_t status;
+} imu_data_t;
+
 /**
  * @brief Reset all simulated sensor registers to nominal atmospheric values.
  */
@@ -43,10 +54,8 @@ bool mock_sensors_get_ms5837(float *pressure_mbar, float *temp_c);
 /**
  * @brief Inject LSM6DSOXTR / BMI270 6-axis IMU quaternion, gyro rates, and status.
  */
-void mock_sensors_set_imu(float qw, float qx, float qy, float qz, float gx_dps, float gy_dps, float gz_dps,
-                          uint8_t status);
-bool mock_sensors_get_imu(float *qw, float *qx, float *qy, float *qz, float *gx_dps, float *gy_dps, float *gz_dps,
-                          uint8_t *status);
+void mock_sensors_set_imu(const imu_data_t *data);
+bool mock_sensors_get_imu(imu_data_t *data);
 
 /**
  * @brief Inject INA226 / INA237 bus voltage and current.

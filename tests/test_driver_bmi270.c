@@ -23,7 +23,16 @@ void test_bmi270_driver(void) {
 
     /* Test mock IMU rate injection */
     mock_sensors_reset();
-    mock_sensors_set_imu(0.7071f, 0.0f, 0.7071f, 0.0f, 10.0f, -5.0f, 45.0f, 3);
+
+    imu_data_t mock_imu = {.qw = 0.7071f,
+                           .qx = 0.0f,
+                           .qy = 0.7071f,
+                           .qz = 0.0f,
+                           .gx_dps = 10.0f,
+                           .gy_dps = -5.0f,
+                           .gz_dps = 45.0f,
+                           .status = 3};
+    mock_sensors_set_imu(&mock_imu);
 
     assert(bmi270_read_raw(&dev) == ROV_OK);
     assert(dev.gyro_x_dps > 9.9f && dev.gyro_x_dps < 10.1f);
