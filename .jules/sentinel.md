@@ -12,3 +12,8 @@
 **Vulnerability:** A `struct.error` could be raised, causing a Denial of Service, when attempting to pack integer values that exceed the format string limits (e.g., packing a value > 65535 using `<H`).
 **Learning:** Python `struct.pack` enforces strict bounds. Unvalidated input affecting loops or mathematical derivations used in packing must be checked beforehand.
 **Prevention:** Always validate and bound check derived integer values (like calculating chunk counts from file size) before passing them to `struct.pack` if they are constrained by type limits.
+
+## 2026-09-07 - SIL Protocol Structural Unpacking DoS
+**Vulnerability:** The Software-In-the-Loop (SIL) TCP bridge unmarshaled raw bytes using `struct.unpack` without prior length checks, leading to unhandled `struct.error` exceptions.
+**Learning:** Network boundaries parsing binary protocols must never assume the underlying transport provides the exact number of bytes required by a fixed struct definition.
+**Prevention:** Always validate `len(buffer) >= REQUIRED_BYTES` before passing data to struct decoding functions to handle truncated packets gracefully with standard ValueErrors.
