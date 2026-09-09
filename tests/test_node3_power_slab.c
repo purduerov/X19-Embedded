@@ -14,11 +14,15 @@
 #include <stdio.h>
 #include <string.h>
 
-void test_node3_nominal_telemetry(void) {
+static void setup(void) {
     mock_bsp_reset();
     mock_can_reset();
     mock_sensors_reset();
     mock_can_set_current_node(ROV_NODE_POWER_SLAB);
+}
+
+void test_node3_nominal_telemetry(void) {
+    setup();
 
     /* Configure 5 PMBus bricks: 5.2V @ 2A, and 4x 12V @ 5A */
     mock_sensors_set_tps25990(0, 48.0f, 5.2f, 2.0f, 32.0f, 0);
@@ -54,10 +58,7 @@ void test_node3_nominal_telemetry(void) {
 }
 
 void test_node3_overcurrent_fault_alert(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_POWER_SLAB);
+    setup();
 
     /* Set brick 2 to 28A (> 25A maximum rating) */
     mock_sensors_set_tps25990(2, 48.0f, 12.0f, 28.0f, 45.0f, 0);
@@ -78,10 +79,7 @@ void test_node3_overcurrent_fault_alert(void) {
 }
 
 void test_node3_overtemperature_fault_alert(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_POWER_SLAB);
+    setup();
 
     /* Set brick 1 to 90 C (> 85 C safe threshold) */
     mock_sensors_set_tps25990(1, 48.0f, 12.0f, 10.0f, 90.0f, 0);
