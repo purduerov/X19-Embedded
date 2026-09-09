@@ -125,39 +125,31 @@ bool mock_sensors_get_ms5837(float *pressure_mbar, float *temp_c) {
     return true;
 }
 
-void mock_sensors_set_imu(float qw, float qx, float qy, float qz, float gx_dps, float gy_dps, float gz_dps,
-                          uint8_t status) {
-    g_mock_imu.qw = qw;
-    g_mock_imu.qx = qx;
-    g_mock_imu.qy = qy;
-    g_mock_imu.qz = qz;
-    g_mock_imu.gx = gx_dps;
-    g_mock_imu.gy = gy_dps;
-    g_mock_imu.gz = gz_dps;
-    g_mock_imu.status = status;
+void mock_sensors_set_imu(const imu_data_t *data) {
+    if (!data)
+        return;
+    g_mock_imu.qw = data->qw;
+    g_mock_imu.qx = data->qx;
+    g_mock_imu.qy = data->qy;
+    g_mock_imu.qz = data->qz;
+    g_mock_imu.gx = data->gx_dps;
+    g_mock_imu.gy = data->gy_dps;
+    g_mock_imu.gz = data->gz_dps;
+    g_mock_imu.status = data->status;
     g_mock_imu.valid = true;
 }
 
-bool mock_sensors_get_imu(float *qw, float *qx, float *qy, float *qz, float *gx_dps, float *gy_dps, float *gz_dps,
-                          uint8_t *status) {
-    if (!g_mock_imu.valid)
+bool mock_sensors_get_imu(imu_data_t *data) {
+    if (!g_mock_imu.valid || !data)
         return false;
-    if (qw)
-        *qw = g_mock_imu.qw;
-    if (qx)
-        *qx = g_mock_imu.qx;
-    if (qy)
-        *qy = g_mock_imu.qy;
-    if (qz)
-        *qz = g_mock_imu.qz;
-    if (gx_dps)
-        *gx_dps = g_mock_imu.gx;
-    if (gy_dps)
-        *gy_dps = g_mock_imu.gy;
-    if (gz_dps)
-        *gz_dps = g_mock_imu.gz;
-    if (status)
-        *status = g_mock_imu.status;
+    data->qw = g_mock_imu.qw;
+    data->qx = g_mock_imu.qx;
+    data->qy = g_mock_imu.qy;
+    data->qz = g_mock_imu.qz;
+    data->gx_dps = g_mock_imu.gx;
+    data->gy_dps = g_mock_imu.gy;
+    data->gz_dps = g_mock_imu.gz;
+    data->status = g_mock_imu.status;
     return true;
 }
 
@@ -217,4 +209,3 @@ bool mock_sensors_get_tmp1075(float *temp_c) {
         *temp_c = g_mock_tmp1075.temp_c;
     return true;
 }
-

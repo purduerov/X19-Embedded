@@ -27,7 +27,15 @@ void test_lsm6dsoxtr_driver(void) {
 
     /* Test mock sensor reading */
     mock_sensors_reset();
-    mock_sensors_set_imu(0.7071f, 0.0f, 0.7071f, 0.0f, 0.05f, -0.02f, 0.12f, 3);
+    imu_data_t imu_data = {.qw = 0.7071f,
+                           .qx = 0.0f,
+                           .qy = 0.7071f,
+                           .qz = 0.0f,
+                           .gx_dps = 0.05f,
+                           .gy_dps = -0.02f,
+                           .gz_dps = 0.12f,
+                           .status = 3};
+    mock_sensors_set_imu(&imu_data);
 
     assert(lsm6dsoxtr_read_raw(&dev) == ROV_OK);
     assert(dev.q_w > 0.70f && dev.q_w < 0.71f);
