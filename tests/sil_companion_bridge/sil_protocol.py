@@ -33,6 +33,8 @@ class ThrusterCommand:
 
     @classmethod
     def unpack(cls, data: bytes) -> "ThrusterCommand":
+        if len(data) < 16:
+            raise ValueError(f"ThrusterCommand requires at least 16 bytes, got {len(data)}")
         pwms = struct.unpack("<8H", data[:16])
         return cls(pwm_us=list(pwms))
 
@@ -45,6 +47,8 @@ class SolenoidCommand:
 
     @classmethod
     def unpack(cls, data: bytes) -> "SolenoidCommand":
+        if len(data) < 2:
+            raise ValueError(f"SolenoidCommand requires at least 2 bytes, got {len(data)}")
         (mask,) = struct.unpack("<H", data[:2])
         return cls(solenoid_mask=mask & 0x03FF)
 
@@ -62,6 +66,8 @@ class NavTelemetry:
 
     @classmethod
     def unpack(cls, data: bytes) -> "NavTelemetry":
+        if len(data) < 33:
+            raise ValueError(f"NavTelemetry requires at least 33 bytes, got {len(data)}")
         qw, qx, qy, qz, gx, gy, gz, depth, status = struct.unpack("<8fB", data[:33])
         return cls(
             q_w=qw, q_x=qx, q_y=qy, q_z=qz,
@@ -78,6 +84,8 @@ class EnvTelemetry:
 
     @classmethod
     def unpack(cls, data: bytes) -> "EnvTelemetry":
+        if len(data) < 13:
+            raise ValueError(f"EnvTelemetry requires at least 13 bytes, got {len(data)}")
         p, h, t, flags = struct.unpack("<3fB", data[:13])
         return cls(pressure_hpa=p, humidity_pct=h, temperature_c=t, leak_flags=flags)
 
@@ -93,6 +101,8 @@ class PowerTelemetry:
 
     @classmethod
     def unpack(cls, data: bytes) -> "PowerTelemetry":
+        if len(data) < 20:
+            raise ValueError(f"PowerTelemetry requires at least 20 bytes, got {len(data)}")
         tv, ti, v5v, v5i, b1, b2, b3, b4, temp, flags = struct.unpack("<HHHH4HhH", data[:20])
         return cls(
             tether_voltage_mv=tv, tether_current_ma=ti,
@@ -108,6 +118,8 @@ def pack_sil_can_frame(can_id: int, payload: bytes) -> bytes:
 
 def unpack_sil_can_frame(chunk: bytes) -> Tuple[int, bytes]:
     """Unpacks a SIL TCP frame into (can_id, payload_bytes)."""
+    if len(chunk) < SIL_PACKET_SIZE:
+        raise ValueError(f"SIL CAN frame requires at least {SIL_PACKET_SIZE} bytes, got {len(chunk)}")
     magic, can_id, length, data = struct.unpack(SIL_PACKET_FMT, chunk[:SIL_PACKET_SIZE])
     if magic != SIL_MAGIC_HEADER and magic != SIL_MAGIC_HEADER_LEGACY:
         raise ValueError(f"Invalid magic header: {hex(magic)}")
