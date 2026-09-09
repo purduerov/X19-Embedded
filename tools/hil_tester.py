@@ -48,10 +48,10 @@ def run_hil_test(interface: str):
     print("\n[TEST 2] Injecting 8-Channel Thruster PWMs (0x100) at 100 Hz...")
     test_pwm = [1550, 1550, 1550, 1550, 1450, 1450, 1450, 1450]
     payload = struct.pack("<8H", *test_pwm)
-    for _ in range(50):
-        msg = can.Message(arbitration_id=0x100, data=payload, is_extended_id=False, is_fd=True)
-        bus.send(msg)
-        time.sleep(0.01)
+    msg = can.Message(arbitration_id=0x100, data=payload, is_extended_id=False, is_fd=True)
+    task = bus.send_periodic(msg, 0.01)
+    time.sleep(0.50)
+    task.stop()
     print("  [PASS] Successfully transmitted 50 PWM command frames.")
 
     # Test 3: Watchdog Timeout Trigger Verification

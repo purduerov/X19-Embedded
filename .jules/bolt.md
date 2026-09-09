@@ -22,3 +22,6 @@
 ## 2026-09-09 - Safely Hoisting Loop Invariants with Conditional Execution
 **Learning:** When hoisting a loop invariant that determines which path an entire loop should take (e.g., stopping all thrusters vs. stepping all thrusters), branching the loop outside based on the condition prevents redundant branching at each iteration.
 **Action:** If a high-frequency loop's execution path strictly depends on a state that does not change during the loop, hoist the condition out and duplicate the loop structure for each path to eliminate branching overhead.
+## 2024-05-24 - Python-CAN Periodic Transmission
+**Learning:** Manual for-loops with `time.sleep()` for high-frequency CAN transmission in Python scripts suffer from OS scheduling jitter and block the main thread.
+**Action:** Use `python-can` built-in `bus.send_periodic(msg, period)` which delegates transmission timing to a background thread or directly to hardware/socketcan for precise, non-blocking periodic message injection.
