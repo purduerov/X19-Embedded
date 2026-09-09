@@ -8,16 +8,8 @@
 #include <stdbool.h>
 #include <string.h>
 
-__attribute__((weak)) bool mock_sensors_get_imu(float *qw, float *qx, float *qy, float *qz,
-                                                float *gx, float *gy, float *gz, uint8_t *status) {
-    (void)qw;
-    (void)qx;
-    (void)qy;
-    (void)qz;
-    (void)gx;
-    (void)gy;
-    (void)gz;
-    (void)status;
+__attribute__((weak)) bool mock_sensors_get_imu(imu_data_t *data) {
+    (void)data;
     return false;
 }
 
@@ -32,9 +24,17 @@ rov_status_t bmi270_init(bmi270_dev_t *dev) {
 rov_status_t bmi270_read_raw(bmi270_dev_t *dev) {
     if (!dev)
         return ROV_ERR_INVALID_ARG;
-    if (mock_sensors_get_imu(&dev->q_w, &dev->q_x, &dev->q_y, &dev->q_z,
-                            &dev->gyro_x_dps, &dev->gyro_y_dps, &dev->gyro_z_dps,
-                            &dev->status_flags)) {
+
+    imu_data_t data;
+    if (mock_sensors_get_imu(&data)) {
+        dev->q_w = data.q_w;
+        dev->q_x = data.q_x;
+        dev->q_y = data.q_y;
+        dev->q_z = data.q_z;
+        dev->gyro_x_dps = data.gyro_x_dps;
+        dev->gyro_y_dps = data.gyro_y_dps;
+        dev->gyro_z_dps = data.gyro_z_dps;
+        dev->status_flags = data.status;
         return ROV_OK;
     }
     return ROV_OK;

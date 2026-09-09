@@ -58,6 +58,20 @@ typedef struct __attribute__((packed)) {
 } rov_solenoid_cmd_t;
 
 /**
+ * @brief IMU Sensor Data Payload.
+ */
+typedef struct __attribute__((packed)) {
+    float q_w;          /**< Orientation Quaternion W */
+    float q_x;          /**< Orientation Quaternion X */
+    float q_y;          /**< Orientation Quaternion Y */
+    float q_z;          /**< Orientation Quaternion Z */
+    float gyro_x_dps;   /**< Angular Velocity X (dps) */
+    float gyro_y_dps;   /**< Angular Velocity Y (dps) */
+    float gyro_z_dps;   /**< Angular Velocity Z (dps) */
+    uint8_t status;     /**< IMU status */
+} imu_data_t;
+
+/**
  * @brief 100 Hz Navigation Telemetry Payload from Control Board (Packed, 33 bytes).
  */
 typedef struct __attribute__((packed)) {
