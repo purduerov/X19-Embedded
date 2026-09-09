@@ -9,9 +9,9 @@
  */
 
 #include "app.h"
+#include "bmi270.h"
 #include "bsp.h"
 #include "can_interface.h"
-#include "lsm6dsoxtr.h"
 #include "ms5837.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
@@ -22,7 +22,7 @@
 static rov_safety_state_t g_safety_state;
 static rov_thruster_cmd_t g_target_pwms;
 static rov_thruster_cmd_t g_active_pwms;
-static lsm6dsoxtr_dev_t g_imu_dev;
+static bmi270_dev_t g_imu_dev;
 static ms5837_dev_t g_depth_dev;
 static uint32_t g_last_nav_time = 0;
 static uint32_t g_last_ramp_time = 0;
@@ -38,7 +38,7 @@ void node2_app_init(void) {
     }
     bsp_solenoid_set(0);
 
-    lsm6dsoxtr_init(&g_imu_dev);
+    bmi270_init(&g_imu_dev);
     ms5837_init(&g_depth_dev);
 
     g_last_nav_time = 0;
@@ -117,7 +117,7 @@ void node2_app_step(void) {
     if (current_time - g_last_nav_time >= (1000 / ROV_NAV_TELEMETRY_FREQ_HZ)) {
         g_last_nav_time = current_time;
 
-        lsm6dsoxtr_read_raw(&g_imu_dev);
+        bmi270_read_raw(&g_imu_dev);
         ms5837_read_pressure_depth(&g_depth_dev, 1000.0f);
 
         rov_nav_telemetry_t nav;

@@ -47,6 +47,11 @@ static struct {
     bool valid;
 } g_mock_tps[5];
 
+static struct {
+    float temp_c;
+    bool valid;
+} g_mock_tmp1075;
+
 void mock_sensors_reset(void) {
     /* Nominal atmospheric defaults */
     g_mock_bme280.pressure_hpa = 1013.25f;
@@ -80,6 +85,9 @@ void mock_sensors_reset(void) {
         g_mock_tps[i].status = 0;
         g_mock_tps[i].valid = true;
     }
+
+    g_mock_tmp1075.temp_c = 25.0f;
+    g_mock_tmp1075.valid = true;
 }
 
 void mock_sensors_set_bme280(float pressure_hpa, float humidity_pct, float temp_c) {
@@ -196,3 +204,17 @@ bool mock_sensors_get_tps25990(uint8_t brick_idx, float *v_in, float *v_out, flo
         *status = g_mock_tps[brick_idx].status;
     return true;
 }
+
+void mock_sensors_set_tmp1075(float temp_c) {
+    g_mock_tmp1075.temp_c = temp_c;
+    g_mock_tmp1075.valid = true;
+}
+
+bool mock_sensors_get_tmp1075(float *temp_c) {
+    if (!g_mock_tmp1075.valid)
+        return false;
+    if (temp_c)
+        *temp_c = g_mock_tmp1075.temp_c;
+    return true;
+}
+

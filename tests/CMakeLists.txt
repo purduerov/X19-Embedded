@@ -64,6 +64,26 @@ if(NOT WIN32 OR MINGW)
 endif()
 add_test(NAME test_driver_lsm6dsoxtr COMMAND test_driver_lsm6dsoxtr)
 
+add_executable(test_driver_bmi270 test_driver_bmi270.c)
+target_link_libraries(test_driver_bmi270 PRIVATE rov_mocks)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_driver_bmi270 PRIVATE m)
+endif()
+add_test(NAME test_driver_bmi270 COMMAND test_driver_bmi270)
+
+add_executable(test_driver_ina237 test_driver_ina237.c)
+target_link_libraries(test_driver_ina237 PRIVATE rov_mocks)
+add_test(NAME test_driver_ina237 COMMAND test_driver_ina237)
+
+add_executable(test_driver_tmp1075 test_driver_tmp1075.c)
+target_link_libraries(test_driver_tmp1075 PRIVATE rov_mocks)
+add_test(NAME test_driver_tmp1075 COMMAND test_driver_tmp1075)
+
+add_executable(test_driver_pmbus_brick test_driver_pmbus_brick.c)
+target_link_libraries(test_driver_pmbus_brick PRIVATE rov_mocks)
+add_test(NAME test_driver_pmbus_brick COMMAND test_driver_pmbus_brick)
+
+
 # Subsystem Application Node SIL Tests (Full Node Logic Execution)
 add_executable(test_node1_pi_shield
     test_node1_pi_shield.c

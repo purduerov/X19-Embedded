@@ -12,15 +12,15 @@
 #include "app.h"
 #include "bsp.h"
 #include "can_interface.h"
+#include "pmbus_brick.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
-#include "tps25990.h"
 #include <string.h>
 
 static rov_safety_state_t g_safety_state;
 static rov_power_telemetry_t g_power_telemetry;
-static tps25990_dev_t g_pmbus_bricks[5];
+static pmbus_brick_dev_t g_pmbus_bricks[5];
 static uint32_t g_last_power_time = 0;
 
 void node3_app_init(void) {
@@ -28,7 +28,7 @@ void node3_app_init(void) {
     rov_safety_init(&g_safety_state);
 
     for (int i = 0; i < 5; i++) {
-        tps25990_init(&g_pmbus_bricks[i], (uint8_t)(0x40 + i));
+        pmbus_brick_init(&g_pmbus_bricks[i], (uint8_t)(0x40 + i));
     }
 
     memset(&g_power_telemetry, 0, sizeof(g_power_telemetry));
@@ -49,7 +49,7 @@ void node3_app_step(void) {
         int16_t max_temp_c_tenths = 250;
 
         for (int i = 0; i < 5; i++) {
-            tps25990_read_telemetry(&g_pmbus_bricks[i]);
+            pmbus_brick_read_telemetry(&g_pmbus_bricks[i]);
 
             /* Brick 0 is 5.2V logic; Bricks 1..4 are 12V 300W thruster bricks */
             if (i == 0) {

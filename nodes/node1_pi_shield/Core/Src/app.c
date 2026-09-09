@@ -13,7 +13,7 @@
 #include "bme280.h"
 #include "bsp.h"
 #include "can_interface.h"
-#include "ina226.h"
+#include "ina237.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
@@ -21,7 +21,7 @@
 static rov_safety_state_t g_safety_state;
 static rov_env_telemetry_t g_env_telemetry;
 static bme280_dev_t g_bme280_dev;
-static ina226_dev_t g_ina226_dev;
+static ina237_dev_t g_ina237_dev;
 static uint32_t g_last_telemetry_time = 0;
 static float g_baseline_pressure_hpa = 0.0f;
 
@@ -30,7 +30,7 @@ void node1_app_init(void) {
     rov_safety_init(&g_safety_state);
 
     bme280_init(&g_bme280_dev);
-    ina226_init(&g_ina226_dev, 0x40, 0.002f);
+    ina237_init(&g_ina237_dev, 0x40, 0.001f);
 
     g_last_telemetry_time = 0;
     g_baseline_pressure_hpa = 0.0f;
@@ -48,7 +48,7 @@ void node1_app_step(void) {
         g_last_telemetry_time = current_time;
 
         bme280_read_all(&g_bme280_dev);
-        ina226_read_power(&g_ina226_dev);
+        ina237_read_power(&g_ina237_dev);
 
         /* Set baseline pressure on first valid sample */
         if (g_baseline_pressure_hpa <= 0.0f && g_bme280_dev.pressure_hpa > 0.0f) {

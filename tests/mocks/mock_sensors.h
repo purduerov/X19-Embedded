@@ -8,9 +8,13 @@
 #define MOCK_SENSORS_H
 
 #include "bme280.h"
+#include "bmi270.h"
 #include "ina226.h"
+#include "ina237.h"
 #include "lsm6dsoxtr.h"
 #include "ms5837.h"
+#include "pmbus_brick.h"
+#include "tmp1075.h"
 #include "tps25990.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -56,6 +60,12 @@ bool mock_sensors_get_ina226(float *voltage_v, float *current_a);
 void mock_sensors_set_tps25990(uint8_t brick_idx, float v_in, float v_out, float i_out, float temp_c, uint16_t status);
 bool mock_sensors_get_tps25990(uint8_t brick_idx, float *v_in, float *v_out, float *i_out, float *temp_c,
                                uint16_t *status);
+
+/**
+ * @brief Inject TMP1075 PCB temperature.
+ */
+void mock_sensors_set_tmp1075(float temp_c);
+bool mock_sensors_get_tmp1075(float *temp_c);
 
 #ifdef __cplusplus
 }
