@@ -45,4 +45,3 @@ rov_status_t bmi270_update_attitude(bmi270_dev_t *dev, float dt_sec) {
         return ROV_ERR_INVALID_ARG;
     return bmi270_read_raw(dev);
 }
-
