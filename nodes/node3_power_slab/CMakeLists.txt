@@ -5,6 +5,8 @@ add_executable(node3_power_slab.elf
 
 target_include_directories(node3_power_slab.elf PRIVATE
     Core/Inc
+    ../../shared/include
+    ../../drivers/include
     "../Shared Library/include"
     "../Hardware Drivers/include"
 )

@@ -4,8 +4,8 @@
             "name": "Mac",
             "includePath": [
                 "${workspaceFolder}/**",
-                "/Users/tanay/Documents/GitHub/X19-Embedded/drivers/include",
-                "/Users/tanay/Documents/GitHub/X19-Embedded/shared/include"
+                "${workspaceFolder}/../../drivers/include",
+                "${workspaceFolder}/../../shared/include"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/clang"
