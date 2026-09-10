@@ -21,14 +21,7 @@ static struct {
 } g_mock_ms5837;
 
 static struct {
-    float qw;
-    float qx;
-    float qy;
-    float qz;
-    float gx;
-    float gy;
-    float gz;
-    uint8_t status;
+    imu_data_t data;
     bool valid;
 } g_mock_imu;
 
@@ -63,14 +56,14 @@ void mock_sensors_reset(void) {
     g_mock_ms5837.temp_c = 18.0f;
     g_mock_ms5837.valid = true;
 
-    g_mock_imu.qw = 1.0f;
-    g_mock_imu.qx = 0.0f;
-    g_mock_imu.qy = 0.0f;
-    g_mock_imu.qz = 0.0f;
-    g_mock_imu.gx = 0.0f;
-    g_mock_imu.gy = 0.0f;
-    g_mock_imu.gz = 0.0f;
-    g_mock_imu.status = 3;
+    g_mock_imu.data.q_w = 1.0f;
+    g_mock_imu.data.q_x = 0.0f;
+    g_mock_imu.data.q_y = 0.0f;
+    g_mock_imu.data.q_z = 0.0f;
+    g_mock_imu.data.gyro_x_dps = 0.0f;
+    g_mock_imu.data.gyro_y_dps = 0.0f;
+    g_mock_imu.data.gyro_z_dps = 0.0f;
+    g_mock_imu.data.status = 3;
     g_mock_imu.valid = true;
 
     g_mock_ina226.voltage_v = 5.2f;
@@ -125,39 +118,17 @@ bool mock_sensors_get_ms5837(float *pressure_mbar, float *temp_c) {
     return true;
 }
 
-void mock_sensors_set_imu(float qw, float qx, float qy, float qz, float gx_dps, float gy_dps, float gz_dps,
-                          uint8_t status) {
-    g_mock_imu.qw = qw;
-    g_mock_imu.qx = qx;
-    g_mock_imu.qy = qy;
-    g_mock_imu.qz = qz;
-    g_mock_imu.gx = gx_dps;
-    g_mock_imu.gy = gy_dps;
-    g_mock_imu.gz = gz_dps;
-    g_mock_imu.status = status;
-    g_mock_imu.valid = true;
+void mock_sensors_set_imu(const imu_data_t *data) {
+    if (data) {
+        g_mock_imu.data = *data;
+        g_mock_imu.valid = true;
+    }
 }
 
-bool mock_sensors_get_imu(float *qw, float *qx, float *qy, float *qz, float *gx_dps, float *gy_dps, float *gz_dps,
-                          uint8_t *status) {
-    if (!g_mock_imu.valid)
+bool mock_sensors_get_imu(imu_data_t *data) {
+    if (!g_mock_imu.valid || !data)
         return false;
-    if (qw)
-        *qw = g_mock_imu.qw;
-    if (qx)
-        *qx = g_mock_imu.qx;
-    if (qy)
-        *qy = g_mock_imu.qy;
-    if (qz)
-        *qz = g_mock_imu.qz;
-    if (gx_dps)
-        *gx_dps = g_mock_imu.gx;
-    if (gy_dps)
-        *gy_dps = g_mock_imu.gy;
-    if (gz_dps)
-        *gz_dps = g_mock_imu.gz;
-    if (status)
-        *status = g_mock_imu.status;
+    *data = g_mock_imu.data;
     return true;
 }
 
