@@ -17,6 +17,7 @@ __pycache__/
 *.a
 
 # VS Code & IDE caches
+/.settings/
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
