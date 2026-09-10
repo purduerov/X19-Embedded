@@ -7,6 +7,8 @@ target_include_directories(node2_control_board.elf PRIVATE
     Core/Inc
     ../../shared/include
     ../../drivers/include
+    "../Shared Library/include"
+    "../Hardware Drivers/include"
 )
 
 target_link_libraries(node2_control_board.elf PRIVATE

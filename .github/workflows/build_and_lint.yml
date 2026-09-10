@@ -15,6 +15,14 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Validate Project Structure
+        run: |
+          if git ls-files | grep -E '^\.settings/|^[^/]+\.ioc$'; then
+            echo "ERROR: STM32 project files detected at repository root!"
+            echo "All STM32 projects and CubeMX configs must be inside nodes/<node_name>/"
+            exit 1
+          fi
+
       - name: Install Toolchain Dependencies
         run: |
           sudo apt-get update
