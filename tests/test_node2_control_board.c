@@ -14,12 +14,15 @@
 #include <stdio.h>
 #include <string.h>
 
-void test_node2_boot_state(void) {
+static void setup(void) {
     mock_bsp_reset();
     mock_can_reset();
     mock_sensors_reset();
     mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+}
 
+void test_node2_boot_state(void) {
+    setup();
     node2_app_init();
 
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
@@ -32,11 +35,7 @@ void test_node2_boot_state(void) {
 }
 
 void test_node2_thruster_ramping(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
-
+    setup();
     node2_app_init();
 
     /* Command Thruster 0 to 1800 us */
@@ -69,11 +68,7 @@ void test_node2_thruster_ramping(void) {
 }
 
 void test_node2_heartbeat_timeout_failsafe(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
-
+    setup();
     node2_app_init();
 
     /* Ramp thruster 0 up to 1600 us */
@@ -108,11 +103,7 @@ void test_node2_heartbeat_timeout_failsafe(void) {
 }
 
 void test_node2_emergency_break_cutoff(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
-
+    setup();
     node2_app_init();
 
     /* Command all thrusters to 1700 us */
@@ -166,11 +157,7 @@ void test_node2_emergency_break_cutoff(void) {
 }
 
 void test_node2_solenoid_command(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
-
+    setup();
     node2_app_init();
 
     rov_solenoid_cmd_t sol = {.solenoid_mask = 0x02A5};
@@ -188,10 +175,7 @@ void test_node2_solenoid_command(void) {
 }
 
 void test_node2_nav_telemetry_stream(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+    setup();
 
     /* Set synthetic IMU orientation and depth (12.5 meters in seawater) */
     imu_data_t imu_mock = {

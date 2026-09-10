@@ -1,30 +1,102 @@
-#MicroX Explorer Configurationfor STM32C542CCTx
+# MicroX Explorer Configuration for STM32C542CCTx
+# Node 3 Power Slab
+#
+# IMPORTANT HARDWARE NOTE:
+# STM32C542CCT6 exposes I2C1 and I3C1, but not an I2C2 peripheral.
+# I3C1 is configured below for legacy I2C Fast-mode (400 kHz) as the
+# closest second-bus substitute. Legacy I2C devices on I3C1 must not
+# require clock stretching.
+
 File.Version=6
 KeepUserPlacement=false
+
 Mcu.CPN=STM32C542CCTx
 Mcu.Family=STM32C5
-Mcu.IP0=FDCAN1
-Mcu.IP1=I2C1
-Mcu.IP2=ADC1
-Mcu.IP3=RCC
-Mcu.IP4=SYS
 Mcu.Name=STM32C542CCTx
 Mcu.Package=LQFP48
-Mcu.Pin0=PB8-BOOT0
-Mcu.Pin1=PB9
-Mcu.Pin2=PA9
-Mcu.Pin3=PA10
-Mcu.Pin4=PA0
-Mcu.PinsNb=5
-Mcu.UserConstants=
-PB8-BOOT0.Signal=FDCAN1_RX
-PB9.Signal=FDCAN1_TX
-PA9.Signal=I2C1_SCL
-PA10.Signal=I2C1_SDA
-PA0.Signal=ADC1_IN1
-RCC.HSEFrequency=24000000
-RCC.SYSCLKSource=RCC_SYSCLKSOURCE_PLLCLK
-RCC.PLLM=2
-RCC.PLLN=24
-RCC.PLLR=2
 
+# Enabled peripherals
+Mcu.IP0=FDCAN1
+Mcu.IP1=I2C1
+Mcu.IP2=I3C1
+Mcu.IP3=ADC1
+Mcu.IP4=RCC
+Mcu.IP5=SYS
+
+# Pin assignments
+# FDCAN1
+Mcu.Pin0=PB8
+Mcu.Pin1=PB9
+PB8.Signal=FDCAN1_RX
+PB9.Signal=FDCAN1_TX
+
+# I2C1 - valid STM32C542 pin pair
+Mcu.Pin2=PA11
+Mcu.Pin3=PA12
+PA11.Signal=I2C1_SCL
+PA12.Signal=I2C1_SDA
+
+# I3C1 used as legacy I2C second bus
+Mcu.Pin4=PB6
+Mcu.Pin5=PB7
+PB6.Signal=I3C1_SCL
+PB7.Signal=I3C1_SDA
+
+# Existing ADC input
+Mcu.Pin6=PA0
+PA0.Signal=ADC1_IN1
+
+# 24 MHz HSE crystal pins
+Mcu.Pin7=PH0-OSC_IN
+Mcu.Pin8=PH1-OSC_OUT
+PH0-OSC_IN.Signal=RCC_OSC_IN
+PH1-OSC_OUT.Signal=RCC_OSC_OUT
+
+Mcu.PinsNb=9
+Mcu.UserConstants=
+
+# -----------------------------------------------------------------------------
+# Clock configuration
+# STM32C5 uses the PSI clock block. 24 MHz HSE is the PSI reference and
+# PSIS supplies the 144 MHz system clock.
+# -----------------------------------------------------------------------------
+RCC.HSESource=CrystalCeramicResonator
+RCC.HSEFrequency=24000000
+RCC.PSIReference=HSE
+RCC.PSIFrequency=144000000
+RCC.SYSCLKSource=PSIS
+RCC.SYSCLKFrequency=144000000
+RCC.AHBPrescaler=1
+RCC.APB1Prescaler=1
+RCC.APB2Prescaler=1
+RCC.APB3Prescaler=1
+
+# -----------------------------------------------------------------------------
+# I2C1 - Fast mode, 400 kHz
+# -----------------------------------------------------------------------------
+I2C1.Mode=I2C
+I2C1.AddressingMode=7bit
+I2C1.SpeedMode=Fast
+I2C1.Frequency=400000
+I2C1.ClockSource=PCLK1
+
+# -----------------------------------------------------------------------------
+# Second two-wire bus
+# STM32C542CCT6 has no I2C2. I3C1 is configured for legacy I2C Fast mode.
+# -----------------------------------------------------------------------------
+I3C1.Mode=LegacyI2CController
+I3C1.LegacyI2CSpeedMode=Fast
+I3C1.LegacyI2CFrequency=400000
+I3C1.ClockSource=PCLK1
+
+# -----------------------------------------------------------------------------
+# FDCAN1 - CAN FD with bit-rate switching
+# Requested bus rates: 1.0 Mbps nominal / 5.0 Mbps data, TDC enabled.
+# Exact bit timing must be solved against the selected FDCAN kernel clock by
+# STM32CubeMX2 / the HAL2 timing utility before hardware validation.
+# -----------------------------------------------------------------------------
+FDCAN1.FrameFormat=CANFD_BRS
+FDCAN1.NominalBitrate=1000000
+FDCAN1.DataBitrate=5000000
+FDCAN1.TDC=Enabled
+FDCAN1.ClockSource=PCLK1

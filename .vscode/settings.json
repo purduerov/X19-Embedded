@@ -22,5 +22,6 @@
     ],
     "cmake.preferredGenerators": [
         "Ninja"
-    ]
+    ],
+    "C_Cpp.default.compilerPath": "c:\\Users\\Rex Wu\\Downloads\\arm-gnu-toolchain-15.3.rel1-mingw-w64-i686-arm-none-eabi.msi"
 }

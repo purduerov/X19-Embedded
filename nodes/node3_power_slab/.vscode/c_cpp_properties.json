@@ -1,0 +1,15 @@
+{
+    "configurations": [
+        {
+            "name": "Mac",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/Users/tanay/Documents/GitHub/X19-Embedded/drivers/include",
+                "/Users/tanay/Documents/GitHub/X19-Embedded/shared/include"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/clang"
+        }
+    ],
+    "version": 4
+}
