@@ -14,11 +14,15 @@
 #include <stdio.h>
 #include <string.h>
 
-void test_node1_nominal_telemetry(void) {
+static void setup(void) {
     mock_bsp_reset();
     mock_can_reset();
     mock_sensors_reset();
     mock_can_set_current_node(ROV_NODE_PI_SHIELD);
+}
+
+void test_node1_nominal_telemetry(void) {
+    setup();
 
     mock_sensors_set_bme280(1013.25f, 42.0f, 26.5f);
     mock_sensors_set_ina226(5.21f, 1.35f);
@@ -52,10 +56,7 @@ void test_node1_nominal_telemetry(void) {
 }
 
 void test_node1_vacuum_loss_leak_trigger(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
+    setup();
 
     /* Start with a sealed enclosure pulled to 750 hPa vacuum */
     mock_sensors_set_bme280(750.0f, 30.0f, 22.0f);
@@ -85,10 +86,7 @@ void test_node1_vacuum_loss_leak_trigger(void) {
 }
 
 void test_node1_humidity_spike_leak_trigger(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
+    setup();
 
     mock_sensors_set_bme280(1013.25f, 35.0f, 24.0f);
     node1_app_init();
@@ -108,10 +106,7 @@ void test_node1_humidity_spike_leak_trigger(void) {
 }
 
 void test_node1_floor_probe_leak_trigger(void) {
-    mock_bsp_reset();
-    mock_can_reset();
-    mock_sensors_reset();
-    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
+    setup();
 
     mock_sensors_set_bme280(1013.25f, 35.0f, 24.0f);
     node1_app_init();
