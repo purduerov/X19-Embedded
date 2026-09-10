@@ -12,6 +12,15 @@ int main(void) {
     /* Hand over execution to Application Layer (Src/app.c).
      * CubeMX code generation preserves this call, while all
      * application logic, state machines, and telemetry stay safe in app.c */
+
+    HAL_Init();
+
+    SystemClock_Config();
+
+    MX_GPIO_Init();
+    MX_I2C1_Init();
+    MX_I2C2_Init();
+    MX_FDCAN1_Init();
     app_main();
     /* USER CODE END 2 */
 
