@@ -22,3 +22,9 @@
 ## 2026-09-09 - Safely Hoisting Loop Invariants with Conditional Execution
 **Learning:** When hoisting a loop invariant that determines which path an entire loop should take (e.g., stopping all thrusters vs. stepping all thrusters), branching the loop outside based on the condition prevents redundant branching at each iteration.
 **Action:** If a high-frequency loop's execution path strictly depends on a state that does not change during the loop, hoist the condition out and duplicate the loop structure for each path to eliminate branching overhead.
+## 2024-05-14 - Prevent synchronous sleep jitter in Python CAN transmissions
+**Learning:** Manual `for` loops utilizing synchronous `time.sleep()` for high-frequency CAN transmissions (e.g. 100Hz) in Python introduce unnecessary main-thread blocking and timing jitter.
+**Action:** Utilize the native `send_periodic` method provided by `python-can` (`can.Bus.send_periodic`), which leverages a background scheduler to send messages non-blockingly and strictly consistently.
+## 2024-05-14 - Fix CI formatting failures
+**Learning:** The CI formatting check will fail if C files are poorly formatted. This includes even minor alignment errors in long parameter lists.
+**Action:** The CI 'Check Formatting' job enforces code formatting across the repository using `clang-format`. If the job fails with 'code should be clang-formatted', identify the specific C/C++ files from the GitHub Actions annotations/logs and run `clang-format-18 -i <file>` on them to resolve the build failure.
