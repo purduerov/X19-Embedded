@@ -44,7 +44,7 @@ void node3_app_step(void) {
     if (current_time - g_last_power_time >= (1000 / ROV_POWER_TELEMETRY_FREQ_HZ)) {
         g_last_power_time = current_time;
 
-        float total_tether_current_a = 0.0f;
+        float total_tether_power_w = 0.0f;
         bool fault_detected = false;
         int16_t max_temp_c_tenths = 250;
 
@@ -55,12 +55,10 @@ void node3_app_step(void) {
             if (i == 0) {
                 g_power_telemetry.v5_voltage_mv = (uint16_t)(g_pmbus_bricks[i].output_voltage_v * 1000.0f);
                 g_power_telemetry.v5_current_ma = (uint16_t)(g_pmbus_bricks[i].output_current_a * 1000.0f);
-                total_tether_current_a +=
-                    (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a) / 48.0f;
+                total_tether_power_w += (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a);
             } else {
                 g_power_telemetry.v12_current_ma[i - 1] = (uint16_t)(g_pmbus_bricks[i].output_current_a * 1000.0f);
-                total_tether_current_a +=
-                    (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a) / 48.0f;
+                total_tether_power_w += (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a);
 
                 /* Overcurrent protection: 25A max per brick */
                 if (g_pmbus_bricks[i].output_current_a > ROV_BRICK_MAX_CURRENT_A) {
@@ -76,6 +74,10 @@ void node3_app_step(void) {
                 fault_detected = true;
             }
         }
+
+        /* Performance optimization: FPU division is slow (~14 cycles).
+           Accumulate total power inside the loop and multiply by the inverse voltage once outside. */
+        float total_tether_current_a = total_tether_power_w * (1.0f / 48.0f);
 
         g_power_telemetry.tether_voltage_mv = 48000;
         g_power_telemetry.tether_current_ma = (uint16_t)(total_tether_current_a * 1000.0f);

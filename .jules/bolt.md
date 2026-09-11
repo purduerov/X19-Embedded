@@ -28,3 +28,6 @@
 ## 2024-05-14 - Fix CI formatting failures
 **Learning:** The CI formatting check will fail if C files are poorly formatted. This includes even minor alignment errors in long parameter lists.
 **Action:** The CI 'Check Formatting' job enforces code formatting across the repository using `clang-format`. If the job fails with 'code should be clang-formatted', identify the specific C/C++ files from the GitHub Actions annotations/logs and run `clang-format-18 -i <file>` on them to resolve the build failure.
+## 2026-09-11 - Precompute inverses for division
+**Learning:** The Cortex-M4 FPU takes ~14 cycles for division. Doing this inside a loop adds unnecessary overhead.
+**Action:** Accumulate total tether power inside the loop and multiply by the inverse of nominal voltage outside the loop.
