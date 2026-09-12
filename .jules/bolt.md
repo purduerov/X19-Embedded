@@ -32,3 +32,7 @@
 ## 2026-09-10 - Hoist FPU Division Accumulations Outside Loops
 **Learning:** Accumulating values that require a division in each iteration (like converting power to current per-brick) incurs repetitive FPU division costs (~14 cycles each).
 **Action:** Accumulate the numerator (e.g. power) during the loop, and apply the division or inverse multiplication once outside the loop to calculate the final aggregate (e.g. current).
+
+## 2026-09-10 - CI Compilation Error with Missing HAL Functions
+**Learning:** The project is configured to be hardware-agnostic for testing. Calling ST HAL functions like `HAL_Init()` or `SystemClock_Config()` directly in `main.c` without proper headers or when compiling for the host architecture causes implicit declaration compilation errors and violates the zero-HAL application layer contract.
+**Action:** Ensure `main.c` strictly only calls `app_main()` in the designated user code block, allowing the BSP abstraction to handle hardware setup.

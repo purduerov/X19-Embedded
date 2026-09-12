@@ -44,6 +44,8 @@ void node3_app_step(void) {
     if (current_time - g_last_power_time >= (1000 / ROV_POWER_TELEMETRY_FREQ_HZ)) {
         g_last_power_time = current_time;
 
+        /* Performance optimization: Accumulate total power inside the loop and apply
+           the division (via inverse multiplication) once outside to avoid 5 FPU divisions (~14 cycles each). */
         float total_tether_power_w = 0.0f;
         bool fault_detected = false;
         int16_t max_temp_c_tenths = 250;
