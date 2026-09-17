@@ -36,3 +36,6 @@
 ## 2026-09-10 - CI Compilation Error with Missing HAL Functions
 **Learning:** The project is configured to be hardware-agnostic for testing. Calling ST HAL functions like `HAL_Init()` or `SystemClock_Config()` directly in `main.c` without proper headers or when compiling for the host architecture causes implicit declaration compilation errors and violates the zero-HAL application layer contract.
 **Action:** Ensure `main.c` strictly only calls `app_main()` in the designated user code block, allowing the BSP abstraction to handle hardware setup.
+## 2024-10-24 - Precompute Small Lookup Tables to Avoid Floating Point Branching and Division
+**Learning:** Parsing network or PMBus protocols (like Linear11 format) often requires dynamic exponent evaluation (`value * 2^exp` or `value / 2^-exp`). On Cortex-M FPUs without native fast branching or dynamic shifting, evaluating `if (exp >= 0)` and executing a division `result /= (1 << -exp)` incurs extreme penalties due to pipeline stalls and ~14 cycle FPU divisions. If the exponent range is tiny (e.g. 5-bit, 32 possible states), a static lookup table is vastly superior.
+**Action:** Always precompute multipliers for narrow-range exponent-based conversions into a static const float array `lut[32]` and index it directly `result = mantissa * lut[exp]` to completely eliminate FPU divisions and conditional branches.

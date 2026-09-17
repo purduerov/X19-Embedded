@@ -20,21 +20,47 @@ __attribute__((weak)) bool mock_sensors_get_tps25990(uint8_t index, float *v_in,
 }
 
 float pmbus_linear11_to_float(uint16_t raw_value) {
-    int16_t exponent = (int16_t)((int8_t)((raw_value >> 11) & 0x1F));
-    if (exponent > 15) {
-        exponent -= 32;
-    }
     int16_t mantissa = (int16_t)(raw_value & 0x07FF);
     if (mantissa > 1023) {
         mantissa -= 2048;
     }
-    float result = (float)mantissa;
-    if (exponent >= 0) {
-        result *= (float)(1 << exponent);
-    } else {
-        result /= (float)(1 << (-exponent));
-    }
-    return result;
+
+    /* Performance optimization: Precompute 2^N multipliers to avoid slow FPU divisions (~14 cycles). */
+    static const float exp_lut[32] = {1.0f,
+                                      2.0f,
+                                      4.0f,
+                                      8.0f,
+                                      16.0f,
+                                      32.0f,
+                                      64.0f,
+                                      128.0f,
+                                      256.0f,
+                                      512.0f,
+                                      1024.0f,
+                                      2048.0f,
+                                      4096.0f,
+                                      8192.0f,
+                                      16384.0f,
+                                      32768.0f,
+                                      0.0000152587890625f,
+                                      0.000030517578125f,
+                                      0.00006103515625f,
+                                      0.0001220703125f,
+                                      0.000244140625f,
+                                      0.00048828125f,
+                                      0.0009765625f,
+                                      0.001953125f,
+                                      0.00390625f,
+                                      0.0078125f,
+                                      0.015625f,
+                                      0.03125f,
+                                      0.0625f,
+                                      0.125f,
+                                      0.25f,
+                                      0.5f};
+
+    uint8_t lut_index = (uint8_t)((raw_value >> 11) & 0x1F);
+    return (float)mantissa * exp_lut[lut_index];
 }
 
 rov_status_t pmbus_brick_init(pmbus_brick_dev_t *dev, uint8_t pmbus_addr) {
