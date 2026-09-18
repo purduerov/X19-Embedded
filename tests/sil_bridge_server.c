@@ -197,6 +197,10 @@ int main(int argc, char **argv) {
                     sil_can_packet_t *pkt = (sil_can_packet_t *)rx_stream_buf;
                     if (pkt->magic == SIL_MAGIC_HEADER || pkt->magic == SIL_MAGIC_HEADER_LEGACY) {
                         mock_can_set_current_node(ROV_NODE_PI_CORE);
+
+                        if (pkt->len > 64) {
+                            pkt->len = 64;
+                        }
                         can_send(pkt->id, pkt->data, pkt->len);
 
                         /* Log C-level execution for real-time verification */
