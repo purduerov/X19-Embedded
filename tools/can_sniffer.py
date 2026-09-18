@@ -7,7 +7,7 @@ Purdue ROV 2026-2027.
 
 import sys
 import time
-import struct
+from struct import Struct
 import argparse
 
 try:
@@ -27,6 +27,12 @@ CAN_ID_USB_HUB_TELEMETRY = 0x310
 
 _last_sec = None
 _last_ts_str = ""
+
+_STRUCT_8H = Struct("<8H")
+_STRUCT_H = Struct("<H")
+_STRUCT_8fB = Struct("<ffffffffB")
+_STRUCT_3fB = Struct("<fffB")
+_STRUCT_POWER = Struct("<HHHHHHHHhH")
 
 
 def _format_timestamp(timestamp: float) -> str:
@@ -59,7 +65,7 @@ def decode_msg(msg: can.Message):
 
     elif msg_id == CAN_ID_THRUSTER_CMD:
         if len(data) == 16:
-            pwms = struct.unpack("<8H", data[:16])
+            pwms = _STRUCT_8H.unpack(data[:16])
             pwm_str = " ".join(f"T{i+1}:{pwms[i]}us" for i in range(8))
             print(f"[{ts}] [CAN 0x100] Thruster PWMs -> {pwm_str}")
         else:
@@ -67,7 +73,7 @@ def decode_msg(msg: can.Message):
 
     elif msg_id == CAN_ID_SOLENOID_CMD:
         if len(data) == 2:
-            mask = struct.unpack("<H", data[:2])[0]
+            mask = _STRUCT_H.unpack(data[:2])[0]
             active = [f"V{i+1}" for i in range(10) if (mask & (1 << i))]
             print(f"[{ts}] [CAN 0x110] Solenoids -> Active: {active if active else 'None'}")
         else:
@@ -75,14 +81,14 @@ def decode_msg(msg: can.Message):
 
     elif msg_id == CAN_ID_NAV_TELEMETRY:
         if len(data) == 33:
-            qw, qx, qy, qz, gx, gy, gz, depth, status = struct.unpack("<ffffffffB", data[:33])
+            qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_8fB.unpack(data[:33])
             print(f"[{ts}] [CAN 0x200] Nav: Depth={depth:5.2f}m | Gyro=({gx:+.2f}, {gy:+.2f}, {gz:+.2f}) | Quat=({qw:.2f}, {qx:.2f}, {qy:.2f}, {qz:.2f}) | Cal={status}")
         else:
             print(f"[{ts}] [CAN 0x200] WARNING: Malformed Nav Telemetry packet (len={len(data)}, expected 33)")
 
     elif msg_id == CAN_ID_ENV_TELEMETRY:
         if len(data) == 13:
-            press, hum, temp, leak = struct.unpack("<fffB", data[:13])
+            press, hum, temp, leak = _STRUCT_3fB.unpack(data[:13])
             leak_str = "LEAK ALERT!" if leak != 0 else "OK"
             print(f"[{ts}] [CAN 0x210] Env: P={press:6.1f}hPa | Hum={hum:4.1f}% | Temp={temp:4.1f}C | Status={leak_str}")
         else:
@@ -90,7 +96,7 @@ def decode_msg(msg: can.Message):
 
     elif msg_id == CAN_ID_POWER_TELEMETRY:
         if len(data) == 20:
-            v_tether, i_tether, v5, i5, b1, b2, b3, b4, temp, status = struct.unpack("<HHHHHHHHhH", data[:20])
+            v_tether, i_tether, v5, i5, b1, b2, b3, b4, temp, status = _STRUCT_POWER.unpack(data[:20])
             print(f"[{ts}] [CAN 0x300] Power: Tether={v_tether/1000.0:4.1f}V @ {i_tether/1000.0:4.1f}A | 5V Rail={v5/1000.0:4.2f}V | Bricks=[{b1}mA, {b2}mA, {b3}mA, {b4}mA] | Temp={temp/10.0:.1f}C")
         else:
             print(f"[{ts}] [CAN 0x300] WARNING: Malformed Power Telemetry packet (len={len(data)}, expected 20)")

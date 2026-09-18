@@ -9,7 +9,12 @@ import argparse
 import sys
 import time
 import struct
+from struct import Struct
 import zlib
+
+_STRUCT_BB = Struct("<BB")
+_STRUCT_BBI_I = Struct("<BBI I")
+_STRUCT_H = Struct("<H")
 
 try:
     import can
@@ -91,7 +96,7 @@ def flash_node(interface: str, target_node: str, bin_path: str):
     print(f"Pinging target {target_node} (Node ID: 0x{node_id:02X})...")
     ping_msg = can.Message(
         arbitration_id=CAN_ID_BOOT_CMD,
-        data=struct.pack("<BB", CMD_PING, node_id),
+        data=_STRUCT_BB.pack(CMD_PING, node_id),
         is_extended_id=False,
         is_fd=True
     )
@@ -103,7 +108,7 @@ def flash_node(interface: str, target_node: str, bin_path: str):
     print(f"Starting Flash: {total_bytes} bytes, CRC32: 0x{crc32_val:08X}...")
     start_msg = can.Message(
         arbitration_id=CAN_ID_BOOT_CMD,
-        data=struct.pack("<BBI I", CMD_START_FLASH, node_id, total_bytes, crc32_val),
+        data=_STRUCT_BBI_I.pack(CMD_START_FLASH, node_id, total_bytes, crc32_val),
         is_extended_id=False,
         is_fd=True
     )
@@ -124,7 +129,7 @@ def flash_node(interface: str, target_node: str, bin_path: str):
         if len(chunk) < chunk_size:
             chunk = chunk.ljust(chunk_size, b'\xFF')
         chunk_crc = crc16_ccitt(chunk)
-        data_frame = struct.pack("<H", i) + chunk + struct.pack("<H", chunk_crc)
+        data_frame = _STRUCT_H.pack(i) + chunk + _STRUCT_H.pack(chunk_crc)
         msg = can.Message(
             arbitration_id=CAN_ID_BOOT_DATA,
             data=data_frame,
@@ -137,7 +142,7 @@ def flash_node(interface: str, target_node: str, bin_path: str):
     print("Firmware transfer complete. Verifying and booting...")
     jump_msg = can.Message(
         arbitration_id=CAN_ID_BOOT_CMD,
-        data=struct.pack("<BB", CMD_JUMP_APP, node_id),
+        data=_STRUCT_BB.pack(CMD_JUMP_APP, node_id),
         is_extended_id=False,
         is_fd=True
     )

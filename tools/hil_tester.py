@@ -8,7 +8,10 @@ Purdue ROV 2026-2027.
 import sys
 import time
 import struct
+from struct import Struct
 import argparse
+
+_STRUCT_8H = Struct("<8H")
 
 try:
     import can
@@ -47,7 +50,7 @@ def run_hil_test(interface: str):
     # Test 2: Thruster PWM Command Injection & Response
     print("\n[TEST 2] Injecting 8-Channel Thruster PWMs (0x100) at 100 Hz...")
     test_pwm = [1550, 1550, 1550, 1550, 1450, 1450, 1450, 1450]
-    payload = struct.pack("<8H", *test_pwm)
+    payload = _STRUCT_8H.pack(*test_pwm)
     msg = can.Message(arbitration_id=0x100, data=payload, is_extended_id=False, is_fd=True)
     task = bus.send_periodic(msg, 0.01)
     time.sleep(0.50)

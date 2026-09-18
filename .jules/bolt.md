@@ -36,3 +36,6 @@
 ## 2026-09-10 - CI Compilation Error with Missing HAL Functions
 **Learning:** The project is configured to be hardware-agnostic for testing. Calling ST HAL functions like `HAL_Init()` or `SystemClock_Config()` directly in `main.c` without proper headers or when compiling for the host architecture causes implicit declaration compilation errors and violates the zero-HAL application layer contract.
 **Action:** Ensure `main.c` strictly only calls `app_main()` in the designated user code block, allowing the BSP abstraction to handle hardware setup.
+## 2026-09-10 - Python Struct Precompilation Optimization
+**Learning:** Repeatedly calling struct.pack and struct.unpack compiles the format string every time, slowing down high-frequency loops in Python.
+**Action:** Precompile struct.Struct format strings to reduce execution overhead in Python CAN data processing.
