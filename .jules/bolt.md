@@ -28,3 +28,11 @@
 ## 2024-05-14 - Fix CI formatting failures
 **Learning:** The CI formatting check will fail if C files are poorly formatted. This includes even minor alignment errors in long parameter lists.
 **Action:** The CI 'Check Formatting' job enforces code formatting across the repository using `clang-format`. If the job fails with 'code should be clang-formatted', identify the specific C/C++ files from the GitHub Actions annotations/logs and run `clang-format-18 -i <file>` on them to resolve the build failure.
+
+## 2026-09-10 - Hoist FPU Division Accumulations Outside Loops
+**Learning:** Accumulating values that require a division in each iteration (like converting power to current per-brick) incurs repetitive FPU division costs (~14 cycles each).
+**Action:** Accumulate the numerator (e.g. power) during the loop, and apply the division or inverse multiplication once outside the loop to calculate the final aggregate (e.g. current).
+
+## 2026-09-10 - CI Compilation Error with Missing HAL Functions
+**Learning:** The project is configured to be hardware-agnostic for testing. Calling ST HAL functions like `HAL_Init()` or `SystemClock_Config()` directly in `main.c` without proper headers or when compiling for the host architecture causes implicit declaration compilation errors and violates the zero-HAL application layer contract.
+**Action:** Ensure `main.c` strictly only calls `app_main()` in the designated user code block, allowing the BSP abstraction to handle hardware setup.
