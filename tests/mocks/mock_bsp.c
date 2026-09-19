@@ -105,6 +105,12 @@ void bsp_pwm_set_us(uint8_t channel, uint16_t pulse_us) {
         if (g_mock_emergency_brake_tripped) {
             g_mock_pwm_us[channel] = ROV_PWM_STOP_US;
         } else {
+            if (pulse_us < ROV_PWM_MIN_US) {
+                pulse_us = ROV_PWM_MIN_US;
+            } else if (pulse_us > ROV_PWM_MAX_US) {
+                pulse_us = ROV_PWM_MAX_US;
+            }
+
             g_mock_pwm_us[channel] = pulse_us;
         }
     }

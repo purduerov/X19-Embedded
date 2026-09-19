@@ -36,6 +36,11 @@ add_executable(test_i2c_recovery test_i2c_recovery.c)
 target_link_libraries(test_i2c_recovery PRIVATE rov_shared)
 add_test(NAME test_i2c_recovery COMMAND test_i2c_recovery)
 
+# Board Support Package (BSP) Tests
+add_executable(test_bsp test_bsp.c)
+target_link_libraries(test_bsp PRIVATE rov_mocks)
+add_test(NAME test_bsp COMMAND test_bsp)
+
 # Peripheral Hardware Driver Unit Tests (Mocked Hardware Registers)
 add_executable(test_driver_bme280 test_driver_bme280.c)
 target_link_libraries(test_driver_bme280 PRIVATE rov_mocks)

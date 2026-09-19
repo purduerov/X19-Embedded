@@ -39,6 +39,10 @@ void test_full_system_simulation(void) {
     mock_can_set_current_node(ROV_NODE_POWER_SLAB);
     node3_app_init();
 
+    /* Complete Node 2's mandatory ESC neutral arming period */
+    mock_bsp_set_time_ms(3000U);
+    node2_app_step();
+
     /* 2. Pilot / Pi Core sends Thruster Command (0x100) commanding 1700 us */
     rov_thruster_cmd_t cmd;
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
