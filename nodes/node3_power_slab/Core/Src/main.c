@@ -8,7 +8,7 @@
 #include "app.h"
 
 int main(void) {
-    /* USER CODE BEGIN 2 */
+
     /* Hand over execution to Application Layer (Src/app.c).
      * CubeMX code generation preserves this call, while all
      * application logic, state machines, and telemetry stay safe in app.c */
@@ -19,8 +19,15 @@ int main(void) {
 
     MX_GPIO_Init();
     MX_I2C1_Init();
+    /*
+     * TODO(node3): I2C2 is used on the NUCLEO-G474RE.
+     * Replace with MX_I3C1_Init() when moving to final STM32C5 hardware.
+     */
     MX_I2C2_Init();
+
     MX_FDCAN1_Init();
+
+    /* USER CODE BEGIN 2 */
     app_main();
     /* USER CODE END 2 */
 
