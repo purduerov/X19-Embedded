@@ -196,6 +196,11 @@ int main(int argc, char **argv) {
                 while (rx_stream_len >= sizeof(sil_can_packet_t)) {
                     sil_can_packet_t *pkt = (sil_can_packet_t *)rx_stream_buf;
                     if (pkt->magic == SIL_MAGIC_HEADER || pkt->magic == SIL_MAGIC_HEADER_LEGACY) {
+                        /* Security: Validate payload length to prevent buffer over-read */
+                        if (pkt->len > 64) {
+                            pkt->len = 64; /* Clamp to maximum CAN FD payload size */
+                        }
+
                         mock_can_set_current_node(ROV_NODE_PI_CORE);
                         can_send(pkt->id, pkt->data, pkt->len);
 
