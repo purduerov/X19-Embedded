@@ -1,30 +1,119 @@
-#MicroX Explorer Configurationfor STM32C542CCTx
+#MicroXplorer Configuration settings
+
 File.Version=6
 KeepUserPlacement=false
+
 Mcu.CPN=STM32C542CCTx
 Mcu.Family=STM32C5
+Mcu.Name=STM32C542CCTx
+Mcu.Package=LQFP48
+
 Mcu.IP0=FDCAN1
 Mcu.IP1=I2C1
 Mcu.IP2=ADC1
 Mcu.IP3=RCC
 Mcu.IP4=SYS
-Mcu.Name=STM32C542CCTx
-Mcu.Package=LQFP48
+
 Mcu.Pin0=PB8-BOOT0
 Mcu.Pin1=PB9
 Mcu.Pin2=PA9
 Mcu.Pin3=PA10
 Mcu.Pin4=PA0
-Mcu.PinsNb=5
+Mcu.Pin5=PB0
+Mcu.Pin6=PB1
+Mcu.Pin7=PB2
+Mcu.Pin8=PB4
+
+Mcu.PinsNb=9
 Mcu.UserConstants=
+
+# -------------------------------------------------
+# PIN ASSIGNMENTS
+# -------------------------------------------------
+
 PB8-BOOT0.Signal=FDCAN1_RX
 PB9.Signal=FDCAN1_TX
+
 PA9.Signal=I2C1_SCL
 PA10.Signal=I2C1_SDA
+
 PA0.Signal=ADC1_IN1
-RCC.HSEFrequency=24000000
+
+PB0.Signal=GPIO_Output
+PB1.Signal=GPIO_Output
+PB2.Signal=GPIO_Output
+PB4.Signal=GPIO_Output
+
+
+# -------------------------------------------------
+# BRICK ENABLE GPIOs
+# -------------------------------------------------
+
+PB0.GPIOParameters=GPIO_ModeDefaultOutputPP,GPIO_Label,GPIO_Speed,GPIO_PuPd,PinState
+PB0.GPIO_Label=BRICK1_EN
+PB0.GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_PP
+PB0.GPIO_PuPd=GPIO_PULLDOWN
+PB0.GPIO_Speed=GPIO_SPEED_LOW
+PB0.PinState=GPIO_PIN_RESET
+
+PB1.GPIOParameters=GPIO_ModeDefaultOutputPP,GPIO_Label,GPIO_Speed,GPIO_PuPd,PinState
+PB1.GPIO_Label=BRICK2_EN
+PB1.GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_PP
+PB1.GPIO_PuPd=GPIO_PULLDOWN
+PB1.GPIO_Speed=GPIO_SPEED_LOW
+PB1.PinState=GPIO_PIN_RESET
+
+PB2.GPIOParameters=GPIO_ModeDefaultOutputPP,GPIO_Label,GPIO_Speed,GPIO_PuPd,PinState
+PB2.GPIO_Label=BRICK3_EN
+PB2.GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_PP
+PB2.GPIO_PuPd=GPIO_PULLDOWN
+PB2.GPIO_Speed=GPIO_SPEED_LOW
+PB2.PinState=GPIO_PIN_RESET
+
+PB4.GPIOParameters=GPIO_ModeDefaultOutputPP,GPIO_Label,GPIO_Speed,GPIO_PuPd,PinState
+PB4.GPIO_Label=BRICK4_EN
+PB4.GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_PP
+PB4.GPIO_PuPd=GPIO_PULLDOWN
+PB4.GPIO_Speed=GPIO_SPEED_LOW
+PB4.PinState=GPIO_PIN_RESET
+
+
+# -------------------------------------------------
+# CLOCK CONFIGURATION
+# 24 MHz external HSE -> PLL -> 144 MHz SYSCLK
+# -------------------------------------------------
+
+RCC.HSE_VALUE=24000000
 RCC.SYSCLKSource=RCC_SYSCLKSOURCE_PLLCLK
+
 RCC.PLLM=2
 RCC.PLLN=24
 RCC.PLLR=2
 
+RCC.SYSCLKFreq_VALUE=144000000
+
+
+# -------------------------------------------------
+# I2C1
+# Shared PMBus / sensor / telemetry bus
+# Target: Fast Mode 400 kHz
+# -------------------------------------------------
+
+I2C1.AddressingMode=I2C_ADDRESSINGMODE_7BIT
+I2C1.DualAddressMode=I2C_DUALADDRESS_DISABLE
+I2C1.GeneralCallMode=I2C_GENERALCALL_DISABLE
+I2C1.NoStretchMode=I2C_NOSTRETCH_DISABLE
+
+
+# -------------------------------------------------
+# FDCAN1
+# CAN FD with Bit Rate Switching
+# Target:
+#   Nominal phase = 1 Mbps
+#   Data phase    = 5 Mbps
+# -------------------------------------------------
+
+FDCAN1.FrameFormat=FDCAN_FRAME_FD_BRS
+FDCAN1.Mode=FDCAN_MODE_NORMAL
+FDCAN1.AutoRetransmission=ENABLE
+FDCAN1.ClockDivider=FDCAN_CLOCK_DIV1
