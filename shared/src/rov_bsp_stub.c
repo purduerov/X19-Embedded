@@ -31,13 +31,28 @@ __attribute__((weak)) bool can_send(uint32_t id, const uint8_t *data, uint8_t le
     (void)id;
     (void)data;
     (void)len;
+
     return true;
+}
+
+/**
+ * @brief Weak fallback for safety-critical CAN transmission.
+ *
+ * Hardware targets should override this function with a direct FDCAN
+ * hardware transmission implementation.
+ *
+ * For host/SIL builds, falling back to can_send() preserves the normal
+ * simulated CAN behavior.
+ */
+__attribute__((weak)) bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len) {
+    return can_send(id, data, len);
 }
 
 __attribute__((weak)) bool can_receive(uint32_t *id, uint8_t *data, uint8_t *len) {
     (void)id;
     (void)data;
     (void)len;
+
     return false;
 }
 
@@ -54,6 +69,7 @@ __attribute__((weak)) void bsp_pwm_set_us(uint8_t channel, uint16_t pulse_us) {
 
 __attribute__((weak)) uint16_t bsp_pwm_get_us(uint8_t channel) {
     (void)channel;
+
     return 1500;
 }
 
@@ -67,6 +83,7 @@ __attribute__((weak)) uint16_t bsp_solenoid_get(void) {
 
 __attribute__((weak)) bool bsp_leak_probe_read(uint8_t probe_idx) {
     (void)probe_idx;
+
     return false;
 }
 
