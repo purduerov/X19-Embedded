@@ -72,16 +72,15 @@ void test_node2_esc_arming(void) {
         assert(mock_bsp_get_pwm_us((uint8_t)i) == ROV_PWM_STOP_US);
     }
 
-    /* Complete the mandatory 3000 ms neutral period. */
+    /* At exactly 3000 ms, the ESCs become active and may accept commands. */
     mock_bsp_set_time_ms(3000U);
-    node2_app_step();
-
-    /* A command after arming should now be accepted. */
     mock_can_inject_rx(
         ROV_CAN_ID_THRUSTER_CMD,
         buffer,
         (uint8_t)packed_len);
+    node2_app_step();
 
+    /* The accepted target should begin ramping on the next elapsed step. */
     mock_bsp_set_time_ms(3010U);
     node2_app_step();
 
@@ -163,7 +162,7 @@ void test_node2_heartbeat_timeout_failsafe(void) {
 void test_node2_emergency_break_cutoff(void) {
     setup();
     node2_app_init();
-    complete_esc_arming(); // simulate ESC arming completion
+    complete_esc_arming();
 
     /* Command all thrusters to 1700 us */
     rov_thruster_cmd_t cmd;

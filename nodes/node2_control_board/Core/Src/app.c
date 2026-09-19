@@ -43,7 +43,7 @@ void node2_app_init(void) {
     bsp_init();
     rov_safety_init(&g_safety_state);
 
-    g_esc_state = ESC_STATE_BOOT; // new change - Rex
+    g_esc_state = ESC_STATE_BOOT;
 
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
@@ -51,10 +51,8 @@ void node2_app_init(void) {
         bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
     }
 
-    // new changes here and it will set the arming start time and change the state to arming
     g_esc_arming_start_ms = time_get_ms();
     g_esc_state = ESC_STATE_ARMING;
-    // end
 
     bsp_solenoid_set(0);
 
@@ -68,14 +66,11 @@ void node2_app_init(void) {
 void node2_app_step(void) {
     uint32_t current_time = time_get_ms();
 
-    // new changes here
-    // new if statement to check if ESC is in arming state and if the arming time has elapsed
     if (g_esc_state == ESC_STATE_ARMING && (uint32_t)(current_time - g_esc_arming_start_ms) >= ESC_ARMING_TIME_MS)
     {
         g_esc_state = ESC_STATE_ACTIVE;
         g_last_ramp_time = current_time;
     }
-    // end
 
     /* Process all incoming CAN frames */
     uint32_t rx_id;
@@ -89,7 +84,7 @@ void node2_app_step(void) {
                 /* Instant hardware and software shutdown */
                 rov_safety_trigger_emergency_break(&g_safety_state);
                 bsp_emergency_brake_trip();
-                g_esc_state = ESC_STATE_DISARMED; // this needs to be disarmed bc esc will not accept commands after emergency break
+                g_esc_state = ESC_STATE_DISARMED;
 
                 for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
                     g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
@@ -100,7 +95,7 @@ void node2_app_step(void) {
         } else if (rx_id == ROV_CAN_ID_THRUSTER_CMD) {
             /* Thruster commands are accepted only after ESC arming completes */
             if ((g_esc_state == ESC_STATE_ACTIVE) && (!g_safety_state.emergency_break_active))
-            { // additional conditional
+            {
                 rov_thruster_cmd_t cmd;
                 if (rov_can_unpack_thruster_cmd(rx_data, rx_len, &cmd) == ROV_OK) {
                     rov_safety_feed_heartbeat(&g_safety_state, current_time);
@@ -126,7 +121,7 @@ void node2_app_step(void) {
     }
 
     /* Hold all ESCs at neutral throughout the mandatory arming period */
-    if (g_esc_state == ESC_STATE_ARMING) // need this first
+    if (g_esc_state == ESC_STATE_ARMING)
     {
         for (int i = 0; i < ROV_NUM_THRUSTERS; i++)
         {
@@ -138,7 +133,7 @@ void node2_app_step(void) {
         g_last_ramp_time = current_time;
     }
     /* 1 kHz Slew-Rate Ramping Step (executed every 1 ms or on step) */
-    else if (current_time > g_last_ramp_time) // now turned to else if
+    else if (current_time > g_last_ramp_time)
     {
         uint32_t dt_ms = current_time - g_last_ramp_time;
         g_last_ramp_time = current_time;
