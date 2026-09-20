@@ -93,25 +93,41 @@ void node2_app_step(void) {
                 }
             }
         } else if (rx_id == ROV_CAN_ID_THRUSTER_CMD) {
-            /* Thruster commands are accepted only after ESC arming completes */
-            if ((g_esc_state == ESC_STATE_ACTIVE) && (!g_safety_state.emergency_break_active))
+    /* Thruster commands are accepted only after ESC arming completes */
+    if ((g_esc_state == ESC_STATE_ACTIVE) && (!g_safety_state.emergency_break_active))
+    {
+        rov_thruster_cmd_t cmd;
+
+        if (rov_can_unpack_thruster_cmd(rx_data, rx_len, &cmd) == ROV_OK)
+        {
+            rov_safety_feed_heartbeat(&g_safety_state, current_time);
+
+            for (int i = 0; i < ROV_NUM_THRUSTERS; i++)
             {
-                rov_thruster_cmd_t cmd;
-                if (rov_can_unpack_thruster_cmd(rx_data, rx_len, &cmd) == ROV_OK) {
-                    rov_safety_feed_heartbeat(&g_safety_state, current_time);
-                    for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
-                        g_target_pwms.pwm_us[i] = cmd.pwm_us[i];
-                    }
+                uint16_t target_us = cmd.pwm_us[i];
+
+                if (target_us < 1000U)
+                {
+                    target_us = 1000U;
                 }
-            }
-        } else if (rx_id == ROV_CAN_ID_SOLENOID_CMD) {
-            rov_solenoid_cmd_t sol;
-            if (rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) {
-                bsp_solenoid_set(sol.solenoid_mask);
+                else if (target_us > 2000U)
+                {
+                    target_us = 2000U;
+                }
+
+                g_target_pwms.pwm_us[i] = target_us;
             }
         }
+    }   
+} else if (rx_id == ROV_CAN_ID_SOLENOID_CMD) 
+    {
+        rov_solenoid_cmd_t sol;
+        if (rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) 
+        {
+            bsp_solenoid_set(sol.solenoid_mask);
+        }
     }
-
+    }
     /* Check heartbeat timeout: if no thruster command in 100 ms, drop to neutral */
     bool heartbeat_lost = rov_safety_is_heartbeat_lost(&g_safety_state, current_time);
     if (heartbeat_lost || g_safety_state.emergency_break_active) {
@@ -130,6 +146,16 @@ void node2_app_step(void) {
             bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
         }
 
+        g_last_ramp_time = current_time;
+    }
+    else if (g_esc_state == ESC_STATE_DISARMED)
+    {
+        for (int i = 0; i < ROV_NUM_THRUSTERS; i++)
+        {
+            g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
+        }
         g_last_ramp_time = current_time;
     }
     /* 1 kHz Slew-Rate Ramping Step (executed every 1 ms or on step) */
