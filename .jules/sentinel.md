@@ -22,3 +22,8 @@
 **Vulnerability:** The `sil_bridge_server.c` extracted the `len` field from an incoming, untrusted TCP packet (`sil_can_packet_t`) and passed it directly to `can_send()` and `memcpy()` without validating it against the protocol maximum (64 bytes).
 **Learning:** Network stream parsing logic correctly validated the struct size but implicitly trusted the nested `len` field populated by the client, creating a critical buffer over-read risk on the C side.
 **Prevention:** Always validate extracted length fields against protocol bounds (e.g., `<= 64`) before using them in function calls or memory operations when parsing untrusted binary network streams.
+
+## 2026-09-21 - Python SIL Unpack Buffer Over-read Denial of Service
+**Vulnerability:** Python scripts parsing binary SIL network payloads (`tests/sil_companion_bridge/sil_protocol.py`) lacked exact payload length validations prior to using `struct.unpack` array slicing.
+**Learning:** Network protocols extracted lengths from an untrusted SIL CAN header and used it directly in a slice without constraint checking (`data[:length]`), exposing the system to exceptions/crash if the length exceeds the expected standard size.
+**Prevention:** Python scripts parsing binary CAN/network payloads must explicitly validate the length field against the maximum allowable size (e.g. 64 bytes) to safely handle and reject malicious packets without crashing the runtime.

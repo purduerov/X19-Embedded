@@ -135,4 +135,6 @@ def unpack_sil_can_frame(chunk: bytes) -> Tuple[int, bytes]:
     magic, can_id, length, data = _STRUCT_SIL_PACKET.unpack(chunk[:SIL_PACKET_SIZE])
     if magic != SIL_MAGIC_HEADER and magic != SIL_MAGIC_HEADER_LEGACY:
         raise ValueError(f"Invalid magic header: {hex(magic)}")
+    if length > 64:
+        raise ValueError(f"Invalid payload length: {length} (exceeds 64)")
     return can_id, data[:length]
