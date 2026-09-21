@@ -17,6 +17,7 @@
 #include "rov_parameters.h"
 #include "rov_pwm_ramp.h"
 #include "rov_safety.h"
+#include "rov_timesync.h"
 #include <string.h>
 
 #define ESC_ARMING_TIME_MS 3000U
@@ -27,6 +28,7 @@ static esc_state_t g_esc_state = ESC_STATE_BOOT;
 static uint32_t g_esc_arming_start_ms = 0U;
 
 static rov_safety_state_t g_safety_state;
+static rov_timesync_state_t g_timesync;
 static rov_thruster_cmd_t g_target_pwms;
 static rov_thruster_cmd_t g_active_pwms;
 static bmi270_dev_t g_imu_dev;
@@ -37,6 +39,7 @@ static uint32_t g_last_ramp_time = 0;
 void node2_app_init(void) {
     bsp_init();
     rov_safety_init(&g_safety_state);
+    rov_timesync_init(&g_timesync);
 
     g_esc_state = ESC_STATE_BOOT;
 
@@ -112,8 +115,34 @@ void node2_app_step(void) {
             if (rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) {
                 bsp_solenoid_set(sol.solenoid_mask);
             }
+        } else if (rx_id == ROV_CAN_ID_TIME_SYNC_MASTER) {
+            rov_time_sync_master_t sync_msg;
+            if (rov_can_unpack_time_sync_master(rx_data, rx_len, &sync_msg) == ROV_OK) {
+                rov_timesync_process_master(&g_timesync, &sync_msg, time_get_us());
+            }
+        } else if (rx_id == ROV_CAN_ID_TIME_SYNC_REQ) {
+            rov_time_sync_req_t req;
+            if (rov_can_unpack_time_sync_req(rx_data, rx_len, &req) == ROV_OK) {
+                if (req.target_node_id == ROV_NODE_CONTROL_BOARD || req.target_node_id == ROV_NODE_BROADCAST) {
+                    uint64_t rx_time_us = time_get_us();
+                    rov_time_sync_resp_t resp;
+                    resp.responder_node_id = ROV_NODE_CONTROL_BOARD;
+                    resp.seq = req.seq;
+                    resp.reserved = 0;
+                    resp.status = g_timesync.synchronized ? 1 : 0;
+                    resp.t1_us = req.t1_us;
+                    resp.t2_us = rx_time_us;
+                    resp.t3_us = time_get_us();
+                    uint8_t resp_buf[64];
+                    size_t resp_len = 0;
+                    if (rov_can_pack_time_sync_resp(&resp, resp_buf, sizeof(resp_buf), &resp_len) == ROV_OK) {
+                        can_send(ROV_CAN_ID_TIME_SYNC_RESP, resp_buf, (uint8_t)resp_len);
+                    }
+                }
+            }
         }
     }
+
     /* Check heartbeat timeout: if no thruster command in 100 ms, drop to neutral */
     bool heartbeat_lost = rov_safety_is_heartbeat_lost(&g_safety_state, current_time);
     if (heartbeat_lost || g_safety_state.emergency_break_active) {
@@ -167,6 +196,7 @@ void node2_app_step(void) {
         ms5837_read_pressure_depth(&g_depth_dev, 1000.0f);
 
         rov_nav_telemetry_t nav;
+        nav.timestamp_us = rov_timesync_get_time_us(&g_timesync, time_get_us());
         nav.q_w = g_imu_dev.q_w;
         nav.q_x = g_imu_dev.q_x;
         nav.q_y = g_imu_dev.q_y;

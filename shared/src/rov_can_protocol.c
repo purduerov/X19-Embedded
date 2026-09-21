@@ -8,6 +8,66 @@
 #include "rov_parameters.h"
 #include <string.h>
 
+rov_status_t rov_can_pack_time_sync_master(const rov_time_sync_master_t *sync, uint8_t *buffer, size_t max_len,
+                                           size_t *packed_len) {
+    if (!sync || !buffer || !packed_len)
+        return ROV_ERR_INVALID_ARG;
+    if (max_len < sizeof(rov_time_sync_master_t))
+        return ROV_ERR_INVALID_ARG;
+    memcpy(buffer, sync, sizeof(rov_time_sync_master_t));
+    *packed_len = sizeof(rov_time_sync_master_t);
+    return ROV_OK;
+}
+
+rov_status_t rov_can_unpack_time_sync_master(const uint8_t *buffer, size_t len, rov_time_sync_master_t *sync) {
+    if (!buffer || !sync)
+        return ROV_ERR_INVALID_ARG;
+    if (len < sizeof(rov_time_sync_master_t))
+        return ROV_ERR_INVALID_ARG;
+    memcpy(sync, buffer, sizeof(rov_time_sync_master_t));
+    return ROV_OK;
+}
+
+rov_status_t rov_can_pack_time_sync_req(const rov_time_sync_req_t *req, uint8_t *buffer, size_t max_len,
+                                        size_t *packed_len) {
+    if (!req || !buffer || !packed_len)
+        return ROV_ERR_INVALID_ARG;
+    if (max_len < sizeof(rov_time_sync_req_t))
+        return ROV_ERR_INVALID_ARG;
+    memcpy(buffer, req, sizeof(rov_time_sync_req_t));
+    *packed_len = sizeof(rov_time_sync_req_t);
+    return ROV_OK;
+}
+
+rov_status_t rov_can_unpack_time_sync_req(const uint8_t *buffer, size_t len, rov_time_sync_req_t *req) {
+    if (!buffer || !req)
+        return ROV_ERR_INVALID_ARG;
+    if (len < sizeof(rov_time_sync_req_t))
+        return ROV_ERR_INVALID_ARG;
+    memcpy(req, buffer, sizeof(rov_time_sync_req_t));
+    return ROV_OK;
+}
+
+rov_status_t rov_can_pack_time_sync_resp(const rov_time_sync_resp_t *resp, uint8_t *buffer, size_t max_len,
+                                         size_t *packed_len) {
+    if (!resp || !buffer || !packed_len)
+        return ROV_ERR_INVALID_ARG;
+    if (max_len < sizeof(rov_time_sync_resp_t))
+        return ROV_ERR_INVALID_ARG;
+    memcpy(buffer, resp, sizeof(rov_time_sync_resp_t));
+    *packed_len = sizeof(rov_time_sync_resp_t);
+    return ROV_OK;
+}
+
+rov_status_t rov_can_unpack_time_sync_resp(const uint8_t *buffer, size_t len, rov_time_sync_resp_t *resp) {
+    if (!buffer || !resp)
+        return ROV_ERR_INVALID_ARG;
+    if (len < sizeof(rov_time_sync_resp_t))
+        return ROV_ERR_INVALID_ARG;
+    memcpy(resp, buffer, sizeof(rov_time_sync_resp_t));
+    return ROV_OK;
+}
+
 rov_status_t rov_can_pack_thruster_cmd(const rov_thruster_cmd_t *cmd, uint8_t *buffer, size_t max_len,
                                        size_t *packed_len) {
     if (!cmd || !buffer || !packed_len)
@@ -176,4 +236,38 @@ rov_status_t x19_can_pack_power_telemetry(const rov_power_telemetry_t *power, ui
 
 rov_status_t x19_can_unpack_power_telemetry(const uint8_t *buffer, size_t len, rov_power_telemetry_t *power) {
     return rov_can_unpack_power_telemetry(buffer, len, power);
+}
+
+#undef x19_can_pack_time_sync_master
+#undef x19_can_unpack_time_sync_master
+#undef x19_can_pack_time_sync_req
+#undef x19_can_unpack_time_sync_req
+#undef x19_can_pack_time_sync_resp
+#undef x19_can_unpack_time_sync_resp
+
+rov_status_t x19_can_pack_time_sync_master(const rov_time_sync_master_t *sync, uint8_t *buffer, size_t max_len,
+                                           size_t *packed_len) {
+    return rov_can_pack_time_sync_master(sync, buffer, max_len, packed_len);
+}
+
+rov_status_t x19_can_unpack_time_sync_master(const uint8_t *buffer, size_t len, rov_time_sync_master_t *sync) {
+    return rov_can_unpack_time_sync_master(buffer, len, sync);
+}
+
+rov_status_t x19_can_pack_time_sync_req(const rov_time_sync_req_t *req, uint8_t *buffer, size_t max_len,
+                                        size_t *packed_len) {
+    return rov_can_pack_time_sync_req(req, buffer, max_len, packed_len);
+}
+
+rov_status_t x19_can_unpack_time_sync_req(const uint8_t *buffer, size_t len, rov_time_sync_req_t *req) {
+    return rov_can_unpack_time_sync_req(buffer, len, req);
+}
+
+rov_status_t x19_can_pack_time_sync_resp(const rov_time_sync_resp_t *resp, uint8_t *buffer, size_t max_len,
+                                         size_t *packed_len) {
+    return rov_can_pack_time_sync_resp(resp, buffer, max_len, packed_len);
+}
+
+rov_status_t x19_can_unpack_time_sync_resp(const uint8_t *buffer, size_t len, rov_time_sync_resp_t *resp) {
+    return rov_can_unpack_time_sync_resp(buffer, len, resp);
 }

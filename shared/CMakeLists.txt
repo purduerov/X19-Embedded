@@ -3,6 +3,7 @@ add_library(rov_shared STATIC
     src/rov_pwm_ramp.c
     src/rov_i2c_recovery.c
     src/rov_safety.c
+    src/rov_timesync.c
     src/rov_bsp_stub.c
 )
 

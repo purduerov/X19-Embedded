@@ -72,9 +72,47 @@ typedef struct __attribute__((packed)) {
 } imu_data_t;
 
 /**
- * @brief 100 Hz Navigation Telemetry Payload from Control Board (Packed, 33 bytes).
+ * @brief Master Clock Synchronization Broadcast Payload (Packed, 16 bytes).
+ * Broadcast at 10 Hz on ROV_CAN_ID_TIME_SYNC_MASTER (0x010).
  */
 typedef struct __attribute__((packed)) {
+    uint64_t master_time_us; /**< Master epoch/monotonic time in microseconds */
+    uint32_t sync_seq;       /**< Monotonically incrementing sequence number */
+    uint8_t flags;           /**< Bit 0: Topside NTP locked, Bit 1: Sync valid */
+    uint8_t reserved[3];     /**< Future expansion / alignment */
+} rov_time_sync_master_t;
+
+/**
+ * @brief Two-Way Delay / Latency Measurement Request (Packed, 16 bytes).
+ * Sent on ROV_CAN_ID_TIME_SYNC_REQ (0x011).
+ */
+typedef struct __attribute__((packed)) {
+    uint8_t target_node_id;  /**< Target node ID (ROV_NODE_CONTROL_BOARD, etc.) */
+    uint8_t seq;             /**< Request sequence number */
+    uint16_t reserved;       /**< 16-bit alignment */
+    uint32_t flags;          /**< Request flags */
+    uint64_t t1_us;          /**< Requester transmit timestamp in microseconds */
+} rov_time_sync_req_t;
+
+/**
+ * @brief Two-Way Delay / Latency Measurement Response (Packed, 32 bytes).
+ * Sent on ROV_CAN_ID_TIME_SYNC_RESP (0x012).
+ */
+typedef struct __attribute__((packed)) {
+    uint8_t responder_node_id; /**< Node responding to delay request */
+    uint8_t seq;               /**< Echoed sequence number from request */
+    uint16_t reserved;         /**< 16-bit alignment */
+    uint32_t status;           /**< Node status flags */
+    uint64_t t1_us;            /**< Echoed requester transmit timestamp */
+    uint64_t t2_us;            /**< Responder local receive timestamp */
+    uint64_t t3_us;            /**< Responder local reply transmit timestamp */
+} rov_time_sync_resp_t;
+
+/**
+ * @brief 100 Hz Navigation Telemetry Payload from Control Board (Packed, 41 bytes).
+ */
+typedef struct __attribute__((packed)) {
+    uint64_t timestamp_us; /**< Synchronized vehicle microsecond timestamp */
     float q_w;          /**< Orientation Quaternion W */
     float q_x;          /**< Orientation Quaternion X */
     float q_y;          /**< Orientation Quaternion Y */
@@ -159,6 +197,9 @@ typedef rov_node_id_t x19_node_id_t;
 
 typedef rov_thruster_cmd_t x19_thruster_cmd_t;
 typedef rov_solenoid_cmd_t x19_solenoid_cmd_t;
+typedef rov_time_sync_master_t x19_time_sync_master_t;
+typedef rov_time_sync_req_t x19_time_sync_req_t;
+typedef rov_time_sync_resp_t x19_time_sync_resp_t;
 typedef rov_nav_telemetry_t x19_nav_telemetry_t;
 typedef rov_env_telemetry_t x19_env_telemetry_t;
 typedef rov_power_telemetry_t x19_power_telemetry_t;

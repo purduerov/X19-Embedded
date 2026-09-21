@@ -73,6 +73,15 @@ extern "C" {
 #define ROV_I2C_RECOVERY_TIMEOUT_MS (10)
 
 /* ========================================================================== */
+/* TIME SYNCHRONIZATION & LATENCY CALCULATION PARAMETERS                      */
+/* ========================================================================== */
+#define ROV_TIME_SYNC_MASTER_FREQ_HZ       (10)    /* Master time broadcast rate (10 Hz) */
+#define ROV_TIME_SYNC_TIMEOUT_MS           (1000)  /* Timeout before dropping sync lock (1000 ms) */
+#define ROV_TIME_SYNC_DEFAULT_DELAY_US     (45)    /* Nominal CAN FD 1M/5M bus delay (45 us) */
+#define ROV_TIME_SYNC_MAX_SLEW_US_PER_STEP (50)    /* Maximum slew adjustment per step (50 us) */
+#define ROV_TIME_SYNC_MAX_JITTER_US        (250)   /* Maximum tolerable CAN FD jitter */
+
+/* ========================================================================== */
 /* FLASH MEMORY & BOOTLOADER PARTITIONS                                       */
 /* ========================================================================== */
 #define ROV_FLASH_BASE_ADDR             (0x08000000)
@@ -82,6 +91,11 @@ extern "C" {
 /* ========================================================================== */
 /* BACKWARD COMPATIBILITY ALIASES (X19 Vehicle Profile)                       */
 /* ========================================================================== */
+#define X19_TIME_SYNC_MASTER_FREQ_HZ       ROV_TIME_SYNC_MASTER_FREQ_HZ
+#define X19_TIME_SYNC_TIMEOUT_MS           ROV_TIME_SYNC_TIMEOUT_MS
+#define X19_TIME_SYNC_DEFAULT_DELAY_US     ROV_TIME_SYNC_DEFAULT_DELAY_US
+#define X19_TIME_SYNC_MAX_SLEW_US_PER_STEP ROV_TIME_SYNC_MAX_SLEW_US_PER_STEP
+#define X19_TIME_SYNC_MAX_JITTER_US        ROV_TIME_SYNC_MAX_JITTER_US
 #define X19_TETHER_NOMINAL_VOLTAGE_V    ROV_TETHER_NOMINAL_VOLTAGE_V
 #define X19_TETHER_MAX_CURRENT_A        ROV_TETHER_MAX_CURRENT_A
 #define X19_TETHER_MAX_POWER_W          ROV_TETHER_MAX_POWER_W
