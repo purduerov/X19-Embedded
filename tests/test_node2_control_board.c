@@ -16,9 +16,16 @@
 
 static void setup(void) {
     mock_bsp_reset();
+    mock_bsp_set_auto_advance_delay(false);
     mock_can_reset();
     mock_sensors_reset();
     mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+}
+
+static void complete_esc_arming(void)  // this will simulate the ESC arming process by advancing time and calling node2_app_step
+{
+    mock_bsp_set_time_ms(3000U);
+    node2_app_step();
 }
 
 void test_node2_boot_state(void) {
@@ -34,9 +41,58 @@ void test_node2_boot_state(void) {
     printf("[PASS] test_node2_boot_state\n");
 }
 
+void test_node2_esc_arming(void) {
+    setup();
+    node2_app_init();
+
+    rov_thruster_cmd_t cmd;
+    for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+        cmd.pwm_us[i] = 1800U;
+    }
+
+    uint8_t buffer[64];
+    size_t packed_len = 0;
+
+    assert(rov_can_pack_thruster_cmd(
+        &cmd,
+        buffer,
+        sizeof(buffer),
+        &packed_len) == ROV_OK);
+
+    /* Thruster commands must be ignored before arming completes. */
+    mock_bsp_set_time_ms(2999U);
+    mock_can_inject_rx(
+        ROV_CAN_ID_THRUSTER_CMD,
+        buffer,
+        (uint8_t)packed_len);
+
+    node2_app_step();
+
+    for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+        assert(mock_bsp_get_pwm_us((uint8_t)i) == ROV_PWM_STOP_US);
+    }
+
+    /* At exactly 3000 ms, the ESCs become active and may accept commands. */
+    mock_bsp_set_time_ms(3000U);
+    mock_can_inject_rx(
+        ROV_CAN_ID_THRUSTER_CMD,
+        buffer,
+        (uint8_t)packed_len);
+    node2_app_step();
+
+    /* The accepted target should begin ramping on the next elapsed step. */
+    mock_bsp_set_time_ms(3010U);
+    node2_app_step();
+
+    assert(mock_bsp_get_pwm_us(0) > ROV_PWM_STOP_US);
+
+    printf("[PASS] test_node2_esc_arming\n");
+}
+
 void test_node2_thruster_ramping(void) {
     setup();
     node2_app_init();
+    complete_esc_arming(); // simulate ESC arming completion
 
     /* Command Thruster 0 to 1800 us */
     rov_thruster_cmd_t cmd;
@@ -70,6 +126,7 @@ void test_node2_thruster_ramping(void) {
 void test_node2_heartbeat_timeout_failsafe(void) {
     setup();
     node2_app_init();
+    complete_esc_arming(); // simulate ESC arming completion
 
     /* Ramp thruster 0 up to 1600 us */
     rov_thruster_cmd_t cmd;
@@ -105,6 +162,7 @@ void test_node2_heartbeat_timeout_failsafe(void) {
 void test_node2_emergency_break_cutoff(void) {
     setup();
     node2_app_init();
+    complete_esc_arming();
 
     /* Command all thrusters to 1700 us */
     rov_thruster_cmd_t cmd;
@@ -216,6 +274,7 @@ void test_node2_nav_telemetry_stream(void) {
 int main(void) {
     printf("Running Node 2 (Control Board) SIL Unit Tests...\n");
     test_node2_boot_state();
+    test_node2_esc_arming();
     test_node2_thruster_ramping();
     test_node2_heartbeat_timeout_failsafe();
     test_node2_emergency_break_cutoff();

@@ -19,6 +19,13 @@
 #include "rov_safety.h"
 #include <string.h>
 
+#define ESC_ARMING_TIME_MS 3000U
+
+typedef enum { ESC_STATE_BOOT, ESC_STATE_ARMING, ESC_STATE_ACTIVE, ESC_STATE_DISARMED } esc_state_t;
+
+static esc_state_t g_esc_state = ESC_STATE_BOOT;
+static uint32_t g_esc_arming_start_ms = 0U;
+
 static rov_safety_state_t g_safety_state;
 static rov_thruster_cmd_t g_target_pwms;
 static rov_thruster_cmd_t g_active_pwms;
@@ -31,11 +38,17 @@ void node2_app_init(void) {
     bsp_init();
     rov_safety_init(&g_safety_state);
 
+    g_esc_state = ESC_STATE_BOOT;
+
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
         g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
         bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
     }
+
+    g_esc_arming_start_ms = time_get_ms();
+    g_esc_state = ESC_STATE_ARMING;
+
     bsp_solenoid_set(0);
 
     bmi270_init(&g_imu_dev);
@@ -47,6 +60,11 @@ void node2_app_init(void) {
 
 void node2_app_step(void) {
     uint32_t current_time = time_get_ms();
+
+    if (g_esc_state == ESC_STATE_ARMING && (uint32_t)(current_time - g_esc_arming_start_ms) >= ESC_ARMING_TIME_MS) {
+        g_esc_state = ESC_STATE_ACTIVE;
+        g_last_ramp_time = current_time;
+    }
 
     /* Process all incoming CAN frames */
     uint32_t rx_id;
@@ -60,6 +78,8 @@ void node2_app_step(void) {
                 /* Instant hardware and software shutdown */
                 rov_safety_trigger_emergency_break(&g_safety_state);
                 bsp_emergency_brake_trip();
+                g_esc_state = ESC_STATE_DISARMED;
+
                 for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
                     g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
                     g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
@@ -67,13 +87,23 @@ void node2_app_step(void) {
                 }
             }
         } else if (rx_id == ROV_CAN_ID_THRUSTER_CMD) {
-            /* Only accept thruster commands if emergency break is not active */
-            if (!g_safety_state.emergency_break_active) {
+            /* Thruster commands are accepted only after ESC arming completes */
+            if ((g_esc_state == ESC_STATE_ACTIVE) && (!g_safety_state.emergency_break_active)) {
                 rov_thruster_cmd_t cmd;
+
                 if (rov_can_unpack_thruster_cmd(rx_data, rx_len, &cmd) == ROV_OK) {
                     rov_safety_feed_heartbeat(&g_safety_state, current_time);
+
                     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
-                        g_target_pwms.pwm_us[i] = cmd.pwm_us[i];
+                        uint16_t target_us = cmd.pwm_us[i];
+
+                        if (target_us < 1000U) {
+                            target_us = 1000U;
+                        } else if (target_us > 2000U) {
+                            target_us = 2000U;
+                        }
+
+                        g_target_pwms.pwm_us[i] = target_us;
                     }
                 }
             }
@@ -84,7 +114,6 @@ void node2_app_step(void) {
             }
         }
     }
-
     /* Check heartbeat timeout: if no thruster command in 100 ms, drop to neutral */
     bool heartbeat_lost = rov_safety_is_heartbeat_lost(&g_safety_state, current_time);
     if (heartbeat_lost || g_safety_state.emergency_break_active) {
@@ -93,8 +122,25 @@ void node2_app_step(void) {
         }
     }
 
+    /* Hold all ESCs at neutral throughout the mandatory arming period */
+    if (g_esc_state == ESC_STATE_ARMING) {
+        for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+            g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
+        }
+
+        g_last_ramp_time = current_time;
+    } else if (g_esc_state == ESC_STATE_DISARMED) {
+        for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+            g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
+        }
+        g_last_ramp_time = current_time;
+    }
     /* 1 kHz Slew-Rate Ramping Step (executed every 1 ms or on step) */
-    if (current_time > g_last_ramp_time) {
+    else if (current_time > g_last_ramp_time) {
         uint32_t dt_ms = current_time - g_last_ramp_time;
         g_last_ramp_time = current_time;
 
