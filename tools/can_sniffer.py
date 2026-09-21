@@ -18,6 +18,9 @@ except ImportError:
 
 CAN_ID_EMERGENCY_BREAK   = 0x001
 CAN_ID_EFUSE_FAULT_ALERT = 0x005
+CAN_ID_TIME_SYNC_MASTER  = 0x010
+CAN_ID_TIME_SYNC_REQ     = 0x011
+CAN_ID_TIME_SYNC_RESP    = 0x012
 CAN_ID_THRUSTER_CMD      = 0x100
 CAN_ID_SOLENOID_CMD      = 0x110
 CAN_ID_NAV_TELEMETRY     = 0x200
@@ -30,11 +33,15 @@ CAN_ID_USB_HUB_TELEMETRY = 0x310
 # of format string parsing (or internal LRU cache lookups) on every function call.
 # This yields a small but measurable CPU reduction (5-10%) in high-frequency
 # (100Hz+) CAN telemetry processing loops.
-_STRUCT_8H = struct.Struct("<8H")
-_STRUCT_H = struct.Struct("<H")
-_STRUCT_NAV = struct.Struct("<ffffffffB")
-_STRUCT_ENV = struct.Struct("<fffB")
-_STRUCT_POWER = struct.Struct("<HHHHHHHHhH")
+_STRUCT_TIME_SYNC_MASTER = struct.Struct("<QIB3x")
+_STRUCT_TIME_SYNC_REQ    = struct.Struct("<BBHIQ")
+_STRUCT_TIME_SYNC_RESP   = struct.Struct("<BBHIQQQ")
+_STRUCT_8H               = struct.Struct("<8H")
+_STRUCT_H                = struct.Struct("<H")
+_STRUCT_NAV_TS           = struct.Struct("<QffffffffB")
+_STRUCT_NAV_LEGACY       = struct.Struct("<ffffffffB")
+_STRUCT_ENV              = struct.Struct("<fffB")
+_STRUCT_POWER            = struct.Struct("<HHHHHHHHhH")
 
 _last_sec = None
 _last_ts_str = ""
@@ -68,6 +75,27 @@ def decode_msg(msg: can.Message):
         else:
             print(f"[{ts}] [CAN 0x005] WARNING: Malformed EFUSE FAULT ALERT packet (len={len(data)})")
 
+    elif msg_id == CAN_ID_TIME_SYNC_MASTER:
+        if len(data) >= 16:
+            master_us, seq, flags = _STRUCT_TIME_SYNC_MASTER.unpack(data[:16])
+            print(f"[{ts}] [CAN 0x010] TimeSync Master -> MasterTime={master_us}us | Seq={seq} | Flags=0x{flags:02X}")
+        else:
+            print(f"[{ts}] [CAN 0x010] WARNING: Malformed TimeSync Master packet (len={len(data)}, expected 16)")
+
+    elif msg_id == CAN_ID_TIME_SYNC_REQ:
+        if len(data) >= 16:
+            target, seq, _, flags, t1 = _STRUCT_TIME_SYNC_REQ.unpack(data[:16])
+            print(f"[{ts}] [CAN 0x011] TimeSync Req -> Target Node {target} | Seq={seq} | t1={t1}us")
+        else:
+            print(f"[{ts}] [CAN 0x011] WARNING: Malformed TimeSync Req packet (len={len(data)}, expected 16)")
+
+    elif msg_id == CAN_ID_TIME_SYNC_RESP:
+        if len(data) >= 32:
+            resp_node, seq, _, status, t1, t2, t3 = _STRUCT_TIME_SYNC_RESP.unpack(data[:32])
+            print(f"[{ts}] [CAN 0x012] TimeSync Resp -> Node {resp_node} | Seq={seq} | t1={t1}us | t2={t2}us | t3={t3}us")
+        else:
+            print(f"[{ts}] [CAN 0x012] WARNING: Malformed TimeSync Resp packet (len={len(data)}, expected 32)")
+
     elif msg_id == CAN_ID_THRUSTER_CMD:
         if len(data) == 16:
             pwms = _STRUCT_8H.unpack(data[:16])
@@ -85,11 +113,14 @@ def decode_msg(msg: can.Message):
             print(f"[{ts}] [CAN 0x110] WARNING: Malformed Solenoid CMD packet (len={len(data)}, expected 2)")
 
     elif msg_id == CAN_ID_NAV_TELEMETRY:
-        if len(data) == 33:
-            qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_NAV.unpack(data[:33])
-            print(f"[{ts}] [CAN 0x200] Nav: Depth={depth:5.2f}m | Gyro=({gx:+.2f}, {gy:+.2f}, {gz:+.2f}) | Quat=({qw:.2f}, {qx:.2f}, {qy:.2f}, {qz:.2f}) | Cal={status}")
+        if len(data) == 41:
+            ts_us, qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_NAV_TS.unpack(data[:41])
+            print(f"[{ts}] [CAN 0x200] Nav [ts={ts_us}us]: Depth={depth:5.2f}m | Gyro=({gx:+.2f}, {gy:+.2f}, {gz:+.2f}) | Quat=({qw:.2f}, {qx:.2f}, {qy:.2f}, {qz:.2f}) | Cal={status}")
+        elif len(data) == 33:
+            qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_NAV_LEGACY.unpack(data[:33])
+            print(f"[{ts}] [CAN 0x200] Nav (Legacy 33B): Depth={depth:5.2f}m | Gyro=({gx:+.2f}, {gy:+.2f}, {gz:+.2f}) | Quat=({qw:.2f}, {qx:.2f}, {qy:.2f}, {qz:.2f}) | Cal={status}")
         else:
-            print(f"[{ts}] [CAN 0x200] WARNING: Malformed Nav Telemetry packet (len={len(data)}, expected 33)")
+            print(f"[{ts}] [CAN 0x200] WARNING: Malformed Nav Telemetry packet (len={len(data)}, expected 41 or 33)")
 
     elif msg_id == CAN_ID_ENV_TELEMETRY:
         if len(data) == 13:

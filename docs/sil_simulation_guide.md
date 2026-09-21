@@ -101,3 +101,56 @@ Dashboard features:
 - **10-Channel Pneumatics**: Toggle switches for all 5 double-acting SMC solenoid valves.
 - **Emergency Break Injection**: Priority 0 `0x001` trigger to test instant motor shutdown and hardware latch.
 - **Live Graphs & Telemetry**: 100 Hz depth and quaternion attitude tracking, BME280 leak detection, and 4x PMBus converter metrics.
+
+---
+
+## 4. 6-DOF Hydrodynamic & Electrical Plant Simulation
+
+The SIL engine includes a physics plant model ([`tests/mocks/mock_physics.c`](../tests/mocks/mock_physics.c) / [`tests/mocks/mock_physics.h`](../tests/mocks/mock_physics.h)) that simulates closed-loop ROV dynamics:
+
+- **6-DOF Rigid-Body Dynamics**: Linear velocities ($u, v, w$), world coordinates ($x, y, z$), orientation quaternions ($q_w, q_x, q_y, q_z$), and body angular rates ($p, q, r$).
+- **Hydrodynamic Forces**:
+  - Restoring forces from vehicle mass (18.5 kg) and net positive buoyancy (+2.1 N upward).
+  - Non-linear quadratic and linear hydrodynamic drag in surge, sway, and heave.
+  - Thruster force allocation matrix for 4 horizontal vectored and 4 vertical thrusters based on T200 PWM-thrust curves.
+- **Electrical & Thermal Plant**:
+  - Thruster electrical current consumption modeling based on commanded PWM.
+  - Current distribution across the 4x 12V 300W DC-DC converter bricks.
+  - Converter temperature modeling and 25A eFuse overcurrent trip protection.
+  - Automatic injection into synthetic hardware sensor mocks (`MS5837` hydrostatic pressure and `TPS25990`/`INA226`/`INA237` electrical monitors).
+
+---
+
+## 5. Headless Fast-Forward Mode
+
+For automated continuous integration, long-term stability runs, and rapid batch simulation, `sil_bridge_server` supports running without real-time delays or TCP sockets:
+
+```powershell
+# Run 10,000 cycles (100 seconds of virtual simulation time) at maximum CPU speed
+./build/tests/sil_bridge_server --fast-forward 10000
+```
+
+---
+
+## 6. Comprehensive CTest Suite (25 Test Suites)
+
+The SIL test suite comprises 25 suites testing hardware drivers, communications, safety invariants, plant physics, and multi-node integration:
+
+| # | Test Target | Description |
+|---|---|---|
+| 1 | `test_can_protocol` | CAN FD frame serialization, unpacking, and validation |
+| 2 | `test_pwm_ramp` | 1 kHz slew-rate limiter and curve shaping |
+| 3 | `test_safety` | Watchdog timeouts and emergency break triggers |
+| 4 | `test_i2c_recovery` | 9-clock bit-bang I2C bus clear routine |
+| 5 | `test_timesync` | Distributed vehicle clock synchronization and time slew |
+| 6 | `test_bsp` | Board support package time, PWM bounds, and emergency brake |
+| 7–16 | `test_driver_*` | Unit tests for BME280, MS5837, INA226, INA237, TCAN1044, TPS25990, LSM6DSOXTR, BMI270, TMP1075, PMBus brick |
+| 17 | `test_mock_physics` | Closed-loop 6-DOF hydrodynamic physics and closed-loop depth PID hold |
+| 18 | `test_node1_pi_shield` | Pi Shield enclosure pressure, humidity, and leak detection |
+| 19 | `test_node2_control_board` | Control board thruster slew rate, solenoid actuation, and 100 Hz nav stream |
+| 20 | `test_node3_power_slab` | Power slab PMBus telemetry, current monitoring, and 20 Hz power stream |
+| 21 | `test_multi_node_bus` | Full virtual CAN FD bus integration across all 3 nodes and Pi Core |
+| 22 | `test_sil_safety` | Tether watchdog SLA, emergency break virtual-time latency, and pneumatics |
+| 23 | `test_sil_power` | Full thruster load current modeling, eFuse protection, and telemetry continuity |
+| 24 | `test_sil_fuzz` | 1,000 randomized malformed CAN FD frames and Bus-Off fault recovery |
+| 25 | `test_sil_burnin` | 100,000-cycle (16.7 min virtual time) continuous stability and ramp alternating |

@@ -10,6 +10,9 @@ from typing import List, Tuple
 # Arbitration CAN IDs
 CAN_ID_EMERGENCY_BREAK   = 0x001
 CAN_ID_EFUSE_FAULT_ALERT = 0x005
+CAN_ID_TIME_SYNC_MASTER  = 0x010
+CAN_ID_TIME_SYNC_REQ     = 0x011
+CAN_ID_TIME_SYNC_RESP    = 0x012
 CAN_ID_THRUSTER_CMD      = 0x100
 CAN_ID_SOLENOID_CMD      = 0x110
 CAN_ID_NAV_TELEMETRY     = 0x200
@@ -27,12 +30,68 @@ SIL_PACKET_SIZE = struct.calcsize(SIL_PACKET_FMT)
 # of format string parsing (or internal LRU cache lookups) on every function call.
 # This yields a small but measurable CPU reduction (5-10%) in high-frequency
 # (100Hz+) CAN telemetry processing loops.
+_STRUCT_TIME_SYNC_MASTER = struct.Struct("<QIB3x")
+_STRUCT_TIME_SYNC_REQ = struct.Struct("<BBHIQ")
+_STRUCT_TIME_SYNC_RESP = struct.Struct("<BBHIQQQ")
 _STRUCT_8H = struct.Struct("<8H")
 _STRUCT_H = struct.Struct("<H")
-_STRUCT_8FB = struct.Struct("<8fB")
+_STRUCT_NAV_TS = struct.Struct("<Q8fB")
+_STRUCT_NAV_LEGACY = struct.Struct("<8fB")
 _STRUCT_3FB = struct.Struct("<3fB")
 _STRUCT_POWER = struct.Struct("<HHHH4HhH")
 _STRUCT_SIL_PACKET = struct.Struct(SIL_PACKET_FMT)
+
+@dataclass
+class TimeSyncMaster:
+    master_time_us: int
+    sync_seq: int
+    flags: int = 1
+
+    def pack(self) -> bytes:
+        return _STRUCT_TIME_SYNC_MASTER.pack(self.master_time_us, self.sync_seq, self.flags)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "TimeSyncMaster":
+        if len(data) < 16:
+            raise ValueError(f"TimeSyncMaster requires at least 16 bytes, got {len(data)}")
+        master_us, seq, flags = _STRUCT_TIME_SYNC_MASTER.unpack(data[:16])
+        return cls(master_time_us=master_us, sync_seq=seq, flags=flags)
+
+@dataclass
+class TimeSyncReq:
+    target_node_id: int
+    seq: int
+    flags: int
+    t1_us: int
+
+    def pack(self) -> bytes:
+        return _STRUCT_TIME_SYNC_REQ.pack(self.target_node_id, self.seq, 0, self.flags, self.t1_us)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "TimeSyncReq":
+        if len(data) < 16:
+            raise ValueError(f"TimeSyncReq requires at least 16 bytes, got {len(data)}")
+        target, seq, _, flags, t1 = _STRUCT_TIME_SYNC_REQ.unpack(data[:16])
+        return cls(target_node_id=target, seq=seq, flags=flags, t1_us=t1)
+
+@dataclass
+class TimeSyncResp:
+    responder_node_id: int
+    seq: int
+    status: int
+    t1_us: int
+    t2_us: int
+    t3_us: int
+
+    def pack(self) -> bytes:
+        return _STRUCT_TIME_SYNC_RESP.pack(self.responder_node_id, self.seq, 0, self.status, self.t1_us, self.t2_us, self.t3_us)
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "TimeSyncResp":
+        if len(data) < 32:
+            raise ValueError(f"TimeSyncResp requires at least 32 bytes, got {len(data)}")
+        node_id, seq, _, status, t1, t2, t3 = _STRUCT_TIME_SYNC_RESP.unpack(data[:32])
+        return cls(responder_node_id=node_id, seq=seq, status=status, t1_us=t1, t2_us=t2, t3_us=t3)
 
 @dataclass
 class ThrusterCommand:
@@ -75,17 +134,26 @@ class NavTelemetry:
     gyro_z_rad_s: float
     depth_meters: float
     imu_status: int
+    timestamp_us: int = 0
 
     @classmethod
     def unpack(cls, data: bytes) -> "NavTelemetry":
-        if len(data) < 33:
+        if len(data) >= 41:
+            ts_us, qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_NAV_TS.unpack(data[:41])
+            return cls(
+                q_w=qw, q_x=qx, q_y=qy, q_z=qz,
+                gyro_x_rad_s=gx, gyro_y_rad_s=gy, gyro_z_rad_s=gz,
+                depth_meters=depth, imu_status=status, timestamp_us=ts_us
+            )
+        elif len(data) >= 33:
+            qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_NAV_LEGACY.unpack(data[:33])
+            return cls(
+                q_w=qw, q_x=qx, q_y=qy, q_z=qz,
+                gyro_x_rad_s=gx, gyro_y_rad_s=gy, gyro_z_rad_s=gz,
+                depth_meters=depth, imu_status=status, timestamp_us=0
+            )
+        else:
             raise ValueError(f"NavTelemetry requires at least 33 bytes, got {len(data)}")
-        qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_8FB.unpack(data[:33])
-        return cls(
-            q_w=qw, q_x=qx, q_y=qy, q_z=qz,
-            gyro_x_rad_s=gx, gyro_y_rad_s=gy, gyro_z_rad_s=gz,
-            depth_meters=depth, imu_status=status
-        )
 
 @dataclass
 class EnvTelemetry:

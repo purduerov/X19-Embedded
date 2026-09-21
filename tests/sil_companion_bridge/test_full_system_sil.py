@@ -25,14 +25,30 @@ from src.python.messaging import Publisher, Subscriber
 from src.protocols.python import telemetry_pb2
 from pi_core_sil_bridge import PiCoreSilBridge
 
+def find_server_binary() -> str:
+    base = os.path.dirname(__file__)
+    candidates = [
+        os.path.abspath(os.path.join(base, "../../tests/build/tests/sil_bridge_server.exe")),
+        os.path.abspath(os.path.join(base, "../../tests/build/tests/sil_bridge_server")),
+        os.path.abspath(os.path.join(base, "../../build/tests/sil_bridge_server.exe")),
+        os.path.abspath(os.path.join(base, "../../build/tests/sil_bridge_server")),
+        os.path.abspath(os.path.join(base, "../../build-native/tests/sil_bridge_server")),
+        os.path.abspath(os.path.join(base, "../../build-native/tests/sil_bridge_server.exe")),
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK | os.R_OK):
+            return c
+    # Fallback to default
+    return candidates[0]
+
 class TestFullSystemSil(unittest.TestCase):
-    SERVER_EXE = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build/tests/sil_bridge_server.exe"))
     PORT = 8765
 
     def setUp(self):
+        server_exe = find_server_binary()
         # 1. Launch STM32 Multi-Node SIL Server Process
         self.server_proc = subprocess.Popen(
-            [self.SERVER_EXE, "--port", str(self.PORT), "--cycles", "200"],
+            [server_exe, "--port", str(self.PORT), "--cycles", "300"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -113,7 +129,30 @@ class TestFullSystemSil(unittest.TestCase):
         for _ in range(10):
             self.bridge.step(timeout_sec=0.01)
 
+        self.assertTrue(self.bridge.emergency_break_received, "Emergency break must be flagged as received")
+        self.assertEqual(self.bridge.latest_pwms, [1500] * 8, "All thruster setpoints must return to 1500 us neutral")
+
+        # Verify subsequent joystick commands cannot re-engage thrusters while emergency break is active
+        self.pilot_joystick_pub.publish(cmd)
+        time.sleep(0.01)
+        for _ in range(5):
+            self.bridge.step(timeout_sec=0.01)
+        self.assertEqual(self.bridge.latest_pwms, [1500] * 8, "Thrusters must remain at 1500 us neutral after emergency break")
+
         print("Emergency break sent and verified across multi-node virtual bus.")
+
+        print("\n--- [SIL TEST 4] Solenoid Command Transmission Verification ---")
+        # Command valves 0 and 2 (channels 0 and 4: bitmask 0x0011)
+        self.bridge.send_solenoid_cmd(0x0011)
+        for _ in range(5):
+            self.bridge.step(timeout_sec=0.01)
+        self.assertEqual(self.bridge.latest_solenoid_mask, 0x0011, "Solenoid mask must be stored and transmitted")
+        print("Solenoid command verified across bridge.")
+
+        if hasattr(telemetry_pb2, "ImuData"):
+            print("\n--- [SIL TEST 5] IMU Data Pipeline Verification ---")
+            self.assertIsNotNone(self.bridge.imu_pub, "IMU publisher must be initialized when ImuData schema is present")
+            print("IMU telemetry pipeline verified.")
 
 if __name__ == "__main__":
     unittest.main()
