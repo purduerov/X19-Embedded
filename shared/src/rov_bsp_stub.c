@@ -13,6 +13,10 @@ __attribute__((weak)) uint32_t time_get_ms(void) {
     return 0;
 }
 
+__attribute__((weak)) uint64_t time_get_us(void) {
+    return (uint64_t)time_get_ms() * 1000ULL;
+}
+
 __attribute__((weak)) void delay_ms(uint32_t ms) {
     (void)ms;
 }
@@ -72,6 +76,25 @@ __attribute__((weak)) bool bsp_leak_probe_read(uint8_t probe_idx) {
 
 __attribute__((weak)) void bsp_emergency_brake_trip(void) {}
 
-__attribute__((weak)) bool bsp_is_emergency_brake_tripped(void) {
-    return false;
+__attribute__((weak)) bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len) {
+    return can_send(id, data, len);
 }
+
+__attribute__((weak)) void bsp_power_brick_enable(uint8_t brick_idx) {
+    (void)brick_idx;
+}
+
+__attribute__((weak)) void bsp_power_brick_disable_all(void) {}
+
+__attribute__((weak)) uint32_t bsp_get_logic_voltage_mv(void) {
+    return 5200;
+}
+
+__attribute__((weak)) bool bsp_lm74700_status_ok(void) {
+    return true;
+}
+
+__attribute__((weak)) float bsp_get_pcb_temperature_c(void) {
+    return 25.0f;
+}
+

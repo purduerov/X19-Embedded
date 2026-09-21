@@ -38,6 +38,19 @@ bool can_init(void);
 bool can_send(uint32_t id, const uint8_t *data, uint8_t len);
 
 /**
+ * @brief Transmit an emergency CAN frame with highest priority.
+ *
+ * Transmits immediately using an emergency or dedicated high-priority hardware mailbox,
+ * bypassing normal telemetry queues.
+ *
+ * @param id 11-bit standard CAN identifier (typically 0x001).
+ * @param data Pointer to payload data buffer.
+ * @param len Payload length.
+ * @return true if transmitted or queued into hardware mailbox, false otherwise.
+ */
+bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len);
+
+/**
  * @brief Retrieve an incoming CAN frame from the RX FIFO (polling).
  *
  * If a message is waiting in the hardware RX FIFO, copies the header and data

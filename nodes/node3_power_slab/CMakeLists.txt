@@ -1,6 +1,7 @@
 add_executable(node3_power_slab.elf
     Core/Src/main.c
     Core/Src/app.c
+    Core/Src/bsp.c
 )
 
 target_include_directories(node3_power_slab.elf PRIVATE
