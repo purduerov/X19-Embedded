@@ -1,11 +1,12 @@
 enable_testing()
-add_definitions(-DROV_UNIT_TEST -DX19_UNIT_TEST)
+add_definitions(-DROV_UNIT_TEST -DX19_UNIT_TEST -UNDEBUG)
 
 # Build the Software-in-the-Loop (SIL) Mock Infrastructure
 add_library(rov_mocks STATIC
     mocks/mock_can.c
     mocks/mock_bsp.c
     mocks/mock_sensors.c
+    mocks/mock_physics.c
 )
 add_library(x19_mocks ALIAS rov_mocks)
 
@@ -15,6 +16,9 @@ target_include_directories(rov_mocks PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../drivers/include
 )
 target_link_libraries(rov_mocks PUBLIC rov_shared rov_drivers)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(rov_mocks PUBLIC m)
+endif()
 
 # Core Shared Library Tests
 add_executable(test_can_protocol test_can_protocol.c)
@@ -35,6 +39,10 @@ add_test(NAME test_safety COMMAND test_safety)
 add_executable(test_i2c_recovery test_i2c_recovery.c)
 target_link_libraries(test_i2c_recovery PRIVATE rov_shared)
 add_test(NAME test_i2c_recovery COMMAND test_i2c_recovery)
+
+add_executable(test_timesync test_timesync.c)
+target_link_libraries(test_timesync PRIVATE rov_shared rov_mocks)
+add_test(NAME test_timesync COMMAND test_timesync)
 
 # Board Support Package (BSP) Tests
 add_executable(test_bsp test_bsp.c)
@@ -88,6 +96,13 @@ add_executable(test_driver_pmbus_brick test_driver_pmbus_brick.c)
 target_link_libraries(test_driver_pmbus_brick PRIVATE rov_mocks)
 add_test(NAME test_driver_pmbus_brick COMMAND test_driver_pmbus_brick)
 
+add_executable(test_mock_physics test_mock_physics.c)
+target_link_libraries(test_mock_physics PRIVATE rov_mocks)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_mock_physics PRIVATE m)
+endif()
+add_test(NAME test_mock_physics COMMAND test_mock_physics)
+
 
 # Subsystem Application Node SIL Tests (Full Node Logic Execution)
 add_executable(test_node1_pi_shield
@@ -140,6 +155,70 @@ if(NOT WIN32 OR MINGW)
     target_link_libraries(test_multi_node_bus PRIVATE m)
 endif()
 add_test(NAME test_multi_node_bus COMMAND test_multi_node_bus)
+
+# SIL Safety, Power, Fuzz, and Burn-In Integration Tests
+add_executable(test_sil_safety
+    test_sil_safety.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+)
+target_include_directories(test_sil_safety PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+)
+target_link_libraries(test_sil_safety PRIVATE rov_mocks)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_sil_safety PRIVATE m)
+endif()
+add_test(NAME test_sil_safety COMMAND test_sil_safety)
+
+add_executable(test_sil_power
+    test_sil_power.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+)
+target_include_directories(test_sil_power PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+)
+target_link_libraries(test_sil_power PRIVATE rov_mocks)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_sil_power PRIVATE m)
+endif()
+add_test(NAME test_sil_power COMMAND test_sil_power)
+
+add_executable(test_sil_fuzz
+    test_sil_fuzz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+)
+target_include_directories(test_sil_fuzz PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+)
+target_link_libraries(test_sil_fuzz PRIVATE rov_mocks)
+add_test(NAME test_sil_fuzz COMMAND test_sil_fuzz)
+
+add_executable(test_sil_burnin
+    test_sil_burnin.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+)
+target_include_directories(test_sil_burnin PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+)
+target_link_libraries(test_sil_burnin PRIVATE rov_mocks)
+add_test(NAME test_sil_burnin COMMAND test_sil_burnin)
+set_tests_properties(test_sil_burnin PROPERTIES TIMEOUT 300)
 
 # Software-in-the-Loop (SIL) Bridge Server (Host Native Only)
 if(NOT CMAKE_CROSSCOMPILING)

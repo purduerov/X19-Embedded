@@ -27,16 +27,14 @@ void test_lsm6dsoxtr_driver(void) {
 
     /* Test mock sensor reading */
     mock_sensors_reset();
-    imu_data_t imu_mock = {
-        .q_w = 0.7071f,
-        .q_x = 0.0f,
-        .q_y = 0.7071f,
-        .q_z = 0.0f,
-        .gyro_x_dps = 0.05f,
-        .gyro_y_dps = -0.02f,
-        .gyro_z_dps = 0.12f,
-        .status = 3
-    };
+    imu_data_t imu_mock = {.q_w = 0.7071f,
+                           .q_x = 0.0f,
+                           .q_y = 0.7071f,
+                           .q_z = 0.0f,
+                           .gyro_x_dps = 0.05f,
+                           .gyro_y_dps = -0.02f,
+                           .gyro_z_dps = 0.12f,
+                           .status = 3};
     mock_sensors_set_imu(&imu_mock);
 
     assert(lsm6dsoxtr_read_raw(&dev) == ROV_OK);
@@ -51,6 +49,7 @@ void test_lsm6dsoxtr_driver(void) {
     assert(lsm6dsoxtr_update_madgwick(&dev, 0.01f) == ROV_OK);
     float norm = sqrtf((dev.q_w * dev.q_w) + (dev.q_x * dev.q_x) + (dev.q_y * dev.q_y) + (dev.q_z * dev.q_z));
     assert(norm > 0.999f && norm < 1.001f);
+    (void)norm; /* suppress -Wunused-but-set-variable under -DNDEBUG */
 
     printf("[PASS] test_lsm6dsoxtr_driver\n");
 }

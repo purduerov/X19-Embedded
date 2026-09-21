@@ -41,9 +41,17 @@ void test_full_system_simulation(void) {
 
     /* Complete Node 2's mandatory ESC neutral arming period */
     mock_bsp_set_time_ms(3000U);
+    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
     node2_app_step();
 
-    /* 2. Pilot / Pi Core sends Thruster Command (0x100) commanding 1700 us */
+    /* Drain initial boot telemetry frames prior to mission start */
+    uint32_t dummy_id;
+    uint8_t dummy_data[64];
+    uint8_t dummy_len;
+    mock_can_set_current_node(ROV_NODE_PI_CORE);
+    while (can_receive(&dummy_id, dummy_data, &dummy_len)) {}
+
+    /* 2. Pilot / Pi Core sends Thruster Command (0x100) commanding 1700 us and Time Sync Master (0x010) */
     rov_thruster_cmd_t cmd;
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         cmd.pwm_us[i] = 1700;
@@ -52,15 +60,28 @@ void test_full_system_simulation(void) {
     size_t tx_len = 0;
     assert(rov_can_pack_thruster_cmd(&cmd, tx_buf, sizeof(tx_buf), &tx_len) == ROV_OK);
 
+    rov_time_sync_master_t master_sync = {
+        .master_time_us = 1726340000000000ULL,
+        .sync_seq = 1,
+        .flags = 0x01,
+        .reserved = {0, 0, 0}
+    };
+    uint8_t sync_buf[64];
+    size_t sync_len = 0;
+    assert(rov_can_pack_time_sync_master(&master_sync, sync_buf, sizeof(sync_buf), &sync_len) == ROV_OK);
+
     /* 3. Execute 5 mission simulation cycles (10 ms each = 50 ms total) */
     for (int cycle = 0; cycle < 5; cycle++) {
         mock_bsp_advance_time_ms(10);
 
-        /* Pilot transmits 0x100 on CAN bus */
+        /* Pilot transmits 0x100 and periodic 0x010 on CAN bus */
         mock_can_set_current_node(ROV_NODE_PI_CORE);
         can_send(ROV_CAN_ID_THRUSTER_CMD, tx_buf, (uint8_t)tx_len);
+        if (cycle == 0) {
+            can_send(ROV_CAN_ID_TIME_SYNC_MASTER, sync_buf, (uint8_t)sync_len);
+        }
 
-        /* Step Node 2 (Control Board): receives 0x100, ramps PWMs, streams 100 Hz Nav (0x200) */
+        /* Step Node 2 (Control Board): receives 0x100 and 0x010, ramps PWMs, streams 100 Hz Nav (0x200) */
         mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
         node2_app_step();
 
@@ -77,7 +98,7 @@ void test_full_system_simulation(void) {
     assert(mock_bsp_get_pwm_us(0) == 1600);
     assert(mock_bsp_get_pwm_us(7) == 1600);
 
-    /* Verify Pi Core received 0x200 Navigation Telemetry from Node 2 */
+    /* Verify Pi Core received 0x200 Navigation Telemetry from Node 2 with synchronized timestamp */
     mock_can_set_current_node(ROV_NODE_PI_CORE);
     uint32_t rx_id = 0;
     uint8_t rx_data[64];
@@ -89,6 +110,7 @@ void test_full_system_simulation(void) {
             rov_nav_telemetry_t nav;
             assert(rov_can_unpack_nav_telemetry(rx_data, rx_len, &nav) == ROV_OK);
             assert(nav.imu_status == 3);
+            assert(nav.timestamp_us >= 1726340000000000ULL);
         }
     }
     assert(found_nav);
