@@ -19,6 +19,7 @@ CAN_ID_NAV_TELEMETRY     = 0x200
 CAN_ID_ENV_TELEMETRY     = 0x210
 CAN_ID_POWER_TELEMETRY   = 0x300
 CAN_ID_USB_HUB_TELEMETRY = 0x310
+CAN_ID_SIL_OUTPUT_STATUS = 0x7FE  # SIL-only mock BSP output snapshot, not a vehicle CAN message
 
 SIL_MAGIC_HEADER = 0x524F5643  # "ROVC"
 SIL_MAGIC_HEADER_LEGACY = 0x58313943  # "X19C"
@@ -40,6 +41,16 @@ _STRUCT_NAV_LEGACY = struct.Struct("<8fB")
 _STRUCT_3FB = struct.Struct("<3fB")
 _STRUCT_POWER = struct.Struct("<HHHH4HhH")
 _STRUCT_SIL_PACKET = struct.Struct(SIL_PACKET_FMT)
+SIL_OUTPUT_STATUS_STRUCT = struct.Struct("<8HBHI")
+
+def unpack_sil_output_status(data: bytes) -> Tuple[List[int], bool, int, int]:
+    """Decode the SIL-only mock BSP snapshot and virtual simulation time."""
+    if len(data) < SIL_OUTPUT_STATUS_STRUCT.size:
+        raise ValueError(f"SIL output status requires {SIL_OUTPUT_STATUS_STRUCT.size} bytes, got {len(data)}")
+    *pwms, brake_active, solenoids, sim_time_ms = SIL_OUTPUT_STATUS_STRUCT.unpack(
+        data[:SIL_OUTPUT_STATUS_STRUCT.size]
+    )
+    return list(pwms), bool(brake_active), solenoids, sim_time_ms
 
 @dataclass
 class TimeSyncMaster:

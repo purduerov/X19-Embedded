@@ -29,6 +29,7 @@ from sil_protocol import (
     CAN_ID_NAV_TELEMETRY,
     CAN_ID_ENV_TELEMETRY,
     CAN_ID_POWER_TELEMETRY,
+    CAN_ID_SIL_OUTPUT_STATUS,
     SIL_MAGIC_HEADER,
     SIL_MAGIC_HEADER_LEGACY,
     SIL_PACKET_SIZE,
@@ -39,6 +40,7 @@ from sil_protocol import (
     PowerTelemetry,
     pack_sil_can_frame,
     unpack_sil_can_frame,
+    unpack_sil_output_status,
 )
 
 class PiCoreSilBridge:
@@ -74,13 +76,22 @@ class PiCoreSilBridge:
         )
 
         self.latest_pwms = [1500] * 8
+        self.latest_node_pwms = [1500] * 8
         self.latest_solenoid_mask = 0
+        self.latest_node_solenoid_mask = 0
+        self.joystick_count = 0
         self.emergency_break_received = False
+        self.emergency_break_sent = False
+        self.node_emergency_brake_active = False
+        self.sim_time_ms = 0
+        self.node_status_count = 0
         self.nav_count = 0
         self.env_count = 0
         self.power_count = 0
         self.latest_depth = 0.0
         self.latest_temp = 0.0
+        self.latest_env: Optional[EnvTelemetry] = None
+        self.latest_power: Optional[PowerTelemetry] = None
         self._rx_buf = bytearray()
 
     def connect_sil_server(self, timeout_sec: float = 5.0) -> bool:
@@ -101,7 +112,8 @@ class PiCoreSilBridge:
 
     def _on_joystick_received(self, cmd: telemetry_pb2.JoystickCommand):
         """Maps JoystickCommand from X19-Core to 8 thruster PWM values."""
-        if self.emergency_break_received:
+        self.joystick_count += 1
+        if self.emergency_break_sent or self.emergency_break_received:
             self.latest_pwms = [1500] * 8
             return
         # Simple 8-thruster holonomic mixer matching X19 geometry
@@ -153,13 +165,24 @@ class PiCoreSilBridge:
         frame = pack_sil_can_frame(CAN_ID_EMERGENCY_BREAK, b"\xAA\x55\x01\x00\x00\x00\x00\x00")
         try:
             self.sock.sendall(frame)
-            self.emergency_break_received = True
+            self.emergency_break_sent = True
             self.latest_pwms = [1500] * 8
         except OSError as e:
             print(f"[Pi-Core SIL Bridge] CAN E-Break TX error: {e}")
 
     def _process_can_frame(self, can_id: int, payload: bytes):
-        if can_id == CAN_ID_NAV_TELEMETRY:
+        if can_id == CAN_ID_SIL_OUTPUT_STATUS:
+            try:
+                pwms, brake_active, solenoids, sim_time_ms = unpack_sil_output_status(payload)
+            except ValueError:
+                return
+            self.latest_node_pwms = pwms
+            self.node_emergency_brake_active = brake_active
+            self.latest_node_solenoid_mask = solenoids
+            self.sim_time_ms = sim_time_ms
+            self.node_status_count += 1
+
+        elif can_id == CAN_ID_NAV_TELEMETRY:
             nav = NavTelemetry.unpack(payload)
             self.nav_count += 1
             self.latest_depth = nav.depth_meters
@@ -199,9 +222,11 @@ class PiCoreSilBridge:
         elif can_id == CAN_ID_ENV_TELEMETRY:
             env = EnvTelemetry.unpack(payload)
             self.env_count += 1
+            self.latest_env = env
             self.latest_temp = env.temperature_c
 
         elif can_id == CAN_ID_POWER_TELEMETRY:
+            self.latest_power = PowerTelemetry.unpack(payload)
             self.power_count += 1
 
         elif can_id == CAN_ID_EMERGENCY_BREAK:

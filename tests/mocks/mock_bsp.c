@@ -169,6 +169,7 @@ bool bsp_leak_probe_read(uint8_t probe_idx) {
 
 void bsp_emergency_brake_trip(void) {
     g_mock_emergency_brake_tripped = true;
+    g_mock_solenoid_mask = 0;
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_mock_pwm_us[i] = ROV_PWM_STOP_US;
     }

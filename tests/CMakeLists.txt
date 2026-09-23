@@ -220,6 +220,58 @@ target_link_libraries(test_sil_burnin PRIVATE rov_mocks)
 add_test(NAME test_sil_burnin COMMAND test_sil_burnin)
 set_tests_properties(test_sil_burnin PROPERTIES TIMEOUT 300)
 
+# Target-readiness acceptance checks compile the real board BSPs and startup
+# entrypoints against a strict fake HAL. They are expected to expose missing
+# hardware integration until each target is fully implemented.
+function(add_target_bsp_contract node_id node_dir test_source)
+    set(bsp_source "${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Src/bsp.c")
+    add_executable(test_target_bsp_node${node_id}
+        ${test_source}
+        hardware/fakes/fake_hal.c
+        ${bsp_source}
+    )
+    target_include_directories(test_target_bsp_node${node_id} BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/hardware/fakes
+        ${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Inc
+        ${PROJECT_SOURCE_DIR}/shared/include
+        ${PROJECT_SOURCE_DIR}/drivers/include
+    )
+    if(MSVC)
+        target_compile_options(test_target_bsp_node${node_id} PRIVATE /UROV_UNIT_TEST /UX19_UNIT_TEST)
+    else()
+        target_compile_options(test_target_bsp_node${node_id} PRIVATE -UROV_UNIT_TEST -UX19_UNIT_TEST)
+    endif()
+    add_test(NAME target_bsp_node${node_id} COMMAND test_target_bsp_node${node_id})
+endfunction()
+
+add_target_bsp_contract(1 node1_pi_shield hardware/test_target_bsp_node1.c)
+add_target_bsp_contract(2 node2_control_board hardware/test_target_bsp_node2.c)
+add_target_bsp_contract(3 node3_power_slab hardware/test_target_bsp_node3.c)
+target_sources(test_target_bsp_node3 PRIVATE
+    ${PROJECT_SOURCE_DIR}/drivers/src/ina237.c
+    ${PROJECT_SOURCE_DIR}/drivers/src/tmp1075.c
+)
+
+function(add_target_startup_contract node_id node_dir)
+    set(main_source "${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Src/main.c")
+    set_source_files_properties("${main_source}" PROPERTIES
+        COMPILE_DEFINITIONS "main=target_firmware_entrypoint")
+    add_executable(test_target_startup_node${node_id}
+        hardware/test_target_startup.c
+        "${main_source}"
+    )
+    target_include_directories(test_target_startup_node${node_id} BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/hardware/fakes
+        ${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Inc
+    )
+    target_compile_definitions(test_target_startup_node${node_id} PRIVATE TARGET_NODE=${node_id})
+    add_test(NAME target_startup_node${node_id} COMMAND test_target_startup_node${node_id})
+endfunction()
+
+add_target_startup_contract(1 node1_pi_shield)
+add_target_startup_contract(2 node2_control_board)
+add_target_startup_contract(3 node3_power_slab)
+
 # Software-in-the-Loop (SIL) Bridge Server (Host Native Only)
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(sil_bridge_server

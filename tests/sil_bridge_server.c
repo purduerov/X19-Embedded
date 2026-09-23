@@ -59,6 +59,7 @@ extern void node3_app_init(void);
 extern void node3_app_step(void);
 
 #define SIL_BRIDGE_DEFAULT_PORT 8765
+#define SIL_CAN_ID_OUTPUT_STATUS 0x7FEU /* SIL-only snapshot of mocked BSP outputs */
 #define SIL_MAGIC_HEADER_LEGACY 0x58313943 /* "X19C" in ASCII */
 #define SIL_MAGIC_HEADER        0x524F5643 /* "ROVC" in ASCII */
 
@@ -88,6 +89,22 @@ static void platform_sleep_ms(uint32_t ms) {
 #else
     usleep(ms * 1000);
 #endif
+}
+
+static bool send_sil_frame(socket_t sock, uint32_t id, const uint8_t *data, uint8_t len) {
+    if (len > 64U) {
+        return false;
+    }
+
+    sil_can_packet_t packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.magic = SIL_MAGIC_HEADER;
+    packet.id = id;
+    packet.len = len;
+    if (len > 0U && data != NULL) {
+        memcpy(packet.data, data, len);
+    }
+    return send(sock, (const char *)&packet, (int)sizeof(packet), 0) == (int)sizeof(packet);
 }
 
 int main(int argc, char **argv) {
@@ -317,6 +334,29 @@ int main(int argc, char **argv) {
         /* 5. Step Node 3 (Power Slab): Evaluate PMBus converter telemetry, stream 0x300 */
         mock_can_set_current_node(ROV_NODE_POWER_SLAB);
         node3_app_step();
+
+        /* SIL-only feedback lets integration tests inspect actual mocked outputs. */
+        if (!IS_INVALID_SOCKET(client_fd)) {
+            uint8_t status[23];
+            for (uint8_t channel = 0; channel < ROV_NUM_THRUSTERS; channel++) {
+                uint16_t pwm = mock_bsp_get_pwm_us(channel);
+                status[channel * 2U] = (uint8_t)(pwm & 0xFFU);
+                status[channel * 2U + 1U] = (uint8_t)(pwm >> 8U);
+            }
+            status[16] = mock_bsp_is_emergency_brake_tripped() ? 1U : 0U;
+            uint16_t solenoids = mock_bsp_get_solenoid_mask();
+            status[17] = (uint8_t)(solenoids & 0xFFU);
+            status[18] = (uint8_t)(solenoids >> 8U);
+            uint32_t sim_time_ms = time_get_ms();
+            status[19] = (uint8_t)(sim_time_ms & 0xFFU);
+            status[20] = (uint8_t)((sim_time_ms >> 8U) & 0xFFU);
+            status[21] = (uint8_t)((sim_time_ms >> 16U) & 0xFFU);
+            status[22] = (uint8_t)(sim_time_ms >> 24U);
+            if (!send_sil_frame(client_fd, SIL_CAN_ID_OUTPUT_STATUS, status, sizeof(status))) {
+                CLOSE_SOCKET(client_fd);
+                client_fd = INVALID_SOCKET;
+            }
+        }
 
         /* 6. Drain frames addressed to Pi Core and forward over TCP (rate-limited telemetry to avoid flooding) */
         mock_can_set_current_node(ROV_NODE_PI_CORE);

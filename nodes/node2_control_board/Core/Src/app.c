@@ -112,7 +112,8 @@ void node2_app_step(void) {
             }
         } else if (rx_id == ROV_CAN_ID_SOLENOID_CMD) {
             rov_solenoid_cmd_t sol;
-            if (rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) {
+            if (!g_safety_state.emergency_break_active &&
+                rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) {
                 bsp_solenoid_set(sol.solenoid_mask);
             }
         } else if (rx_id == ROV_CAN_ID_TIME_SYNC_MASTER) {

@@ -210,7 +210,8 @@ bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len) {
 bool can_receive(uint32_t *id, uint8_t *data, uint8_t *len) {
     uint8_t cur_idx = node_to_index(g_current_node);
     mock_node_bus_state_t *st = &g_nodes[cur_idx];
-    if (st->count == 0) {
+    /* A bus-off controller cannot receive frames until it recovers. */
+    if (st->is_bus_off || st->count == 0) {
         return false;
     }
 

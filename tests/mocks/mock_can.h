@@ -76,7 +76,8 @@ bool mock_can_find_latest_tx(uint32_t target_id, uint8_t *data, uint8_t *len);
 uint32_t mock_can_count_tx_by_id(uint32_t target_id);
 
 /**
- * @brief Enable or disable Bus-Off state for fault injection.
+ * @brief Enable or disable Bus-Off state for the currently selected node.
+ *        A bus-off node cannot transmit or receive until recovery.
  */
 void mock_can_set_bus_off(bool bus_off);
 

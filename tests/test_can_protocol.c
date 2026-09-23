@@ -264,10 +264,16 @@ void test_solenoid_cmd_pack_unpack(void) {
     assert(decoded.solenoid_mask == 0x0255);
 
     /* Test 10-bit mask clamping */
-    original.solenoid_mask = 0xFFFF;
+    original.solenoid_mask = 0xFC01;
     assert(rov_can_pack_solenoid_cmd(&original, buffer, sizeof(buffer), &len) == ROV_OK);
     assert(rov_can_unpack_solenoid_cmd(buffer, len, &decoded) == ROV_OK);
-    assert(decoded.solenoid_mask == 0x03FF);
+    assert(decoded.solenoid_mask == 0x0001);
+
+    /* The two coils for a valve are mutually exclusive at the protocol boundary. */
+    original.solenoid_mask = 0x0003;
+    assert(rov_can_pack_solenoid_cmd(&original, buffer, sizeof(buffer), &len) == ROV_OK);
+    assert(rov_can_unpack_solenoid_cmd(buffer, len, &decoded) == ROV_ERR_INVALID_ARG);
+    assert(decoded.solenoid_mask == 0);
 
     (void)len;
     (void)decoded;

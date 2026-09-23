@@ -174,6 +174,19 @@ void test_solenoid_interlock(void) {
 
     assert(mock_bsp_get_solenoid_mask() == 0x0000);
 
+    /* A malformed command requesting both coils for one valve must be rejected. */
+    rov_solenoid_cmd_t conflicting_cmd = {.solenoid_mask = 0x0003};
+    uint8_t conflicting_buf[2];
+    size_t conflicting_len = 0;
+    assert(rov_can_pack_solenoid_cmd(&conflicting_cmd, conflicting_buf, sizeof(conflicting_buf), &conflicting_len) ==
+           ROV_OK);
+    mock_can_set_current_node(ROV_NODE_PI_CORE);
+    assert(can_send(ROV_CAN_ID_SOLENOID_CMD, conflicting_buf, (uint8_t)conflicting_len));
+    mock_bsp_advance_time_ms(10);
+    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+    node2_app_step();
+    assert(mock_bsp_get_solenoid_mask() == 0);
+
     uint8_t sol_buf[2];
     size_t sol_len = 0;
     rov_solenoid_cmd_t sol_cmd;
@@ -224,11 +237,50 @@ void test_solenoid_interlock(void) {
     printf("[PASS] test_solenoid_interlock\n");
 }
 
+void test_estop_latches_pneumatics_off(void) {
+    mock_bsp_reset();
+    mock_bsp_set_auto_advance_delay(false);
+    mock_can_reset();
+    mock_sensors_reset();
+    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+    node2_app_init();
+
+    rov_solenoid_cmd_t sol = {.solenoid_mask = 0x0001};
+    uint8_t sol_buf[2];
+    size_t sol_len = 0;
+    assert(rov_can_pack_solenoid_cmd(&sol, sol_buf, sizeof(sol_buf), &sol_len) == ROV_OK);
+    mock_can_set_current_node(ROV_NODE_PI_CORE);
+    assert(can_send(ROV_CAN_ID_SOLENOID_CMD, sol_buf, (uint8_t)sol_len));
+    mock_bsp_advance_time_ms(10);
+    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+    node2_app_step();
+    assert(mock_bsp_get_solenoid_mask() == 0x0001);
+
+    const uint8_t estop[] = {0xAA, 0x55};
+    mock_can_set_current_node(ROV_NODE_PI_CORE);
+    assert(can_send(ROV_CAN_ID_EMERGENCY_BREAK, estop, sizeof(estop)));
+    mock_bsp_advance_time_ms(10);
+    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+    node2_app_step();
+    assert(mock_bsp_is_emergency_brake_tripped());
+    assert(mock_bsp_get_solenoid_mask() == 0);
+
+    /* A queued/new command must not re-energize pneumatics after latched E-stop. */
+    mock_can_set_current_node(ROV_NODE_PI_CORE);
+    assert(can_send(ROV_CAN_ID_SOLENOID_CMD, sol_buf, (uint8_t)sol_len));
+    mock_bsp_advance_time_ms(10);
+    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+    node2_app_step();
+    assert(mock_bsp_get_solenoid_mask() == 0);
+    printf("[PASS] test_estop_latches_pneumatics_off\n");
+}
+
 int main(void) {
     printf("Running SIL Safety Verification Tests...\n");
     test_tether_watchdog_sla();
     test_emergency_break_latency();
     test_solenoid_interlock();
+    test_estop_latches_pneumatics_off();
     printf("All SIL Safety Tests Passed Successfully!\n");
     return 0;
 }

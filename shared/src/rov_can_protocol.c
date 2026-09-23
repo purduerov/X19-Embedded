@@ -116,6 +116,14 @@ rov_status_t rov_can_unpack_solenoid_cmd(const uint8_t *buffer, size_t len, rov_
     memcpy(cmd, buffer, sizeof(rov_solenoid_cmd_t));
     /* Mask to 10 valid channels (bits 0..9) */
     cmd->solenoid_mask &= 0x03FF;
+    /* Each double-acting valve has opposing coils; never accept both at once. */
+    for (uint8_t valve = 0; valve < ROV_NUM_SOLENOIDS; valve++) {
+        uint16_t pair_mask = (uint16_t)(0x3u << (valve * 2u));
+        if ((cmd->solenoid_mask & pair_mask) == pair_mask) {
+            cmd->solenoid_mask = 0;
+            return ROV_ERR_INVALID_ARG;
+        }
+    }
     return ROV_OK;
 }
 
