@@ -31,6 +31,16 @@ void mock_bsp_set_time_ms(uint32_t ms);
 void mock_bsp_advance_time_ms(uint32_t delta_ms);
 
 /**
+ * @brief Set the virtual system time in microseconds.
+ */
+void mock_bsp_set_time_us(uint64_t us);
+
+/**
+ * @brief Advance the virtual system time by delta_us.
+ */
+void mock_bsp_advance_time_us(uint64_t delta_us);
+
+/**
  * @brief Query diagnostic LED state.
  */
 bool mock_bsp_get_led_state(void);
@@ -65,6 +75,26 @@ void mock_bsp_set_auto_advance_delay(bool enable);
  * @brief Check if emergency brake was tripped.
  */
 bool mock_bsp_is_emergency_brake_tripped(void);
+
+/**
+ * @brief Check if a specific Power Slab converter brick is enabled.
+ */
+bool mock_bsp_is_brick_enabled(uint8_t brick_idx);
+
+/**
+ * @brief Set the simulated 5.2V logic rail voltage in millivolts.
+ */
+void mock_bsp_set_logic_voltage_mv(uint32_t mv);
+
+/**
+ * @brief Set the simulated LM74700 diode status (true = ok).
+ */
+void mock_bsp_set_lm74700_ok(bool ok);
+
+/**
+ * @brief Set the simulated PCB temperature in degrees Celsius.
+ */
+void mock_bsp_set_pcb_temperature_c(float temp_c);
 
 #ifdef __cplusplus
 }

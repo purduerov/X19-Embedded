@@ -1,11 +1,12 @@
 enable_testing()
-add_definitions(-DROV_UNIT_TEST -DX19_UNIT_TEST)
+add_definitions(-DROV_UNIT_TEST -DX19_UNIT_TEST -UNDEBUG)
 
 # Build the Software-in-the-Loop (SIL) Mock Infrastructure
 add_library(rov_mocks STATIC
     mocks/mock_can.c
     mocks/mock_bsp.c
     mocks/mock_sensors.c
+    mocks/mock_physics.c
 )
 add_library(x19_mocks ALIAS rov_mocks)
 
@@ -15,6 +16,9 @@ target_include_directories(rov_mocks PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../drivers/include
 )
 target_link_libraries(rov_mocks PUBLIC rov_shared rov_drivers)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(rov_mocks PUBLIC m)
+endif()
 
 # Core Shared Library Tests
 add_executable(test_can_protocol test_can_protocol.c)
@@ -35,6 +39,15 @@ add_test(NAME test_safety COMMAND test_safety)
 add_executable(test_i2c_recovery test_i2c_recovery.c)
 target_link_libraries(test_i2c_recovery PRIVATE rov_shared)
 add_test(NAME test_i2c_recovery COMMAND test_i2c_recovery)
+
+add_executable(test_timesync test_timesync.c)
+target_link_libraries(test_timesync PRIVATE rov_shared rov_mocks)
+add_test(NAME test_timesync COMMAND test_timesync)
+
+# Board Support Package (BSP) Tests
+add_executable(test_bsp test_bsp.c)
+target_link_libraries(test_bsp PRIVATE rov_mocks)
+add_test(NAME test_bsp COMMAND test_bsp)
 
 # Peripheral Hardware Driver Unit Tests (Mocked Hardware Registers)
 add_executable(test_driver_bme280 test_driver_bme280.c)
@@ -82,6 +95,13 @@ add_test(NAME test_driver_tmp1075 COMMAND test_driver_tmp1075)
 add_executable(test_driver_pmbus_brick test_driver_pmbus_brick.c)
 target_link_libraries(test_driver_pmbus_brick PRIVATE rov_mocks)
 add_test(NAME test_driver_pmbus_brick COMMAND test_driver_pmbus_brick)
+
+add_executable(test_mock_physics test_mock_physics.c)
+target_link_libraries(test_mock_physics PRIVATE rov_mocks)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_mock_physics PRIVATE m)
+endif()
+add_test(NAME test_mock_physics COMMAND test_mock_physics)
 
 
 # Subsystem Application Node SIL Tests (Full Node Logic Execution)
@@ -135,6 +155,122 @@ if(NOT WIN32 OR MINGW)
     target_link_libraries(test_multi_node_bus PRIVATE m)
 endif()
 add_test(NAME test_multi_node_bus COMMAND test_multi_node_bus)
+
+# SIL Safety, Power, Fuzz, and Burn-In Integration Tests
+add_executable(test_sil_safety
+    test_sil_safety.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+)
+target_include_directories(test_sil_safety PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+)
+target_link_libraries(test_sil_safety PRIVATE rov_mocks)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_sil_safety PRIVATE m)
+endif()
+add_test(NAME test_sil_safety COMMAND test_sil_safety)
+
+add_executable(test_sil_power
+    test_sil_power.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+)
+target_include_directories(test_sil_power PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+)
+target_link_libraries(test_sil_power PRIVATE rov_mocks)
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_sil_power PRIVATE m)
+endif()
+add_test(NAME test_sil_power COMMAND test_sil_power)
+
+add_executable(test_sil_fuzz
+    test_sil_fuzz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+)
+target_include_directories(test_sil_fuzz PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+)
+target_link_libraries(test_sil_fuzz PRIVATE rov_mocks)
+add_test(NAME test_sil_fuzz COMMAND test_sil_fuzz)
+
+add_executable(test_sil_burnin
+    test_sil_burnin.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+)
+target_include_directories(test_sil_burnin PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
+)
+target_link_libraries(test_sil_burnin PRIVATE rov_mocks)
+add_test(NAME test_sil_burnin COMMAND test_sil_burnin)
+set_tests_properties(test_sil_burnin PROPERTIES TIMEOUT 300)
+
+# Target-readiness acceptance checks compile the real board BSPs and startup
+# entrypoints against a strict fake HAL. They are expected to expose missing
+# hardware integration until each target is fully implemented.
+function(add_target_bsp_contract node_id node_dir test_source)
+    set(bsp_source "${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Src/bsp.c")
+    add_executable(test_target_bsp_node${node_id}
+        ${test_source}
+        hardware/fakes/fake_hal.c
+        ${bsp_source}
+    )
+    target_include_directories(test_target_bsp_node${node_id} BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/hardware/fakes
+        ${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Inc
+        ${PROJECT_SOURCE_DIR}/shared/include
+        ${PROJECT_SOURCE_DIR}/drivers/include
+    )
+    if(MSVC)
+        target_compile_options(test_target_bsp_node${node_id} PRIVATE /UROV_UNIT_TEST /UX19_UNIT_TEST)
+    else()
+        target_compile_options(test_target_bsp_node${node_id} PRIVATE -UROV_UNIT_TEST -UX19_UNIT_TEST)
+    endif()
+    add_test(NAME target_bsp_node${node_id} COMMAND test_target_bsp_node${node_id})
+endfunction()
+
+add_target_bsp_contract(1 node1_pi_shield hardware/test_target_bsp_node1.c)
+add_target_bsp_contract(2 node2_control_board hardware/test_target_bsp_node2.c)
+add_target_bsp_contract(3 node3_power_slab hardware/test_target_bsp_node3.c)
+target_sources(test_target_bsp_node3 PRIVATE
+    ${PROJECT_SOURCE_DIR}/drivers/src/ina237.c
+    ${PROJECT_SOURCE_DIR}/drivers/src/tmp1075.c
+)
+
+function(add_target_startup_contract node_id node_dir)
+    set(main_source "${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Src/main.c")
+    set_source_files_properties("${main_source}" PROPERTIES
+        COMPILE_DEFINITIONS "main=target_firmware_entrypoint")
+    add_executable(test_target_startup_node${node_id}
+        hardware/test_target_startup.c
+        "${main_source}"
+    )
+    target_include_directories(test_target_startup_node${node_id} BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/hardware/fakes
+        ${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Inc
+    )
+    target_compile_definitions(test_target_startup_node${node_id} PRIVATE TARGET_NODE=${node_id})
+    add_test(NAME target_startup_node${node_id} COMMAND test_target_startup_node${node_id})
+endfunction()
+
+add_target_startup_contract(1 node1_pi_shield)
+add_target_startup_contract(2 node2_control_board)
+add_target_startup_contract(3 node3_power_slab)
 
 # Software-in-the-Loop (SIL) Bridge Server (Host Native Only)
 if(NOT CMAKE_CROSSCOMPILING)

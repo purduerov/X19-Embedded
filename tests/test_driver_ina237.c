@@ -31,6 +31,7 @@ void test_ina237_driver(void) {
     assert(dev.shunt_current_a > 3.49f && dev.shunt_current_a < 3.51f);
     assert(dev.power_w > 18.19f && dev.power_w < 18.21f);
 
+    (void)dev; /* suppress -Wunused-but-set-variable under -DNDEBUG */
     printf("[PASS] test_ina237_driver\n");
 }
 

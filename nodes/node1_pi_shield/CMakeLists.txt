@@ -1,6 +1,7 @@
 add_executable(node1_pi_shield.elf
     Core/Src/main.c
     Core/Src/app.c
+    Core/Src/bsp.c
 )
 
 target_include_directories(node1_pi_shield.elf PRIVATE

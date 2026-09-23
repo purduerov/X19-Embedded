@@ -30,6 +30,12 @@ void bsp_init(void);
 uint32_t time_get_ms(void);
 
 /**
+ * @brief Get elapsed system time in microseconds since boot.
+ * @return Microseconds elapsed.
+ */
+uint64_t time_get_us(void);
+
+/**
  * @brief Non-preemptive millisecond delay.
  * @param ms Duration to delay in milliseconds.
  */
@@ -89,6 +95,35 @@ void bsp_emergency_brake_trip(void);
  * @return true if tripped, false if normal.
  */
 bool bsp_is_emergency_brake_tripped(void);
+
+/**
+ * @brief Enable a specific DC-DC converter brick on Node 3 (0 to 3).
+ * @param brick_idx Converter brick index (0 to 3).
+ */
+void bsp_power_brick_enable(uint8_t brick_idx);
+
+/**
+ * @brief Disable all 4 DC-DC converter bricks immediately.
+ */
+void bsp_power_brick_disable_all(void);
+
+/**
+ * @brief Get 5.2V logic rail voltage in millivolts (measured via INA237).
+ * @return Voltage in millivolts.
+ */
+uint32_t bsp_get_logic_voltage_mv(void);
+
+/**
+ * @brief Query TI LM74700-Q1 ideal diode status.
+ * @return true if diode status indicates normal operation (no reverse current / fault), false otherwise.
+ */
+bool bsp_lm74700_status_ok(void);
+
+/**
+ * @brief Get PCB temperature in degrees Celsius from onboard sensor (TMP1075).
+ * @return Temperature in degrees C.
+ */
+float bsp_get_pcb_temperature_c(void);
 
 #ifdef __cplusplus
 }

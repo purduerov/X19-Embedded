@@ -17,9 +17,18 @@
 #include "rov_parameters.h"
 #include "rov_pwm_ramp.h"
 #include "rov_safety.h"
+#include "rov_timesync.h"
 #include <string.h>
 
+#define ESC_ARMING_TIME_MS 3000U
+
+typedef enum { ESC_STATE_BOOT, ESC_STATE_ARMING, ESC_STATE_ACTIVE, ESC_STATE_DISARMED } esc_state_t;
+
+static esc_state_t g_esc_state = ESC_STATE_BOOT;
+static uint32_t g_esc_arming_start_ms = 0U;
+
 static rov_safety_state_t g_safety_state;
+static rov_timesync_state_t g_timesync;
 static rov_thruster_cmd_t g_target_pwms;
 static rov_thruster_cmd_t g_active_pwms;
 static bmi270_dev_t g_imu_dev;
@@ -30,12 +39,19 @@ static uint32_t g_last_ramp_time = 0;
 void node2_app_init(void) {
     bsp_init();
     rov_safety_init(&g_safety_state);
+    rov_timesync_init(&g_timesync);
+
+    g_esc_state = ESC_STATE_BOOT;
 
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
         g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
         bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
     }
+
+    g_esc_arming_start_ms = time_get_ms();
+    g_esc_state = ESC_STATE_ARMING;
+
     bsp_solenoid_set(0);
 
     bmi270_init(&g_imu_dev);
@@ -47,6 +63,11 @@ void node2_app_init(void) {
 
 void node2_app_step(void) {
     uint32_t current_time = time_get_ms();
+
+    if (g_esc_state == ESC_STATE_ARMING && (uint32_t)(current_time - g_esc_arming_start_ms) >= ESC_ARMING_TIME_MS) {
+        g_esc_state = ESC_STATE_ACTIVE;
+        g_last_ramp_time = current_time;
+    }
 
     /* Process all incoming CAN frames */
     uint32_t rx_id;
@@ -60,6 +81,8 @@ void node2_app_step(void) {
                 /* Instant hardware and software shutdown */
                 rov_safety_trigger_emergency_break(&g_safety_state);
                 bsp_emergency_brake_trip();
+                g_esc_state = ESC_STATE_DISARMED;
+
                 for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
                     g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
                     g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
@@ -67,20 +90,56 @@ void node2_app_step(void) {
                 }
             }
         } else if (rx_id == ROV_CAN_ID_THRUSTER_CMD) {
-            /* Only accept thruster commands if emergency break is not active */
-            if (!g_safety_state.emergency_break_active) {
+            /* Thruster commands are accepted only after ESC arming completes */
+            if ((g_esc_state == ESC_STATE_ACTIVE) && (!g_safety_state.emergency_break_active)) {
                 rov_thruster_cmd_t cmd;
+
                 if (rov_can_unpack_thruster_cmd(rx_data, rx_len, &cmd) == ROV_OK) {
                     rov_safety_feed_heartbeat(&g_safety_state, current_time);
+
                     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
-                        g_target_pwms.pwm_us[i] = cmd.pwm_us[i];
+                        uint16_t target_us = cmd.pwm_us[i];
+
+                        if (target_us < 1000U) {
+                            target_us = 1000U;
+                        } else if (target_us > 2000U) {
+                            target_us = 2000U;
+                        }
+
+                        g_target_pwms.pwm_us[i] = target_us;
                     }
                 }
             }
         } else if (rx_id == ROV_CAN_ID_SOLENOID_CMD) {
             rov_solenoid_cmd_t sol;
-            if (rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) {
+            if (!g_safety_state.emergency_break_active &&
+                rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) {
                 bsp_solenoid_set(sol.solenoid_mask);
+            }
+        } else if (rx_id == ROV_CAN_ID_TIME_SYNC_MASTER) {
+            rov_time_sync_master_t sync_msg;
+            if (rov_can_unpack_time_sync_master(rx_data, rx_len, &sync_msg) == ROV_OK) {
+                rov_timesync_process_master(&g_timesync, &sync_msg, time_get_us());
+            }
+        } else if (rx_id == ROV_CAN_ID_TIME_SYNC_REQ) {
+            rov_time_sync_req_t req;
+            if (rov_can_unpack_time_sync_req(rx_data, rx_len, &req) == ROV_OK) {
+                if (req.target_node_id == ROV_NODE_CONTROL_BOARD || req.target_node_id == ROV_NODE_BROADCAST) {
+                    uint64_t rx_time_us = time_get_us();
+                    rov_time_sync_resp_t resp;
+                    resp.responder_node_id = ROV_NODE_CONTROL_BOARD;
+                    resp.seq = req.seq;
+                    resp.reserved = 0;
+                    resp.status = g_timesync.synchronized ? 1 : 0;
+                    resp.t1_us = req.t1_us;
+                    resp.t2_us = rx_time_us;
+                    resp.t3_us = time_get_us();
+                    uint8_t resp_buf[64];
+                    size_t resp_len = 0;
+                    if (rov_can_pack_time_sync_resp(&resp, resp_buf, sizeof(resp_buf), &resp_len) == ROV_OK) {
+                        can_send(ROV_CAN_ID_TIME_SYNC_RESP, resp_buf, (uint8_t)resp_len);
+                    }
+                }
             }
         }
     }
@@ -93,8 +152,25 @@ void node2_app_step(void) {
         }
     }
 
+    /* Hold all ESCs at neutral throughout the mandatory arming period */
+    if (g_esc_state == ESC_STATE_ARMING) {
+        for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+            g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
+        }
+
+        g_last_ramp_time = current_time;
+    } else if (g_esc_state == ESC_STATE_DISARMED) {
+        for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
+            g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
+            bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
+        }
+        g_last_ramp_time = current_time;
+    }
     /* 1 kHz Slew-Rate Ramping Step (executed every 1 ms or on step) */
-    if (current_time > g_last_ramp_time) {
+    else if (current_time > g_last_ramp_time) {
         uint32_t dt_ms = current_time - g_last_ramp_time;
         g_last_ramp_time = current_time;
 
@@ -121,6 +197,7 @@ void node2_app_step(void) {
         ms5837_read_pressure_depth(&g_depth_dev, 1000.0f);
 
         rov_nav_telemetry_t nav;
+        nav.timestamp_us = rov_timesync_get_time_us(&g_timesync, time_get_us());
         nav.q_w = g_imu_dev.q_w;
         nav.q_x = g_imu_dev.q_x;
         nav.q_y = g_imu_dev.q_y;

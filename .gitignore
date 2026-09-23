@@ -26,6 +26,15 @@ __pycache__/
 .cache/
 .DS_Store
 
+# STM32CubeIDE & Eclipse metadata
+.metadata/
+*/.metadata/
+*/*/.metadata/
+.project
+.cproject
+
 # CubeMX temporary files
 *.bak
 *.tmp
+*.ioc.bak
+.aider*

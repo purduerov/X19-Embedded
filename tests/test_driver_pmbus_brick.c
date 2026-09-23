@@ -4,8 +4,8 @@
  * @organization Purdue ROV
  */
 
-#include "pmbus_brick.h"
 #include "mocks/mock_sensors.h"
+#include "pmbus_brick.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -30,6 +30,7 @@ void test_pmbus_brick_driver(void) {
     assert(dev.output_current_a > 8.49f && dev.output_current_a < 8.51f);
     assert(dev.temperature_c > 41.4f && dev.temperature_c < 41.6f);
 
+    (void)dev; /* suppress -Wunused-but-set-variable under -DNDEBUG */
     printf("[PASS] test_pmbus_brick_driver\n");
 }
 

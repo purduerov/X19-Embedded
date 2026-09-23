@@ -36,3 +36,10 @@
 ## 2026-09-10 - CI Compilation Error with Missing HAL Functions
 **Learning:** The project is configured to be hardware-agnostic for testing. Calling ST HAL functions like `HAL_Init()` or `SystemClock_Config()` directly in `main.c` without proper headers or when compiling for the host architecture causes implicit declaration compilation errors and violates the zero-HAL application layer contract.
 **Action:** Ensure `main.c` strictly only calls `app_main()` in the designated user code block, allowing the BSP abstraction to handle hardware setup.
+## 2026-09-11 - Precompile struct formats for high-throughput deserialization
+**Learning:** Python's `struct.pack` and `struct.unpack` parse format strings on every call (or rely on an internal LRU cache), introducing parsing overhead per function call. In high-frequency telemetry loops (like decoding 100+ Hz CAN streams), this micro-overhead compounds into measurable CPU usage.
+**Action:** Always precompile format strings using `struct.Struct("<fmt>")` at the module level and call their `.pack()`/`.unpack()` methods instead of the inline module functions when dealing with high-throughput streams.
+
+## 2026-09-12 - Lookup Tables for Expensive Bitwise Float Operations
+**Learning:** Using bitwise shifting to decode exponents inside float generation routines (like PMBus Linear11) introduces branching and costly FPU division (~14 cycles on ARM Cortex-M) for negative exponents.
+**Action:** Replace bitwise float exponent decoding with precomputed float Lookup Tables (LUT) to eliminate branching and reduce the operation to O(1) array access and a single FPU multiplication.

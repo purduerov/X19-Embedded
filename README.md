@@ -20,7 +20,7 @@
 
 ## 2. Software-in-the-Loop (SIL) Host Testing (Zero-Hardware Simulation)
 
-Developers can compile and execute 100% of the vehicle's firmware logic natively on their host machines (Linux, Windows, macOS) without needing any physical microcontrollers, sensors, or CAN transceivers.
+Developers can compile and execute the shared application logic, protocol code, and host-testable drivers natively on Linux, Windows, or macOS. SIL substitutes mock CAN, BSP, and sensor interfaces for the target peripherals. It does not build or validate STM32 startup code, vendor HAL integration, peripheral timing, or electrical behavior; use the cross-compile and hardware bench checks for those layers.
 
 ### Running the Test Suite Locally
 
@@ -31,8 +31,28 @@ cmake -B build -G Ninja
 # Build all mock libraries, drivers, node applications, and unit tests
 cmake --build build
 
-# Execute all 14 test suites (<1 second total runtime)
-ctest --test-dir build --output-on-failure
+# Run the host-side logic, protocol, and driver regression suite
+ctest --test-dir build -E "^target_" --output-on-failure
+
+# Run target startup and board-I/O readiness checks (expected to fail until implemented)
+ctest --test-dir build -R "^target_" --output-on-failure
+```
+
+The `target_*` acceptance checks compile each node's real `main.c` and `bsp.c` against a strict fake HAL. They check startup peripheral initialization, GPIO setup, CAN bring-up, actuator outputs, and live power-sensor values. These checks are intentionally red while target firmware integration is incomplete; their assertion output identifies the missing contract. The 25 host-side CTest executables exercise application logic with mocked hardware and are not evidence that target firmware is ready.
+
+The host SIL now rejects solenoid commands that energize both coils of a double-acting valve and verifies that an E-stop clears pneumatics and prevents later commands from re-energizing them. The deterministic frame fuzzer also checks that oversized frames are rejected and records accepted input volume.
+
+### SIL Limits and Next Coverage
+
+- The CAN mock models bounded receive FIFOs, broadcast, bus-off, TX failure, and frame drops. It does not model bit timing, arbitration latency, ACK errors, retransmission, or hardware error confinement; add these before using SIL to make bus timing claims.
+- Mock physics and sensor injection check application responses to chosen values. They do not model hull leakage, real pressure transients, electrical brownouts, EMI, or analog sensor noise. Add calibrated plant scenarios as hardware data becomes available.
+- Fake-HAL target checks verify that firmware requests expected startup and I/O operations. They do not emulate STM32 registers, Cube HAL state, interrupts, or pin electrical behavior; bench tests remain necessary.
+- Add command sequence/property tests for heartbeat expiry while pneumatics are active, CAN RX FIFO saturation, sensor disconnect/stale samples, timer wraparound, and recovery after brownout. Record expected safety behavior for each scenario before treating it as a pass criterion.
+
+The Python Pi Core bridge test is separate from CTest. Run it after building the host bridge server and installing the Core Python dependencies:
+
+```powershell
+python tests/sil_companion_bridge/test_full_system_sil.py
 ```
 
 ### Simulation Architecture (`tests/mocks/`)
@@ -51,7 +71,7 @@ ctest --test-dir build --output-on-failure
    - Inject synthetic physics into Bosch BME280, TE MS5837-30BA, TI INA226/237, ST/Bosch 6-axis IMUs, and TI TPS25990 PMBus bricks.
    - Verifies driver conversions (hydrostatic depth formula, power calculations, quaternion normalization) against exact mathematical baselines.
 
-### Test Coverage Summary (14 Test Suites)
+### Test Coverage Summary (25 CTest Executables)
 
 | Test Executable | Target Layer | Verification Scope |
 | :--- | :--- | :--- |
@@ -59,16 +79,29 @@ ctest --test-dir build --output-on-failure
 | `test_pwm_ramp` | Shared Math | 1 kHz slew-rate limiter ($2\,\mu\text{s/ms}$), parametric cubic exponential curve ($a=0.65$), bounds clamping. |
 | `test_safety` | Shared Safety | Watchdog timer expiration, heartbeat loss tracking ($>100\,\text{ms}$), emergency break latch. |
 | `test_i2c_recovery` | Shared Recovery | Automated 9-clock bus-clearing sequence for unsticking hung I2C slave devices. |
+| `test_timesync` | Shared Time Sync | Master, request, response processing, and clock-offset behavior. |
+| `test_bsp` | Board Support Package | Mock clock, PWM, solenoid, leak probe, and emergency brake behavior. |
 | `test_driver_bme280` | Driver Layer | Bosch BME280 enclosure pressure, humidity, and temperature acquisition with NULL guards. |
 | `test_driver_ms5837` | Driver Layer | Hydrostatic depth conversion from absolute millibar pressure ($h = \Delta P / (\rho g)$). |
 | `test_driver_ina226` | Driver Layer | Bus voltage, shunt current, and wattage calculation ($P = V \times I$). |
 | `test_driver_tcan1044` | Driver Layer | TI TCAN1044 high-speed CAN FD transceiver state machine and standby mode control. |
 | `test_driver_tps25990` | Driver Layer | TI TPS25990 PMBus converter brick telemetry and status reporting. |
 | `test_driver_lsm6dsoxtr`| Driver Layer | 6-axis IMU angular rate acquisition and Madgwick quaternion normalization. |
+| `test_driver_bmi270` | Driver Layer | BMI270 initialization and inertial data conversion through mocked sensor registers. |
+| `test_driver_ina237` | Driver Layer | INA237 voltage, current, power, and status conversions. |
+| `test_driver_tmp1075` | Driver Layer | TMP1075 temperature-register conversion and edge handling. |
+| `test_driver_pmbus_brick` | Driver Layer | PMBus brick command, telemetry, and status decoding. |
+| `test_mock_physics` | SIL Plant Model | Buoyancy, motion, orientation, thruster load, and sensor synchronization. |
 | `test_node1_pi_shield` | Node 1 App | Sealed enclosure vacuum decay, humidity spike ($>80\%$), floor leak probe contact, 10 Hz telemetry, instant `0x001` E-Stop broadcast. |
 | `test_node2_control_board`| Node 2 App | 8x PWM slew ramping, 100 ms heartbeat timeout failsafe, `0x001` emergency break cutoff, 10-ch solenoids, 100 Hz nav telemetry stream. |
 | `test_node3_power_slab` | Node 3 App | 5-brick PMBus telemetry, 48V tether monitoring, 25A overcurrent trip, 85 C overtemp protection, `0x005` eFuse Fault Alert broadcast. |
 | `test_multi_node_bus` | Full Vehicle Stack | Concurrent multi-node simulation (Pi Core + Node 1 + Node 2 + Node 3) verifying pilot control, depth changes, leak event, and instant distributed cutoff. |
+| `test_sil_safety` | SIL Safety | Heartbeat watchdog shutdown, emergency-break latency, and solenoid interlocks across nodes. |
+| `test_sil_power` | SIL Power | eFuse overcurrent response and power telemetry cadence. |
+| `test_sil_fuzz` | SIL Fault Injection | Deterministic malformed-frame input and Control Board bus-off failsafe/recovery. |
+| `test_sil_burnin` | SIL Stability | 100,000 neutral cycles and 10,000 alternating command/ramp cycles. |
+
+These 25 native executables are registered with CTest. The Python bridge integration test runs separately in CI and can be run locally with `python tests/sil_companion_bridge/test_full_system_sil.py`. It covers ZMQ/Protobuf, simulated pilot commands, telemetry, emergency stop, and solenoid output through the host bridge server.
 
 ---
 

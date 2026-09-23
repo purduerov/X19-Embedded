@@ -6,15 +6,22 @@
  * Runs the X19 subsea vehicle node state machines (Node 1 Pi Shield,
  * Node 2 Control Board, Node 3 Power Slab) at 100 Hz virtual or real-time clock.
  * Exposes a lightweight TCP framing protocol on 127.0.0.1:8765 allowing the
- * Raspberry Pi companion computer software (ZMQ bridges, Python scripts, or ROS2)
+ * Raspberry Pi companion computer software (ZMQ bridges or Python scripts)
  * to transmit CAN ID 0x100 / 0x110 frames and receive 0x200 / 0x210 / 0x300 telemetry.
  *
  * Automatically keeps the simulation running and accepts new client connections
  * when a client reconnects or a dashboard refreshes.
+ *
+ * CLI flags:
+ *   --port <N>            Listen on port N instead of default 8765.
+ *   --cycles <N>          Exit after N simulation cycles (0 = run indefinitely).
+ *   --fast-forward <N>    Run N cycles as fast as possible (no real-time sleep).
+ *                         Physics engine is enabled. Useful for CI burn-in.
  */
 
 #include "mocks/mock_bsp.h"
 #include "mocks/mock_can.h"
+#include "mocks/mock_physics.h"
 #include "mocks/mock_sensors.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
@@ -52,6 +59,7 @@ extern void node3_app_init(void);
 extern void node3_app_step(void);
 
 #define SIL_BRIDGE_DEFAULT_PORT 8765
+#define SIL_CAN_ID_OUTPUT_STATUS 0x7FEU /* SIL-only snapshot of mocked BSP outputs */
 #define SIL_MAGIC_HEADER_LEGACY 0x58313943 /* "X19C" in ASCII */
 #define SIL_MAGIC_HEADER        0x524F5643 /* "ROVC" in ASCII */
 
@@ -83,16 +91,79 @@ static void platform_sleep_ms(uint32_t ms) {
 #endif
 }
 
+static bool send_sil_frame(socket_t sock, uint32_t id, const uint8_t *data, uint8_t len) {
+    if (len > 64U) {
+        return false;
+    }
+
+    sil_can_packet_t packet;
+    memset(&packet, 0, sizeof(packet));
+    packet.magic = SIL_MAGIC_HEADER;
+    packet.id = id;
+    packet.len = len;
+    if (len > 0U && data != NULL) {
+        memcpy(packet.data, data, len);
+    }
+    return send(sock, (const char *)&packet, (int)sizeof(packet), 0) == (int)sizeof(packet);
+}
+
 int main(int argc, char **argv) {
     int port = SIL_BRIDGE_DEFAULT_PORT;
-    int max_cycles = 0; /* 0 = run indefinitely */
+    int max_cycles = 0;   /* 0 = run indefinitely */
+    int fast_forward = 0; /* 0 = disabled; > 0 = run N cycles headless and exit */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--cycles") == 0 && i + 1 < argc) {
             max_cycles = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--fast-forward") == 0 && i + 1 < argc) {
+            fast_forward = atoi(argv[++i]);
         }
+    }
+
+    /* --fast-forward mode: headless, no TCP, full physics, no real-time sleep */
+    if (fast_forward > 0) {
+        printf("================================================================\n");
+        printf(" X19 SIL Fast-Forward Mode: %d cycles (no TCP, no real-time)\n", fast_forward);
+        printf("================================================================\n");
+        fflush(stdout);
+
+        mock_bsp_reset();
+        mock_bsp_set_auto_advance_delay(false);
+        mock_can_reset();
+        mock_sensors_reset();
+        mock_physics_reset();
+        mock_physics_set_enabled(true);
+
+        mock_can_set_current_node(ROV_NODE_PI_SHIELD);
+        node1_app_init();
+        mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+        node2_app_init();
+        mock_can_set_current_node(ROV_NODE_POWER_SLAB);
+        node3_app_init();
+
+        for (int ff = 0; ff < fast_forward; ff++) {
+            mock_bsp_advance_time_ms(10);
+            mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
+            node2_app_step();
+            mock_can_set_current_node(ROV_NODE_PI_SHIELD);
+            node1_app_step();
+            mock_can_set_current_node(ROV_NODE_POWER_SLAB);
+            node3_app_step();
+
+            if ((ff + 1) % 10000 == 0) {
+                printf("[FF] Cycle %d / %d | SimTime=%u ms | PWMs: [%u, %u, %u, %u, %u, %u, %u, %u]\n", ff + 1,
+                       fast_forward, time_get_ms(), mock_bsp_get_pwm_us(0), mock_bsp_get_pwm_us(1),
+                       mock_bsp_get_pwm_us(2), mock_bsp_get_pwm_us(3), mock_bsp_get_pwm_us(4), mock_bsp_get_pwm_us(5),
+                       mock_bsp_get_pwm_us(6), mock_bsp_get_pwm_us(7));
+                fflush(stdout);
+            }
+        }
+
+        printf("[FF] Done: %d cycles in %u ms virtual time. TX frames: %u\n", fast_forward, time_get_ms(),
+               mock_can_get_tx_count());
+        return 0;
     }
 
 #ifdef _WIN32
@@ -143,6 +214,8 @@ int main(int argc, char **argv) {
     mock_bsp_set_auto_advance_delay(false);
     mock_can_reset();
     mock_sensors_reset();
+    mock_physics_reset();
+    mock_physics_set_enabled(true); /* Run 6-DOF physics plant model in real-time mode */
 
     mock_can_set_current_node(ROV_NODE_PI_SHIELD);
     node1_app_init();
@@ -158,9 +231,10 @@ int main(int argc, char **argv) {
     uint8_t rx_stream_buf[sizeof(sil_can_packet_t) * 4];
     size_t rx_stream_len = 0;
 
-    static uint32_t s_last_tx_nav = 0;
     static uint32_t s_last_tx_env = 0;
     static uint32_t s_last_tx_pwr = 0;
+    static bool s_env_initial_sent = false;
+    static bool s_pwr_initial_sent = false;
 
     bool running = true;
     while (running) {
@@ -179,6 +253,8 @@ int main(int argc, char **argv) {
             client_fd = new_client;
             set_nonblocking(client_fd);
             rx_stream_len = 0;
+            s_env_initial_sent = false;
+            s_pwr_initial_sent = false;
             printf("SIL Bridge: Client connected from %s:%d\n", inet_ntoa(client_addr.sin_addr),
                    ntohs(client_addr.sin_port));
             fflush(stdout);
@@ -196,6 +272,15 @@ int main(int argc, char **argv) {
                 while (rx_stream_len >= sizeof(sil_can_packet_t)) {
                     sil_can_packet_t *pkt = (sil_can_packet_t *)rx_stream_buf;
                     if (pkt->magic == SIL_MAGIC_HEADER || pkt->magic == SIL_MAGIC_HEADER_LEGACY) {
+                        /* Security: Validate payload length to prevent buffer over-read */
+                        if (pkt->len > 64) {
+                            printf("SIL Bridge: WARNING: Dropped malformed packet with length %u (exceeds maximum 64)\n", pkt->len);
+                            fflush(stdout);
+                            memmove(rx_stream_buf, rx_stream_buf + 1, rx_stream_len - 1);
+                            rx_stream_len--;
+                            continue;
+                        }
+
                         mock_can_set_current_node(ROV_NODE_PI_CORE);
                         can_send(pkt->id, pkt->data, pkt->len);
 
@@ -250,6 +335,29 @@ int main(int argc, char **argv) {
         mock_can_set_current_node(ROV_NODE_POWER_SLAB);
         node3_app_step();
 
+        /* SIL-only feedback lets integration tests inspect actual mocked outputs. */
+        if (!IS_INVALID_SOCKET(client_fd)) {
+            uint8_t status[23];
+            for (uint8_t channel = 0; channel < ROV_NUM_THRUSTERS; channel++) {
+                uint16_t pwm = mock_bsp_get_pwm_us(channel);
+                status[channel * 2U] = (uint8_t)(pwm & 0xFFU);
+                status[channel * 2U + 1U] = (uint8_t)(pwm >> 8U);
+            }
+            status[16] = mock_bsp_is_emergency_brake_tripped() ? 1U : 0U;
+            uint16_t solenoids = mock_bsp_get_solenoid_mask();
+            status[17] = (uint8_t)(solenoids & 0xFFU);
+            status[18] = (uint8_t)(solenoids >> 8U);
+            uint32_t sim_time_ms = time_get_ms();
+            status[19] = (uint8_t)(sim_time_ms & 0xFFU);
+            status[20] = (uint8_t)((sim_time_ms >> 8U) & 0xFFU);
+            status[21] = (uint8_t)((sim_time_ms >> 16U) & 0xFFU);
+            status[22] = (uint8_t)(sim_time_ms >> 24U);
+            if (!send_sil_frame(client_fd, SIL_CAN_ID_OUTPUT_STATUS, status, sizeof(status))) {
+                CLOSE_SOCKET(client_fd);
+                client_fd = INVALID_SOCKET;
+            }
+        }
+
         /* 6. Drain frames addressed to Pi Core and forward over TCP (rate-limited telemetry to avoid flooding) */
         mock_can_set_current_node(ROV_NODE_PI_CORE);
         uint32_t rx_id;
@@ -261,27 +369,22 @@ int main(int argc, char **argv) {
             if (!IS_INVALID_SOCKET(client_fd)) {
                 bool should_send = false;
 
-                if (rx_id == ROV_CAN_ID_EMERGENCY_BREAK || rx_id == ROV_CAN_ID_EFUSE_FAULT_ALERT) {
-                    /* Critical safety alerts: ALWAYS send immediately */
+                if (rx_id == ROV_CAN_ID_EMERGENCY_BREAK || rx_id == ROV_CAN_ID_EFUSE_FAULT_ALERT ||
+                    rx_id == ROV_CAN_ID_NAV_TELEMETRY) {
+                    /* Critical safety alerts and 100 Hz Nav telemetry: ALWAYS send immediately */
                     should_send = true;
-                } else if (rx_id == ROV_CAN_ID_NAV_TELEMETRY) {
-                    /* Nav telemetry: stream at 5 Hz (every 200 ms) instead of 100 Hz flood */
-                    if (now_ms - s_last_tx_nav >= 200) {
-                        s_last_tx_nav = now_ms;
-                        should_send = true;
-                    }
                 } else if (rx_id == ROV_CAN_ID_ENV_TELEMETRY) {
-                    /* Enclosure telemetry: 1 Hz normal, instant if leak detected */
-                    if (rx_len >= 13 && rx_data[12] != 0) {
-                        should_send = true;
-                    } else if (now_ms - s_last_tx_env >= 1000) {
+                    /* Enclosure telemetry: instant if leak, otherwise 1 Hz (initial frame instant) */
+                    if ((rx_len >= 13 && rx_data[12] != 0) || !s_env_initial_sent || (now_ms - s_last_tx_env >= 1000)) {
                         s_last_tx_env = now_ms;
+                        s_env_initial_sent = true;
                         should_send = true;
                     }
                 } else if (rx_id == ROV_CAN_ID_POWER_TELEMETRY) {
-                    /* Power telemetry: stream at 1 Hz */
-                    if (now_ms - s_last_tx_pwr >= 1000) {
+                    /* Power telemetry: initial frame immediately, then 1 Hz */
+                    if (!s_pwr_initial_sent || (now_ms - s_last_tx_pwr >= 1000)) {
                         s_last_tx_pwr = now_ms;
+                        s_pwr_initial_sent = true;
                         should_send = true;
                     }
                 } else {
@@ -291,11 +394,13 @@ int main(int argc, char **argv) {
 
                 if (should_send) {
                     sil_can_packet_t tx_pkt;
+                    memset(&tx_pkt, 0, sizeof(tx_pkt));
                     tx_pkt.magic = SIL_MAGIC_HEADER;
                     tx_pkt.id = rx_id;
-                    tx_pkt.len = rx_len;
-                    if (rx_len > 0) {
-                        memcpy(tx_pkt.data, rx_data, rx_len);
+                    uint8_t copy_len = (rx_len > sizeof(tx_pkt.data)) ? (uint8_t)sizeof(tx_pkt.data) : rx_len;
+                    tx_pkt.len = copy_len;
+                    if (copy_len > 0) {
+                        memcpy(tx_pkt.data, rx_data, copy_len);
                     }
                     int sent = send(client_fd, (const char *)&tx_pkt, sizeof(sil_can_packet_t), 0);
                     if (sent <= 0) {
