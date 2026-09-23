@@ -4,8 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum
-{
+typedef enum {
     PWR_SEQ_INIT = 0,
     PWR_SEQ_WAIT_LOGIC_STABLE,
     PWR_SEQ_DIAGNOSTICS,

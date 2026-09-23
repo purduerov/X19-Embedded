@@ -90,6 +90,35 @@ void bsp_emergency_brake_trip(void);
  */
 bool bsp_is_emergency_brake_tripped(void);
 
+/**
+ * @brief Enable one 12 V converter brick.
+ * @param brick_idx Brick index (0 to 3).
+ */
+void bsp_power_brick_enable(uint8_t brick_idx);
+
+/**
+ * @brief Immediately disable all 12 V converter bricks.
+ */
+void bsp_power_brick_disable_all(void);
+
+/**
+ * @brief Read the logic rail voltage.
+ * @return Logic rail voltage in millivolts.
+ */
+uint32_t bsp_get_logic_voltage_mv(void);
+
+/**
+ * @brief Check LM74700 ideal diode controller status.
+ * @return true if status is healthy, false if a fault is detected.
+ */
+bool bsp_lm74700_status_ok(void);
+
+/**
+ * @brief Read the PCB temperature.
+ * @return PCB temperature in degrees Celsius.
+ */
+float bsp_get_pcb_temperature_c(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -24,7 +24,6 @@ int main(void) {
      * Replace with MX_I3C1_Init() when moving to final STM32C5 hardware.
      */
     MX_I2C2_Init();
-
     MX_FDCAN1_Init();
 
     /* USER CODE BEGIN 2 */
