@@ -90,6 +90,8 @@ void mock_can_set_tx_fail(bool fail);
  */
 void mock_can_set_drop_count(uint32_t count);
 
+bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len);
+
 #ifdef __cplusplus
 }
 #endif

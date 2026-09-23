@@ -232,3 +232,7 @@ void can_recover(void) {
     uint8_t cur_idx = node_to_index(g_current_node);
     g_nodes[cur_idx].is_bus_off = false;
 }
+
+bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len) {
+    return can_send(id, data, len);
+}
