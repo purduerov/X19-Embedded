@@ -36,6 +36,13 @@ static void setup(void) {
     mock_bsp_set_lm74700_status_ok(true);
 }
 
+static void run_one_full_pmbus_cycle(void) {
+    for (int i = 0; i < 5; i++) {
+        mock_bsp_advance_time_ms(10U);
+        node3_app_step();
+    }
+}
+
 /*
  * ==========================================================================
  * Existing Node 3 telemetry tests
@@ -45,12 +52,13 @@ static void setup(void) {
 void test_node3_nominal_telemetry(void) {
     setup();
 
-    /* Configure 5 PMBus bricks: 5.2V @ 2A, and 4x 12V @ 5A */
-    mock_sensors_set_tps25990(0, 48.0f, 5.2f, 2.0f, 32.0f, 0);
-
-    for (int i = 1; i < 5; i++) {
+    /* Bricks 0..3 are 12 V converters. */
+    for (int i = 0; i < 4; i++) {
         mock_sensors_set_tps25990((uint8_t)i, 48.0f, 12.0f, 5.0f, 38.0f, 0);
     }
+
+    /* Brick 4 / address 0x44 is the 5.2 V logic converter. */
+    mock_sensors_set_tps25990(4U, 48.0f, 5.2f, 2.0f, 32.0f, 0);
 
     node3_app_init();
 
@@ -59,11 +67,11 @@ void test_node3_nominal_telemetry(void) {
 
     assert(mock_can_get_tx_count() == 0);
 
-    /* Advance 50 ms to trigger 20 Hz power telemetry */
-    mock_bsp_advance_time_ms(50);
-
-    node3_app_step();
-
+    /* Poll one PMBus brick every 10 ms. */
+    for (int i = 0; i < 5; i++) {
+        mock_bsp_advance_time_ms(10U);
+        node3_app_step();
+    }
     assert(mock_can_get_tx_count() == 1);
 
     uint8_t tx_data[64];
@@ -93,9 +101,7 @@ void test_node3_overcurrent_fault_alert(void) {
 
     node3_app_init();
 
-    mock_bsp_advance_time_ms(50);
-
-    node3_app_step();
+    run_one_full_pmbus_cycle();
 
     /* Must broadcast Priority 0 eFuse Fault Alert (0x005) */
     assert(mock_can_count_tx_by_id(ROV_CAN_ID_EFUSE_FAULT_ALERT) >= 1);

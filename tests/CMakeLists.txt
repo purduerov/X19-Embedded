@@ -126,6 +126,7 @@ add_executable(test_multi_node_bus
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
 )
 target_include_directories(test_multi_node_bus PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
@@ -145,6 +146,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
     )
     target_include_directories(sil_bridge_server PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc

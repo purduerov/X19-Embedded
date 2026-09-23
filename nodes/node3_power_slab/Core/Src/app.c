@@ -13,16 +13,18 @@
 #include "bsp.h"
 #include "can_interface.h"
 #include "pmbus_brick.h"
+#include "power_sequence.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
 #include <string.h>
-#include "power_sequence.h"
 
 static rov_safety_state_t g_safety_state;
 static rov_power_telemetry_t g_power_telemetry;
 static pmbus_brick_dev_t g_pmbus_bricks[5];
-static uint32_t g_last_power_time = 0;
+static uint32_t g_last_power_time = 0U;
+static uint32_t g_last_pmbus_poll_time = 0U;
+static uint8_t g_next_pmbus_brick = 0U;
 
 void node3_app_init(void) {
     bsp_init();
@@ -36,76 +38,94 @@ void node3_app_init(void) {
     memset(&g_power_telemetry, 0, sizeof(g_power_telemetry));
     g_power_telemetry.tether_voltage_mv = 48000;
     g_power_telemetry.v5_voltage_mv = 5200;
-    g_last_power_time = 0;
+    g_last_power_time = 0U;
+    g_last_pmbus_poll_time = 0U;
+    g_next_pmbus_brick = 0U;
 }
 
 void node3_app_step(void) {
     power_sequence_step();
     uint32_t current_time = time_get_ms();
+    /* Non-blocking PMBus round-robin polling: one brick every 10 ms. */
+    if ((current_time - g_last_pmbus_poll_time) >= 10U) {
+        g_last_pmbus_poll_time = current_time;
 
-    /* 20 Hz Power Telemetry and Protection Loop */
-    if (current_time - g_last_power_time >= (1000 / ROV_POWER_TELEMETRY_FREQ_HZ)) {
-        g_last_power_time = current_time;
+        (void)pmbus_brick_read_telemetry(&g_pmbus_bricks[g_next_pmbus_brick]);
 
-        /* Performance optimization: Accumulate total power inside the loop and apply
-           the division (via inverse multiplication) once outside to avoid 5 FPU divisions (~14 cycles each). */
-        float total_tether_power_w = 0.0f;
-        bool fault_detected = false;
-        int16_t max_temp_c_tenths = 250;
+        g_next_pmbus_brick++;
 
-        for (int i = 0; i < 5; i++) {
-            pmbus_brick_read_telemetry(&g_pmbus_bricks[i]);
+        if (g_next_pmbus_brick >= 5U) {
+            g_next_pmbus_brick = 0U;
+        }
 
-            /* Brick 0 is 5.2V logic; Bricks 1..4 are 12V 300W thruster bricks */
-            if (i == 0) {
-                g_power_telemetry.v5_voltage_mv = (uint16_t)(g_pmbus_bricks[i].output_voltage_v * 1000.0f);
-                g_power_telemetry.v5_current_ma = (uint16_t)(g_pmbus_bricks[i].output_current_a * 1000.0f);
-                total_tether_power_w += (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a);
-            } else {
-                g_power_telemetry.v12_current_ma[i - 1] = (uint16_t)(g_pmbus_bricks[i].output_current_a * 1000.0f);
-                total_tether_power_w += (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a);
+        /* 20 Hz Power Telemetry and Protection Loop */
+        if (current_time - g_last_power_time >= (1000 / ROV_POWER_TELEMETRY_FREQ_HZ)) {
+            g_last_power_time = current_time;
 
-                /* Overcurrent protection: 25A max per brick */
-                if (g_pmbus_bricks[i].output_current_a > ROV_BRICK_MAX_CURRENT_A) {
+            /* Performance optimization: Accumulate total power inside the loop and apply
+               the division (via inverse multiplication) once outside to avoid 5 FPU divisions (~14 cycles each). */
+            float total_tether_power_w = 0.0f;
+            bool fault_detected = false;
+            int16_t max_temp_c_tenths = 250;
+
+            for (int i = 0; i < 5; i++) {
+                pmbus_brick_read_telemetry(&g_pmbus_bricks[i]);
+
+                /* Brick 0 is 5.2V logic; Bricks 1..4 are 12V 300W thruster bricks */
+                /* Bricks 0..3 are 12 V converters; Brick 4 is the 5.2 V logic converter. */
+                if (i == 4) {
+                    g_power_telemetry.v5_voltage_mv = (uint16_t)(g_pmbus_bricks[i].output_voltage_v * 1000.0f);
+
+                    g_power_telemetry.v5_current_ma = (uint16_t)(g_pmbus_bricks[i].output_current_a * 1000.0f);
+
+                    total_tether_power_w += (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a);
+                } else {
+                    g_power_telemetry.v12_current_ma[i - 1] = (uint16_t)(g_pmbus_bricks[i].output_current_a * 1000.0f);
+
+                    total_tether_power_w += (g_pmbus_bricks[i].output_voltage_v * g_pmbus_bricks[i].output_current_a);
+
+                    /* Overcurrent protection: 25 A max per 12 V brick. */
+                    if (g_pmbus_bricks[i].output_current_a > ROV_BRICK_MAX_CURRENT_A) {
+                        fault_detected = true;
+                    }
+                }
+
+                int16_t brick_temp_tenths = (int16_t)(g_pmbus_bricks[i].temperature_c * 10.0f);
+                if (brick_temp_tenths > max_temp_c_tenths) {
+                    max_temp_c_tenths = brick_temp_tenths;
+                }
+                if (g_pmbus_bricks[i].temperature_c > ROV_PCB_MAX_SAFE_TEMP_C) {
                     fault_detected = true;
                 }
             }
 
-            int16_t brick_temp_tenths = (int16_t)(g_pmbus_bricks[i].temperature_c * 10.0f);
-            if (brick_temp_tenths > max_temp_c_tenths) {
-                max_temp_c_tenths = brick_temp_tenths;
+            float total_tether_current_a = total_tether_power_w * (1.0f / ROV_TETHER_NOMINAL_VOLTAGE_V);
+            g_power_telemetry.tether_voltage_mv = (uint16_t)(ROV_TETHER_NOMINAL_VOLTAGE_V * 1000.0f);
+            g_power_telemetry.tether_current_ma = (uint16_t)(total_tether_current_a * 1000.0f);
+            g_power_telemetry.pcb_temp_c = max_temp_c_tenths;
+
+            if (fault_detected) {
+                power_sequence_emergency_stop();
+                g_power_telemetry.status_flags |= 0x0001; /* Fault bit */
+                g_safety_state.overtemperature_tripped = true;
+
+                /* Broadcast Priority 0 eFuse Fault Alert (0x005) */
+                uint8_t alert[8] = {0xEF, 0x01, (uint8_t)(g_power_telemetry.status_flags & 0xFF), 0, 0, 0, 0, 0};
+                can_send(ROV_CAN_ID_EFUSE_FAULT_ALERT, alert, sizeof(alert));
             }
-            if (g_pmbus_bricks[i].temperature_c > ROV_PCB_MAX_SAFE_TEMP_C) {
-                fault_detected = true;
+
+            /* Stream 0x300 Power Telemetry over CAN FD */
+            uint8_t tx_buf[64];
+            size_t packed_len = 0;
+            if (rov_can_pack_power_telemetry(&g_power_telemetry, tx_buf, sizeof(tx_buf), &packed_len) == ROV_OK) {
+                can_send(ROV_CAN_ID_POWER_TELEMETRY, tx_buf, (uint8_t)packed_len);
             }
+
+            led_toggle();
         }
 
-        float total_tether_current_a = total_tether_power_w * (1.0f / ROV_TETHER_NOMINAL_VOLTAGE_V);
-        g_power_telemetry.tether_voltage_mv = (uint16_t)(ROV_TETHER_NOMINAL_VOLTAGE_V * 1000.0f);
-        g_power_telemetry.tether_current_ma = (uint16_t)(total_tether_current_a * 1000.0f);
-        g_power_telemetry.pcb_temp_c = max_temp_c_tenths;
-
-        if (fault_detected) {
-            power_sequence_emergency_stop();
-            g_power_telemetry.status_flags |= 0x0001; /* Fault bit */
-            g_safety_state.overtemperature_tripped = true;
-
-            /* Broadcast Priority 0 eFuse Fault Alert (0x005) */
-            uint8_t alert[8] = {0xEF, 0x01, (uint8_t)(g_power_telemetry.status_flags & 0xFF), 0, 0, 0, 0, 0};
-            can_send(ROV_CAN_ID_EFUSE_FAULT_ALERT, alert, sizeof(alert));
-        }
-
-        /* Stream 0x300 Power Telemetry over CAN FD */
-        uint8_t tx_buf[64];
-        size_t packed_len = 0;
-        if (rov_can_pack_power_telemetry(&g_power_telemetry, tx_buf, sizeof(tx_buf), &packed_len) == ROV_OK) {
-            can_send(ROV_CAN_ID_POWER_TELEMETRY, tx_buf, (uint8_t)packed_len);
-        }
-
-        led_toggle();
+        delay_ms(5);
     }
-
-    delay_ms(5);
 }
 
 #ifndef ROV_UNIT_TEST
@@ -113,7 +133,6 @@ void app_main(void) {
     node3_app_init();
     while (1) {
         node3_app_step();
-        
     }
 }
 #endif

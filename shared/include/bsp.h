@@ -119,6 +119,15 @@ bool bsp_lm74700_status_ok(void);
  */
 float bsp_get_pcb_temperature_c(void);
 
+/**
+ * @brief Read a 16-bit PMBus command word from a converter brick.
+ * @param pmbus_addr 7-bit PMBus slave address.
+ * @param command PMBus command code.
+ * @param raw_word Destination for the raw 16-bit response.
+ * @return true if the transaction succeeded, false otherwise.
+ */
+bool bsp_pmbus_read_word(uint8_t pmbus_addr, uint8_t command, uint16_t *raw_word);
+
 #ifdef __cplusplus
 }
 #endif

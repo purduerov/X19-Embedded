@@ -204,3 +204,16 @@ void bsp_power_brick_disable_all(void) {
         mock_power_brick_enabled[i] = false;
     }
 }
+
+bool bsp_pmbus_read_word(uint8_t pmbus_addr, uint8_t command, uint16_t *raw_word) {
+    (void)pmbus_addr;
+    (void)command;
+
+    if (raw_word == NULL) {
+        return false;
+    }
+
+    *raw_word = 0U;
+
+    return true;
+}
