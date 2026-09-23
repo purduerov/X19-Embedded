@@ -38,15 +38,19 @@ bool can_init(void);
 bool can_send(uint32_t id, const uint8_t *data, uint8_t len);
 
 /**
- * @brief Transmit an emergency CAN frame with highest priority.
+ * @brief Immediately submit a safety-critical CAN frame.
  *
- * Transmits immediately using an emergency or dedicated high-priority hardware mailbox,
- * bypassing normal telemetry queues.
+ * This transmission path is reserved for time-critical safety messages such
+ * as ROV_CAN_ID_EMERGENCY_BREAK (0x001).
  *
- * @param id 11-bit standard CAN identifier (typically 0x001).
+ * The hardware-specific implementation must bypass normal software telemetry
+ * queues and submit the frame directly to the FDCAN hardware transmit resource.
+ * The function must be non-blocking and safe to call from the leak EXTI path.
+ *
+ * @param id 11-bit standard CAN identifier.
  * @param data Pointer to payload data buffer.
  * @param len Payload length.
- * @return true if transmitted or queued into hardware mailbox, false otherwise.
+ * @return true if submitted to the hardware transmit resource, false otherwise.
  */
 bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len);
 
