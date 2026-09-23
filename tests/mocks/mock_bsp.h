@@ -66,6 +66,31 @@ void mock_bsp_set_auto_advance_delay(bool enable);
  */
 bool mock_bsp_is_emergency_brake_tripped(void);
 
+/**
+ * @brief Set the mocked logic rail voltage.
+ * @param voltage_mv Logic rail voltage in millivolts.
+ */
+void mock_bsp_set_logic_voltage_mv(uint32_t voltage_mv);
+
+/**
+ * @brief Set the mocked PCB temperature.
+ * @param temperature_c PCB temperature in degrees Celsius.
+ */
+void mock_bsp_set_pcb_temperature_c(float temperature_c);
+
+/**
+ * @brief Set the mocked LM74700 status.
+ * @param status_ok true if the ideal diode controller is healthy, false if faulted.
+ */
+void mock_bsp_set_lm74700_status_ok(bool status_ok);
+
+/**
+ * @brief Check whether a mocked power brick is currently enabled.
+ * @param brick_idx Power brick index.
+ * @return true if the brick is enabled, false otherwise.
+ */
+bool mock_bsp_is_power_brick_enabled(uint8_t brick_idx);
+
 #ifdef __cplusplus
 }
 #endif

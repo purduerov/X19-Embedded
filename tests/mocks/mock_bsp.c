@@ -8,6 +8,12 @@
 #include "rov_parameters.h"
 #include <string.h>
 
+#define MOCK_NUM_POWER_BRICKS 4U
+
+static uint32_t mock_logic_voltage_mv = 0U;
+static float mock_pcb_temperature_c = 25.0f;
+static bool mock_lm74700_status_ok = true;
+static bool mock_power_brick_enabled[MOCK_NUM_POWER_BRICKS];
 static uint32_t g_mock_time_ms = 0;
 static bool g_mock_led_state = false;
 static uint32_t g_mock_led_toggle_count = 0;
@@ -29,6 +35,34 @@ void mock_bsp_reset(void) {
     g_mock_leak_probes[1] = false;
     g_mock_emergency_brake_tripped = false;
     g_auto_advance_delay = true;
+
+    mock_logic_voltage_mv = 0U;
+    mock_pcb_temperature_c = 25.0f;
+    mock_lm74700_status_ok = true;
+
+    for (uint8_t i = 0U; i < MOCK_NUM_POWER_BRICKS; i++) {
+        mock_power_brick_enabled[i] = false;
+    }
+}
+
+void mock_bsp_set_logic_voltage_mv(uint32_t voltage_mv) {
+    mock_logic_voltage_mv = voltage_mv;
+}
+
+void mock_bsp_set_pcb_temperature_c(float temperature_c) {
+    mock_pcb_temperature_c = temperature_c;
+}
+
+void mock_bsp_set_lm74700_status_ok(bool status_ok) {
+    mock_lm74700_status_ok = status_ok;
+}
+
+bool mock_bsp_is_power_brick_enabled(uint8_t brick_idx) {
+    if (brick_idx >= MOCK_NUM_POWER_BRICKS) {
+        return false;
+    }
+
+    return mock_power_brick_enabled[brick_idx];
 }
 
 void mock_bsp_set_time_ms(uint32_t ms) {
@@ -145,4 +179,28 @@ bool bsp_is_emergency_brake_tripped(void) {
 
 bool mock_bsp_is_emergency_brake_tripped(void) {
     return g_mock_emergency_brake_tripped;
+}
+
+uint32_t bsp_get_logic_voltage_mv(void) {
+    return mock_logic_voltage_mv;
+}
+
+float bsp_get_pcb_temperature_c(void) {
+    return mock_pcb_temperature_c;
+}
+
+bool bsp_lm74700_status_ok(void) {
+    return mock_lm74700_status_ok;
+}
+
+void bsp_power_brick_enable(uint8_t brick_idx) {
+    if (brick_idx < MOCK_NUM_POWER_BRICKS) {
+        mock_power_brick_enabled[brick_idx] = true;
+    }
+}
+
+void bsp_power_brick_disable_all(void) {
+    for (uint8_t i = 0U; i < MOCK_NUM_POWER_BRICKS; i++) {
+        mock_power_brick_enabled[i] = false;
+    }
 }

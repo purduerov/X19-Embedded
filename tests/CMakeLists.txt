@@ -111,6 +111,8 @@ add_test(NAME test_node2_control_board COMMAND test_node2_control_board)
 add_executable(test_node3_power_slab
     test_node3_power_slab.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
+
 )
 target_include_directories(test_node3_power_slab PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
