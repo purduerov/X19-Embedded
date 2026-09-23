@@ -62,8 +62,7 @@ void led_toggle(void) {
 
 void led_set(bool state) {
 #if defined(LED_HEARTBEAT_GPIO_Port) && defined(LED_HEARTBEAT_Pin)
-    HAL_GPIO_WritePin(LED_HEARTBEAT_GPIO_Port, LED_HEARTBEAT_Pin,
-                      state ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(LED_HEARTBEAT_GPIO_Port, LED_HEARTBEAT_Pin, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 #else
     (void)state;
 #endif

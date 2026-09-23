@@ -18,7 +18,7 @@ void rov_timesync_init(rov_timesync_state_t *ts) {
 }
 
 rov_status_t rov_timesync_process_master(rov_timesync_state_t *ts, const rov_time_sync_master_t *sync,
-                                        uint64_t local_rx_us) {
+                                         uint64_t local_rx_us) {
     if (!ts || !sync)
         return ROV_ERR_INVALID_ARG;
 
@@ -81,9 +81,8 @@ rov_status_t rov_timesync_update_latency(rov_timesync_state_t *ts, uint32_t rtt_
         return ROV_ERR_INVALID_ARG;
 
     /* Exponential moving average jitter estimation */
-    uint32_t delay_diff = (one_way_delay_us > ts->one_way_delay_us) ?
-                          (one_way_delay_us - ts->one_way_delay_us) :
-                          (ts->one_way_delay_us - one_way_delay_us);
+    uint32_t delay_diff = (one_way_delay_us > ts->one_way_delay_us) ? (one_way_delay_us - ts->one_way_delay_us)
+                                                                    : (ts->one_way_delay_us - one_way_delay_us);
     ts->jitter_us = (ts->jitter_us * 3 + delay_diff) / 4;
 
     ts->round_trip_us = rtt_us;

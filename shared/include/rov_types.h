@@ -87,11 +87,11 @@ typedef struct __attribute__((packed)) {
  * Sent on ROV_CAN_ID_TIME_SYNC_REQ (0x011).
  */
 typedef struct __attribute__((packed)) {
-    uint8_t target_node_id;  /**< Target node ID (ROV_NODE_CONTROL_BOARD, etc.) */
-    uint8_t seq;             /**< Request sequence number */
-    uint16_t reserved;       /**< 16-bit alignment */
-    uint32_t flags;          /**< Request flags */
-    uint64_t t1_us;          /**< Requester transmit timestamp in microseconds */
+    uint8_t target_node_id; /**< Target node ID (ROV_NODE_CONTROL_BOARD, etc.) */
+    uint8_t seq;            /**< Request sequence number */
+    uint16_t reserved;      /**< 16-bit alignment */
+    uint32_t flags;         /**< Request flags */
+    uint64_t t1_us;         /**< Requester transmit timestamp in microseconds */
 } rov_time_sync_req_t;
 
 /**
@@ -113,15 +113,15 @@ typedef struct __attribute__((packed)) {
  */
 typedef struct __attribute__((packed)) {
     uint64_t timestamp_us; /**< Synchronized vehicle microsecond timestamp */
-    float q_w;          /**< Orientation Quaternion W */
-    float q_x;          /**< Orientation Quaternion X */
-    float q_y;          /**< Orientation Quaternion Y */
-    float q_z;          /**< Orientation Quaternion Z */
-    float gyro_x_rad_s; /**< Angular Velocity X (rad/s) */
-    float gyro_y_rad_s; /**< Angular Velocity Y (rad/s) */
-    float gyro_z_rad_s; /**< Angular Velocity Z (rad/s) */
-    float depth_meters; /**< Hydrostatic depth in meters (from MS5837) */
-    uint8_t imu_status; /**< IMU calibration & health flags (0 = Uncalibrated, 3 = High Precision) */
+    float q_w;             /**< Orientation Quaternion W */
+    float q_x;             /**< Orientation Quaternion X */
+    float q_y;             /**< Orientation Quaternion Y */
+    float q_z;             /**< Orientation Quaternion Z */
+    float gyro_x_rad_s;    /**< Angular Velocity X (rad/s) */
+    float gyro_y_rad_s;    /**< Angular Velocity Y (rad/s) */
+    float gyro_z_rad_s;    /**< Angular Velocity Z (rad/s) */
+    float depth_meters;    /**< Hydrostatic depth in meters (from MS5837) */
+    uint8_t imu_status;    /**< IMU calibration & health flags (0 = Uncalibrated, 3 = High Precision) */
 } rov_nav_telemetry_t;
 
 /**

@@ -30,16 +30,16 @@ extern "C" {
  * @brief Time Synchronization State Tracker.
  */
 typedef struct {
-    int64_t clock_offset_us;     /**< Clock offset: T_synced = T_local + clock_offset_us */
-    uint64_t last_sync_rx_us;    /**< Local hardware timestamp when last master sync was received */
-    uint64_t last_master_time_us;/**< Master timestamp from last received sync frame */
-    uint32_t last_seq;           /**< Last received sequence number */
-    uint32_t round_trip_us;      /**< Last measured round-trip time in microseconds */
-    uint32_t one_way_delay_us;   /**< Estimated one-way bus propagation delay in microseconds */
-    uint32_t jitter_us;          /**< Estimated delay jitter in microseconds */
-    bool synchronized;           /**< true if actively synchronized within timeout window */
-    bool initial_sync_done;      /**< true after first valid sync frame */
-    uint8_t master_status;       /**< Master status flags (e.g. topside NTP lock) */
+    int64_t clock_offset_us;      /**< Clock offset: T_synced = T_local + clock_offset_us */
+    uint64_t last_sync_rx_us;     /**< Local hardware timestamp when last master sync was received */
+    uint64_t last_master_time_us; /**< Master timestamp from last received sync frame */
+    uint32_t last_seq;            /**< Last received sequence number */
+    uint32_t round_trip_us;       /**< Last measured round-trip time in microseconds */
+    uint32_t one_way_delay_us;    /**< Estimated one-way bus propagation delay in microseconds */
+    uint32_t jitter_us;           /**< Estimated delay jitter in microseconds */
+    bool synchronized;            /**< true if actively synchronized within timeout window */
+    bool initial_sync_done;       /**< true after first valid sync frame */
+    uint8_t master_status;        /**< Master status flags (e.g. topside NTP lock) */
 } rov_timesync_state_t;
 
 /**
@@ -60,7 +60,7 @@ void rov_timesync_init(rov_timesync_state_t *ts);
  * @return ROV_OK on success, ROV_ERR_INVALID_ARG on null pointers.
  */
 rov_status_t rov_timesync_process_master(rov_timesync_state_t *ts, const rov_time_sync_master_t *sync,
-                                        uint64_t local_rx_us);
+                                         uint64_t local_rx_us);
 
 /**
  * @brief Calculate two-way network latency and clock offset from a 4-timestamp exchange.

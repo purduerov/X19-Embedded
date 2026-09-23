@@ -63,8 +63,7 @@ void led_toggle(void) {
 
 void led_set(bool state) {
 #if defined(LED_STATUS_GPIO_Port) && defined(LED_STATUS_Pin)
-    HAL_GPIO_WritePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin,
-                      state ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 #else
     (void)state;
 #endif
@@ -84,15 +83,32 @@ void bsp_pwm_set_us(uint8_t channel, uint16_t pulse_us) {
      */
 #if defined(htim1) && defined(htim8)
     switch (channel) {
-        case 0: __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_us); break;
-        case 1: __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pulse_us); break;
-        case 2: __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pulse_us); break;
-        case 3: __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pulse_us); break;
-        case 4: __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_1, pulse_us); break;
-        case 5: __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_2, pulse_us); break;
-        case 6: __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, pulse_us); break;
-        case 7: __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_4, pulse_us); break;
-        default: break;
+    case 0:
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_us);
+        break;
+    case 1:
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pulse_us);
+        break;
+    case 2:
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pulse_us);
+        break;
+    case 3:
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pulse_us);
+        break;
+    case 4:
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_1, pulse_us);
+        break;
+    case 5:
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_2, pulse_us);
+        break;
+    case 6:
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_3, pulse_us);
+        break;
+    case 7:
+        __HAL_TIM_SET_COMPARE(&htim8, TIM_CHANNEL_4, pulse_us);
+        break;
+    default:
+        break;
     }
 #endif
 }
