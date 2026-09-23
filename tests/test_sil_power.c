@@ -137,7 +137,7 @@ void test_power_telemetry_continuity(void) {
     uint32_t pwr_count = mock_can_count_tx_by_id(ROV_CAN_ID_POWER_TELEMETRY);
     assert(pwr_count >= 20);
     assert(pwr_count <= 60);
-    printf("[PASS] test_power_telemetry_continuity (%" PRIu32 " frames in 2s)\n", pwr_count);
+    printf("[PASS] test_power_telemetry_continuity (%"PRIu32" frames in 2s)\n", pwr_count);
 }
 
 int main(void) {

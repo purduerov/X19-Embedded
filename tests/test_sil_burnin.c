@@ -1,3 +1,4 @@
+#include <inttypes.h>
 /**
  * @file test_sil_burnin.c
  * @brief SIL 100,000-cycle Burn-In Test: long-duration stability, counter
@@ -60,12 +61,12 @@ void test_burnin_neutral_100k(void) {
             prev_tx_count = tx_count;
             uint32_t expected_time_ms = (uint32_t)(cycle + 1) * 10u;
             assert(time_get_ms() == expected_time_ms);
-            printf("[BURNIN] Cycle %d / %d | SimTime=%u ms | TX frames=%u\n", cycle + 1, TOTAL_CYCLES, expected_time_ms,
+            printf("[BURNIN] Cycle %d / %d | SimTime=%"PRIu32" ms | TX frames=%"PRIu32"\n", cycle + 1, TOTAL_CYCLES, expected_time_ms,
                    tx_count);
             fflush(stdout);
         }
     }
-    printf("[PASS] test_burnin_neutral_100k (%d cycles, %u ms virtual time)\n", TOTAL_CYCLES, time_get_ms());
+    printf("[PASS] test_burnin_neutral_100k (%d cycles, %"PRIu32" ms virtual time)\n", TOTAL_CYCLES, time_get_ms());
 }
 
 /* ============================================================================
