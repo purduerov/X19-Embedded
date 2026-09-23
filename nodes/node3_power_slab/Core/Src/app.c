@@ -17,6 +17,7 @@
 #include "rov_parameters.h"
 #include "rov_safety.h"
 #include <string.h>
+#include "power_sequence.h"
 
 static rov_safety_state_t g_safety_state;
 static rov_power_telemetry_t g_power_telemetry;
@@ -25,6 +26,7 @@ static uint32_t g_last_power_time = 0;
 
 void node3_app_init(void) {
     bsp_init();
+    power_sequence_init();
     rov_safety_init(&g_safety_state);
 
     for (int i = 0; i < 5; i++) {
@@ -38,6 +40,7 @@ void node3_app_init(void) {
 }
 
 void node3_app_step(void) {
+    power_sequence_step();
     uint32_t current_time = time_get_ms();
 
     /* 20 Hz Power Telemetry and Protection Loop */
@@ -83,6 +86,7 @@ void node3_app_step(void) {
         g_power_telemetry.pcb_temp_c = max_temp_c_tenths;
 
         if (fault_detected) {
+            power_sequence_emergency_stop();
             g_power_telemetry.status_flags |= 0x0001; /* Fault bit */
             g_safety_state.overtemperature_tripped = true;
 
@@ -109,6 +113,7 @@ void app_main(void) {
     node3_app_init();
     while (1) {
         node3_app_step();
+        
     }
 }
 #endif
