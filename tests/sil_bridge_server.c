@@ -257,7 +257,11 @@ int main(int argc, char **argv) {
                     if (pkt->magic == SIL_MAGIC_HEADER || pkt->magic == SIL_MAGIC_HEADER_LEGACY) {
                         /* Security: Validate payload length to prevent buffer over-read */
                         if (pkt->len > 64) {
-                            pkt->len = 64; /* Clamp to maximum CAN FD payload size */
+                            printf("SIL Bridge: WARNING: Dropped malformed packet with length %u (exceeds maximum 64)\n", pkt->len);
+                            fflush(stdout);
+                            memmove(rx_stream_buf, rx_stream_buf + 1, rx_stream_len - 1);
+                            rx_stream_len--;
+                            continue;
                         }
 
                         mock_can_set_current_node(ROV_NODE_PI_CORE);

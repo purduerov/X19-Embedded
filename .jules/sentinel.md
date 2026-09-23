@@ -27,3 +27,7 @@
 **Vulnerability:** Python scripts parsing binary SIL network payloads (`tests/sil_companion_bridge/sil_protocol.py`) lacked exact payload length validations prior to using `struct.unpack` array slicing.
 **Learning:** Network protocols extracted lengths from an untrusted SIL CAN header and used it directly in a slice without constraint checking (`data[:length]`), exposing the system to exceptions/crash if the length exceeds the expected standard size.
 **Prevention:** Python scripts parsing binary CAN/network payloads must explicitly validate the length field against the maximum allowable size (e.g. 64 bytes) to safely handle and reject malicious packets without crashing the runtime.
+## 2026-09-24 - Stream Parsing Desynchronization via Silent Clamping
+**Vulnerability:** The SIL bridge server (`tests/sil_bridge_server.c`) silently clamped incoming CAN frame payloads that exceeded 64 bytes instead of rejecting them.
+**Learning:** Clamping length variables during stream parsing causes data desynchronization. If a corrupted header reports a length greater than the maximum, reading only the clamped amount leaves the remainder of the invalid payload in the stream, which is then incorrectly parsed as the next packet's header.
+**Prevention:** When parsing stream-based network protocols, validate length headers strictly. If a length exceeds protocol bounds, explicitly drop the malformed packet by advancing the stream buffer and continuing to properly resynchronize the stream.

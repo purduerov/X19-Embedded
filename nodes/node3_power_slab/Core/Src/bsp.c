@@ -55,8 +55,7 @@ void led_toggle(void) {
 
 void led_set(bool state) {
 #if defined(LED_HEARTBEAT_GPIO_Port) && defined(LED_HEARTBEAT_Pin)
-    HAL_GPIO_WritePin(LED_HEARTBEAT_GPIO_Port, LED_HEARTBEAT_Pin,
-                      state ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(LED_HEARTBEAT_GPIO_Port, LED_HEARTBEAT_Pin, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 #else
     (void)state;
 #endif
@@ -72,11 +71,20 @@ void bsp_power_brick_enable(uint8_t brick_idx) {
      */
 #if defined(BRICK1_EN_GPIO_Port) && defined(BRICK1_EN_Pin)
     switch (brick_idx) {
-        case 0: HAL_GPIO_WritePin(BRICK1_EN_GPIO_Port, BRICK1_EN_Pin, GPIO_PIN_SET); break;
-        case 1: HAL_GPIO_WritePin(BRICK2_EN_GPIO_Port, BRICK2_EN_Pin, GPIO_PIN_SET); break;
-        case 2: HAL_GPIO_WritePin(BRICK3_EN_GPIO_Port, BRICK3_EN_Pin, GPIO_PIN_SET); break;
-        case 3: HAL_GPIO_WritePin(BRICK4_EN_GPIO_Port, BRICK4_EN_Pin, GPIO_PIN_SET); break;
-        default: break;
+    case 0:
+        HAL_GPIO_WritePin(BRICK1_EN_GPIO_Port, BRICK1_EN_Pin, GPIO_PIN_SET);
+        break;
+    case 1:
+        HAL_GPIO_WritePin(BRICK2_EN_GPIO_Port, BRICK2_EN_Pin, GPIO_PIN_SET);
+        break;
+    case 2:
+        HAL_GPIO_WritePin(BRICK3_EN_GPIO_Port, BRICK3_EN_Pin, GPIO_PIN_SET);
+        break;
+    case 3:
+        HAL_GPIO_WritePin(BRICK4_EN_GPIO_Port, BRICK4_EN_Pin, GPIO_PIN_SET);
+        break;
+    default:
+        break;
     }
 #else
     (void)brick_idx;

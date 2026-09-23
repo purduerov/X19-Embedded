@@ -97,4 +97,3 @@ __attribute__((weak)) bool bsp_lm74700_status_ok(void) {
 __attribute__((weak)) float bsp_get_pcb_temperature_c(void) {
     return 25.0f;
 }
-
