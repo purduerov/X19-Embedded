@@ -110,3 +110,31 @@ __attribute__((weak)) bool bsp_lm74700_status_ok(void) {
 __attribute__((weak)) float bsp_get_pcb_temperature_c(void) {
     return 25.0f;
 }
+
+__attribute__((weak)) rov_status_t bsp_i2c_mem_read(
+    uint8_t addr, 
+    uint8_t reg, 
+    uint8_t *data, 
+    uint16_t len
+){
+    (void)addr; 
+    (void)reg; 
+    (void)data; 
+    (void)len; 
+
+    return ROV_ERROR; 
+}
+
+__attribute__((weak)) rov_status_t bsp_i2c_mem_write(
+    uint8_t addr, 
+    uint8_t reg, 
+    const uint8_t *data, 
+    uint16_t len
+){
+    (void)addr; 
+    (void)reg; 
+    (void)data; 
+    (void)len; 
+
+    return ROV_ERROR; 
+}

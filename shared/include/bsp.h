@@ -17,6 +17,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <rov_types.h> 
 
 /**
  * @brief Initialize low-level board hardware, clocks, peripherals, and debug UART.
@@ -124,6 +125,40 @@ bool bsp_lm74700_status_ok(void);
  * @return Temperature in degrees C.
  */
 float bsp_get_pcb_temperature_c(void);
+
+/**
+ * @brief Read registers from an I2C peripheral. 
+ * 
+ * @param addr 7-bit I2C device address. 
+ * @param reg Starting register address.
+ * @param data Destination buffer. 
+ * @param len Number of bytes to read. 
+ * @return ROV_OK on success or an error status. 
+ * 
+ */
+rov_status_t bsp_i2c_mem_read(
+    uint8_t addr, 
+    uint8_t reg, 
+    uint8_t *data, 
+    uint16_t len
+); 
+
+/**
+ * @brief Write registers to an I2C peripheral. 
+ * 
+ * @param addr 7-bit I2C device address. 
+ * @param reg Starting register address.
+ * @param data Source buffer. 
+ * @param len Number of bytes to write. 
+ * @return ROV_OK on success or an error status. 
+ * 
+ */
+rov_status_t bsp_i2c_mem_write(
+    uint8_t addr, 
+    uint8_t reg, 
+    const uint8_t *data, 
+    uint16_t len
+); 
 
 #ifdef __cplusplus
 }
