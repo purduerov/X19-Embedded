@@ -93,10 +93,6 @@ __attribute__((weak)) bool bsp_leak_probe_read(uint8_t probe_idx) {
 
 __attribute__((weak)) void bsp_emergency_brake_trip(void) {}
 
-__attribute__((weak)) bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len) {
-    return can_send(id, data, len);
-}
-
 __attribute__((weak)) void bsp_power_brick_enable(uint8_t brick_idx) {
     (void)brick_idx;
 }

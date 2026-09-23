@@ -11,6 +11,7 @@
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -106,7 +107,8 @@ void test_can_fuzz_robustness(void) {
     }
     assert(accepted_frames > 0);
     assert(rejected_oversize_frames > 0);
-    printf("[PASS] test_can_fuzz_robustness (1000 iterations, %u accepted, %u oversize rejected)\n",
+    printf("[PASS] test_can_fuzz_robustness (1000 iterations, %" PRIu32 " accepted, %" PRIu32
+           " oversize rejected)\n",
            accepted_frames, rejected_oversize_frames);
 }
 
