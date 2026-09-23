@@ -1,3 +1,4 @@
+#include <inttypes.h>
 /**
  * @file test_sil_safety.c
  * @brief SIL Safety Verification: Tether Watchdog SLA, Emergency Break Latency,
@@ -152,7 +153,7 @@ void test_emergency_break_latency(void) {
         assert(mock_bsp_get_pwm_us((uint8_t)ch) == ROV_PWM_STOP_US);
     }
     assert(mock_bsp_is_emergency_brake_tripped());
-    printf("[PASS] test_emergency_break_latency (rx_latency = %u ms, total = %u ms)\n", rx_latency_ms,
+    printf("[PASS] test_emergency_break_latency (rx_latency = %" PRIu32 " ms, total = %" PRIu32 " ms)\n", rx_latency_ms,
            total_latency_ms);
 }
 
