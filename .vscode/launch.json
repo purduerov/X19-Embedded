@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug: Host SIL Test (Node 2 Control Board)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/sil-debug/tests/test_node2_control_board.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "preLaunchTask": "Build: Host SIL (Debug)"
+    },
+    {
+      "name": "Debug: Host SIL Bridge Server",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/sil-debug/tests/sil_bridge_server.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "preLaunchTask": "Build: Host SIL (Debug)"
+    }
+  ]
+}

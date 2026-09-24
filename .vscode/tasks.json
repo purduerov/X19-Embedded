@@ -48,22 +48,61 @@
     {
       "label": "Flash: Node 1 Pi Shield (STM32C542 USB DFU)",
       "type": "process",
-      "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
+      "command": "STM32_Programmer_CLI",
+      "windows": {
+        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
+      },
       "args": ["-c", "port=USB1", "-w", "${input:node1Firmware}", "-v", "-rst"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash: Node 1 Pi Shield (ST-Link SWD)",
+      "type": "process",
+      "command": "STM32_Programmer_CLI",
+      "windows": {
+        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
+      },
+      "args": ["-c", "port=SWD", "-w", "${input:node1Firmware}", "-v", "-rst"],
       "problemMatcher": []
     },
     {
       "label": "Flash: Node 2 Vehicle Control Board (STM32C542 USB DFU)",
       "type": "process",
-      "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
+      "command": "STM32_Programmer_CLI",
+      "windows": {
+        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
+      },
       "args": ["-c", "port=USB1", "-w", "${input:node2Firmware}", "-v", "-rst"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash: Node 2 Vehicle Control Board (ST-Link SWD)",
+      "type": "process",
+      "command": "STM32_Programmer_CLI",
+      "windows": {
+        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
+      },
+      "args": ["-c", "port=SWD", "-w", "${input:node2Firmware}", "-v", "-rst"],
       "problemMatcher": []
     },
     {
       "label": "Flash: Node 3 Power Slab (STM32C542 USB DFU)",
       "type": "process",
-      "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
+      "command": "STM32_Programmer_CLI",
+      "windows": {
+        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
+      },
       "args": ["-c", "port=USB1", "-w", "${input:node3Firmware}", "-v", "-rst"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash: Node 3 Power Slab (ST-Link SWD)",
+      "type": "process",
+      "command": "STM32_Programmer_CLI",
+      "windows": {
+        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
+      },
+      "args": ["-c", "port=SWD", "-w", "${input:node3Firmware}", "-v", "-rst"],
       "problemMatcher": []
     },
     {

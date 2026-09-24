@@ -22,7 +22,7 @@ ctest --preset sil-debug
 
 `sil-release` provides the corresponding release configuration in a separate build directory.
 
-**Known clean-checkout build blocker:** on Windows, `cmake --build --preset sil-debug` currently fails at link time for MS5837-dependent host targets because BSP I2C/time symbols are unresolved. The preset and task make the command reproducible, but the existing mock/link integration needs repair for a successful full SIL build.
+Host SIL targets compile and link natively out-of-the-box. Running `ctest --preset sil-debug` executes the 25 host test suites while excluding unfinished `target_*` acceptance contracts until physical target bring-up is completed.
 
 ## Flash a vehicle node over USB-C
 

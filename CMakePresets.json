@@ -10,7 +10,27 @@
     {"name": "sil-release", "displayName": "Build Host SIL (Release)", "configurePreset": "sil-release"}
   ],
   "testPresets": [
-    {"name": "sil-debug", "displayName": "Test Host SIL (Debug)", "configurePreset": "sil-debug", "output": {"outputOnFailure": true}},
-    {"name": "sil-release", "displayName": "Test Host SIL (Release)", "configurePreset": "sil-release", "output": {"outputOnFailure": true}}
+    {
+      "name": "sil-debug",
+      "displayName": "Test Host SIL (Debug)",
+      "configurePreset": "sil-debug",
+      "filter": {
+        "exclude": {
+          "name": "^target_"
+        }
+      },
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "sil-release",
+      "displayName": "Test Host SIL (Release)",
+      "configurePreset": "sil-release",
+      "filter": {
+        "exclude": {
+          "name": "^target_"
+        }
+      },
+      "output": {"outputOnFailure": true}
+    }
   ]
 }
