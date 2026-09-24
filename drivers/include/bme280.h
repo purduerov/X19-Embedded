@@ -6,6 +6,8 @@
 
 #ifndef BME280_H
 #define BME280_H
+#define BME280_I2C_ADDR_PRIMARY   0x76u
+#define BME280_I2C_ADDR_SECONDARY 0x77u
 
 #include "rov_types.h"
 #include <stdint.h>
@@ -14,7 +16,7 @@
 extern "C" {
 #endif
 
-typedef struct{
+typedef struct {
     uint16_t dig_T1;
     int16_t dig_T2;
     int16_t dig_T3;
@@ -35,18 +37,18 @@ typedef struct{
     int16_t dig_H4;
     int16_t dig_H5;
     int8_t dig_H6;
-} bme280_calib_t; // facotry coefficients 
+} bme280_calib_t;  // facotry coefficients
 
 typedef struct {
-    uint8_t i2c_addr; // 0x76 or 0x77 
-    bme280_calib_t calib; 
-    uint32_t t_fine; // temperature compensation produces an intermediate value 
+    uint8_t i2c_addr;  // 0x76 or 0x77
+    bme280_calib_t calib;
+    uint32_t t_fine;  // temperature compensation produces an intermediate value
 
     float pressure_hpa;
     float humidity_pct;
     float temperature_c;
 
-    bool initialized; 
+    bool initialized;
 } bme280_dev_t;
 
 rov_status_t bme280_init(bme280_dev_t *dev);

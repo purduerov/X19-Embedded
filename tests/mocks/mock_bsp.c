@@ -9,6 +9,10 @@
 #include "rov_parameters.h"
 #include <string.h>
 
+#define MOCK_I2C_NUM_ADDRS 128
+#define MOCK_I2C_NUM_REGS  256
+
+static uint8_t g_mock_i2c_regs[MOCK_I2C_NUM_ADDRS][MOCK_I2C_NUM_REGS];
 static uint64_t g_mock_time_us = 0;
 static bool g_mock_led_state = false;
 static uint32_t g_mock_led_toggle_count = 0;
@@ -26,6 +30,9 @@ void mock_bsp_reset(void) {
     g_mock_time_us = 0;
     g_mock_led_state = false;
     g_mock_led_toggle_count = 0;
+
+    memset(g_mock_i2c_regs, 0, sizeof(g_mock_i2c_regs));
+
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_mock_pwm_us[i] = ROV_PWM_STOP_US;
     }
@@ -92,6 +99,36 @@ void mock_bsp_set_leak_probe(uint8_t probe_idx, bool wet) {
 
 void mock_bsp_set_auto_advance_delay(bool enable) {
     g_auto_advance_delay = enable;
+}
+
+void mock_bsp_i2c_set_reg(uint8_t addr, uint8_t reg, uint8_t value) {
+    if (addr < MOCK_I2C_NUM_ADDRS) {
+        g_mock_i2c_regs[addr][reg] = value;
+    }
+}
+
+void mock_bsp_i2c_set_regs(uint8_t addr, uint8_t start_reg, const uint8_t *data, uint16_t len) {
+    if (addr >= MOCK_I2C_NUM_ADDRS || data == NULL) {
+        return;
+    }
+
+    for (uint16_t i = 0; i < len; i++) {
+        uint16_t reg = (uint16_t)start_reg + i;
+
+        if (reg >= MOCK_I2C_NUM_REGS) {
+            break;
+        }
+
+        g_mock_i2c_regs[addr][reg] = data[i];
+    }
+}
+
+uint8_t mock_bsp_i2c_get_reg(uint8_t addr, uint8_t reg) {
+    if (addr >= MOCK_I2C_NUM_ADDRS) {
+        return 0;
+    }
+
+    return g_mock_i2c_regs[addr][reg];
 }
 
 /* ========================================================================== */
@@ -224,4 +261,40 @@ void mock_bsp_set_lm74700_ok(bool ok) {
 
 void mock_bsp_set_pcb_temperature_c(float temp_c) {
     g_mock_pcb_temperature_c = temp_c;
+}
+
+rov_status_t bsp_i2c_mem_read(uint8_t addr, uint8_t reg, uint8_t *data, uint16_t len) {
+    if (addr >= MOCK_I2C_NUM_ADDRS || data == NULL) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
+    for (uint16_t i = 0; i < len; i++) {
+        uint16_t current_reg = (uint16_t)reg + i;
+
+        if (current_reg >= MOCK_I2C_NUM_REGS) {
+            return ROV_ERR_INVALID_ARG;
+        }
+
+        data[i] = g_mock_i2c_regs[addr][current_reg];
+    }
+
+    return ROV_OK;
+}
+
+rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, const uint8_t *data, uint16_t len) {
+    if (addr >= MOCK_I2C_NUM_ADDRS || data == NULL) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
+    for (uint16_t i = 0; i < len; i++) {
+        uint16_t current_reg = (uint16_t)reg + i;
+
+        if (current_reg >= MOCK_I2C_NUM_REGS) {
+            return ROV_ERR_INVALID_ARG;
+        }
+
+        g_mock_i2c_regs[addr][current_reg] = data[i];
+    }
+
+    return ROV_OK;
 }
