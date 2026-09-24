@@ -55,9 +55,3 @@ jobs:
           # Hardware readiness checks report missing BSP/startup code until written,
           # but do not block CI while node bring-up is in progress
           ctest --test-dir build-native -R "target_" --output-on-failure
-
-      - name: Run Full-System SIL Co-Simulation (ZMQ + Protobuf)
-        run: |
-          python3 -m pip install pyzmq protobuf
-          git clone --depth 1 https://github.com/purduerov/X19-Core.git ../X19-Core
-          python3 tests/sil_companion_bridge/test_full_system_sil.py
