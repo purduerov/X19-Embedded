@@ -66,10 +66,9 @@
     },
     "extensions": {
         "recommendations": [
-            "STMicroelectronics.stm32-for-vscode",
+            "stmicroelectronics.stm32-vscode-extension",
             "ms-vscode.cpptools",
             "ms-vscode.cmake-tools",
-            "marus25.cortex-debug",
             "twxs.cmake"
         ]
     }

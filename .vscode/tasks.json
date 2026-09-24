@@ -1,39 +1,56 @@
 {
-    "version": "2.0.0",
-    "tasks": [
-        {
-            "label": "Build All Nodes",
-            "type": "shell",
-            "command": "ninja -C build",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "Flash: Control Board (ST-Link)",
-            "type": "shell",
-            "command": "STM32_Programmer_CLI -c port=SWD -w build/nodes/node2_control_board/node2_control_board.bin 0x08004000 -v -rst",
-            "problemMatcher": []
-        },
-        {
-            "label": "Flash: Power Slab (ST-Link)",
-            "type": "shell",
-            "command": "STM32_Programmer_CLI -c port=SWD -w build/nodes/node3_power_slab/node3_power_slab.bin 0x08004000 -v -rst",
-            "problemMatcher": []
-        },
-        {
-            "label": "Flash: Pi Shield (ST-Link)",
-            "type": "shell",
-            "command": "STM32_Programmer_CLI -c port=SWD -w build/nodes/node1_pi_shield/node1_pi_shield.bin 0x08004000 -v -rst",
-            "problemMatcher": []
-        },
-        {
-            "label": "Clean Build Directory",
-            "type": "shell",
-            "command": "ninja -C build clean",
-            "problemMatcher": []
-        }
-    ]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure: Host SIL (Debug)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--preset", "sil-debug"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Build: Host SIL (Debug)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "sil-debug"],
+      "dependsOn": "Configure: Host SIL (Debug)",
+      "dependsOrder": "sequence",
+      "group": {"kind": "build", "isDefault": true},
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Test: Host SIL (Debug)",
+      "type": "process",
+      "command": "ctest",
+      "args": ["--preset", "sil-debug"],
+      "dependsOn": "Build: Host SIL (Debug)",
+      "dependsOrder": "sequence",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Configure: Node 2 Nucleo G474 (Debug)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--preset", "Debug"],
+      "options": {"cwd": "${workspaceFolder}/nodes/node2_control_board"},
+      "problemMatcher": []
+    },
+    {
+      "label": "Build: Node 2 Nucleo G474 (Debug)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "Debug"],
+      "options": {"cwd": "${workspaceFolder}/nodes/node2_control_board"},
+      "dependsOn": "Configure: Node 2 Nucleo G474 (Debug)",
+      "dependsOrder": "sequence",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Clean: Host SIL (Debug)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "sil-debug", "--target", "clean"],
+      "problemMatcher": []
+    }
+  ]
 }
