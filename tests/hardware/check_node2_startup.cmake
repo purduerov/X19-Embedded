@@ -5,14 +5,14 @@ endif()
 file(READ "${MAIN_SOURCE}" MAIN_CONTENTS)
 
 set(EXPECTED_CALLS
-    "HAL_Init();"
-    "SystemClock_Config();"
-    "MX_GPIO_Init();"
-    "MX_FDCAN1_Init();"
-    "MX_I2C1_Init();"
-    "MX_TIM1_Init();"
-    "MX_TIM8_Init();"
-    "app_main();"
+    "HAL_Init()"
+    "SystemClock_Config()"
+    "MX_GPIO_Init()"
+    "MX_FDCAN1_Init()"
+    "MX_I2C1_Init()"
+    "MX_TIM1_Init()"
+    "MX_TIM8_Init()"
+    "app_main()"
 )
 
 set(PREVIOUS_POSITION -1)
