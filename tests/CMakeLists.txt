@@ -269,7 +269,12 @@ function(add_target_startup_contract node_id node_dir)
 endfunction()
 
 add_target_startup_contract(1 node1_pi_shield)
-add_target_startup_contract(2 node2_control_board)
+
+# Node 2 uses a CubeMX-generated STM32G474 startup and is validated
+# through its standalone Cortex-M4 build.
+# The legacy fake-HAL startup contract does not apply.
+# add_target_startup_contract(2 node2_control_board)
+
 add_target_startup_contract(3 node3_power_slab)
 
 # Software-in-the-Loop (SIL) Bridge Server (Host Native Only)
