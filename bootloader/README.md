@@ -34,3 +34,9 @@ python bootloader/tools/can_flash.py --interface can0 --target power_slab --bin 
 # Flash Pi Shield firmware
 python bootloader/tools/can_flash.py --interface can0 --target pi_shield --bin build/nodes/node1_pi_shield/node1_pi_shield.bin
 ```
+
+The flasher validates image size before opening the bus, requires positive
+acknowledgements for erase, transfer start, verification, and jump, closes the
+SocketCAN bus on every exit path, and returns a nonzero process status when any
+step is unconfirmed. A successful command-line exit therefore means the
+bootloader acknowledged the complete sequence.

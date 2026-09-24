@@ -33,6 +33,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     target_link_libraries(node2_control_board
         rov_shared
         rov_drivers
+        m
     )
 
     target_compile_options(node2_control_board PRIVATE
@@ -64,6 +65,7 @@ else()
     target_link_libraries(node2_control_board.elf PRIVATE
         rov_shared
         rov_drivers
+        m
     )
 
     target_compile_features(node2_control_board.elf PUBLIC c_std_11)

@@ -15,19 +15,22 @@ void rov_safety_init(rov_safety_state_t *state) {
     state->watchdog_expired = false;
     state->overtemperature_tripped = false;
     state->last_heartbeat_timestamp_ms = 0;
+    state->heartbeat_initialized = false;
 }
 
 void rov_safety_feed_heartbeat(rov_safety_state_t *state, uint32_t current_time_ms) {
     if (!state)
         return;
     state->last_heartbeat_timestamp_ms = current_time_ms;
+    state->heartbeat_initialized = true;
+    state->watchdog_expired = false;
 }
 
 bool rov_safety_is_heartbeat_lost(const rov_safety_state_t *state, uint32_t current_time_ms) {
     if (!state)
         return true;
-    if (state->last_heartbeat_timestamp_ms == 0)
-        return false; /* Uninitialized */
+    if (!state->heartbeat_initialized)
+        return true; /* Fail safe until the first heartbeat establishes a deadline */
     return (current_time_ms - state->last_heartbeat_timestamp_ms) > ROV_HEARTBEAT_TIMEOUT_MS;
 }
 

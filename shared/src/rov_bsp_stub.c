@@ -43,8 +43,9 @@ __attribute__((weak)) void led_set(bool state) {
     (void)state;
 }
 
+/* A target without a real FDCAN implementation must fail closed. */
 __attribute__((weak)) bool can_init(void) {
-    return true;
+    return false;
 }
 
 __attribute__((weak)) bool can_send(uint32_t id, const uint8_t *data, uint8_t len) {
@@ -52,7 +53,7 @@ __attribute__((weak)) bool can_send(uint32_t id, const uint8_t *data, uint8_t le
     (void)data;
     (void)len;
 
-    return true;
+    return false;
 }
 
 /**
@@ -61,11 +62,14 @@ __attribute__((weak)) bool can_send(uint32_t id, const uint8_t *data, uint8_t le
  * Hardware targets should override this function with a direct FDCAN
  * hardware transmission implementation.
  *
- * For host/SIL builds, falling back to can_send() preserves the normal
- * simulated CAN behavior.
+ * A target must provide a strong implementation; the weak fallback fails
+ * closed instead of claiming that a safety frame was transmitted.
  */
 __attribute__((weak)) bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len) {
-    return can_send(id, data, len);
+    (void)id;
+    (void)data;
+    (void)len;
+    return false;
 }
 
 __attribute__((weak)) bool can_receive(uint32_t *id, uint8_t *data, uint8_t *len) {

@@ -30,6 +30,8 @@ rov_status_t rov_i2c_recover_bus(rov_gpio_write_fn scl_write, rov_gpio_read_fn s
         }
     }
 
+    scl_write(false);
+    delay_us(5);
     sda_write(false);
     delay_us(5);
     scl_write(true);

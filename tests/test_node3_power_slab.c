@@ -69,6 +69,13 @@ void test_node3_overcurrent_fault_alert(void) {
 
     /* Must broadcast Priority 0 eFuse Fault Alert (0x005) */
     assert(mock_can_count_tx_by_id(ROV_CAN_ID_EFUSE_FAULT_ALERT) >= 1);
+    uint32_t alert_count = mock_can_count_tx_by_id(ROV_CAN_ID_EFUSE_FAULT_ALERT);
+
+    /* A transiently nominal reading must not clear a latched shutdown. */
+    mock_sensors_set_tps25990(2, 48.0f, 12.0f, 5.0f, 38.0f, 0);
+    mock_bsp_advance_time_ms(50);
+    node3_app_step();
+    assert(mock_can_count_tx_by_id(ROV_CAN_ID_EFUSE_FAULT_ALERT) == alert_count);
 
     uint8_t alert_data[64];
     uint8_t alert_len = 0;

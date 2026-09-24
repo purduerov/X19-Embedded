@@ -2,7 +2,11 @@ enable_testing()
 add_definitions(-DROV_UNIT_TEST -DX19_UNIT_TEST -UNDEBUG)
 
 # Build the Software-in-the-Loop (SIL) Mock Infrastructure
-add_library(rov_mocks STATIC
+# Keep the mock BSP as an object library so its timing and I2C symbols are
+# available to driver-only test executables.  A static archive is not extracted
+# when a driver archive introduces the first reference after the mock archive
+# has already been searched.
+add_library(rov_mocks OBJECT
     mocks/mock_can.c
     mocks/mock_bsp.c
     mocks/mock_sensors.c

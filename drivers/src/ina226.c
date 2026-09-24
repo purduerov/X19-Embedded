@@ -32,5 +32,5 @@ rov_status_t ina226_read_power(ina226_dev_t *dev) {
         return ROV_OK;
     }
 
-    return ROV_OK;
+    return ROV_ERROR;
 }

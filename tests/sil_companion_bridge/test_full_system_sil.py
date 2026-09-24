@@ -20,11 +20,17 @@ import subprocess
 import unittest
 import importlib.util
 
-X19_CORE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../X19-Core"))
+try:
+    from workspace_paths import find_x19_repo_dir
+except ModuleNotFoundError:
+    sys.path.insert(0, os.path.dirname(__file__))
+    from workspace_paths import find_x19_repo_dir
+
+X19_CORE_DIR = str(find_x19_repo_dir("X19-Core"))
 if X19_CORE_DIR not in sys.path:
     sys.path.insert(0, X19_CORE_DIR)
 
-X19_SURFACE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../X19-Surface"))
+X19_SURFACE_DIR = str(find_x19_repo_dir("X19-Surface"))
 
 
 def _load_repo_module(module_name: str, file_path: str):
@@ -50,6 +56,10 @@ surface_telemetry_pb2 = _load_repo_module(
     os.path.join(X19_SURFACE_DIR, "src", "zmq", "protocols", "python", "telemetry_pb2.py"),
 )
 SurfaceSubscriber = surface_subscriber_module.Subscriber
+
+BRIDGE_DIR = os.path.dirname(__file__)
+if BRIDGE_DIR not in sys.path:
+    sys.path.insert(0, BRIDGE_DIR)
 from pi_core_sil_bridge import PiCoreSilBridge
 
 def find_server_binary() -> str:
@@ -72,6 +82,29 @@ def find_server_binary() -> str:
             return c
     # Fallback to default
     return candidates[0]
+
+class TestJoystickMixer(unittest.TestCase):
+    def test_axis_allocation_matches_plant_geometry(self):
+        forward = core_telemetry_pb2.JoystickCommand(forward=1.0)
+        self.assertEqual(PiCoreSilBridge._mix_joystick_to_pwms(forward), [1900] * 4 + [1500] * 4)
+
+        yaw = core_telemetry_pb2.JoystickCommand(yaw=1.0)
+        self.assertEqual(PiCoreSilBridge._mix_joystick_to_pwms(yaw), [1100, 1900, 1100, 1900] + [1500] * 4)
+
+        roll = core_telemetry_pb2.JoystickCommand(roll=1.0)
+        self.assertEqual(PiCoreSilBridge._mix_joystick_to_pwms(roll), [1500] * 4 + [1100, 1900, 1100, 1900])
+
+        pitch = core_telemetry_pb2.JoystickCommand(pitch=1.0)
+        self.assertEqual(PiCoreSilBridge._mix_joystick_to_pwms(pitch), [1500] * 4 + [1100, 1100, 1900, 1900])
+
+    def test_combined_axes_scale_without_direction_clipping(self):
+        command = core_telemetry_pb2.JoystickCommand(forward=1.0, yaw=1.0)
+        self.assertEqual(PiCoreSilBridge._mix_joystick_to_pwms(command), [1500, 1900, 1500, 1900] + [1500] * 4)
+
+    def test_non_finite_axis_is_fail_safe(self):
+        command = core_telemetry_pb2.JoystickCommand(forward=float("nan"))
+        self.assertEqual(PiCoreSilBridge._mix_joystick_to_pwms(command), [1500] * 8)
+
 
 class TestFullSystemSil(unittest.TestCase):
     @staticmethod
@@ -110,7 +143,7 @@ class TestFullSystemSil(unittest.TestCase):
 
         self.received_sensor_packets = []
 
-        def on_topside_telemetry(msg: telemetry_pb2.SensorData):
+        def on_topside_telemetry(msg: core_telemetry_pb2.SensorData):
             self.received_sensor_packets.append(msg)
 
         self.pilot_joystick_pub = Publisher(
