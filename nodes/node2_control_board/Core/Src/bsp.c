@@ -27,12 +27,33 @@
 #include "tim.h"
 #endif
 
+extern TIM_HandleTypeDef htim1;
+extern TIM_HandleTypeDef htim8;
+
 /* Cached PWM duty cycles for reading back */
 static uint16_t g_pwm_duty_us[8] = {1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500};
 static uint16_t g_solenoid_state_mask = 0;
 
 void bsp_init(void) {
     /* Peripheral init is performed in main.c by STM32CubeMX generated code */
+    static const uint32_t tim_channels[4] = {
+        TIM_CHANNEL_1,
+        TIM_CHANNEL_2,
+        TIM_CHANNEL_3,
+        TIM_CHANNEL_4,
+    };
+
+    for (uint8_t i = 0; i < 4; i++) {
+        __HAL_TIM_SET_COMPARE(&htim1, tim_channels[i], 1500U);
+        __HAL_TIM_SET_COMPARE(&htim8, tim_channels[i], 1500U);
+
+        HAL_TIM_PWM_Start(&htim1, tim_channels[i]);
+        HAL_TIM_PWM_Start(&htim8, tim_channels[i]);
+    }
+
+    for (uint8_t i = 0; i < 8; i++) {
+        g_pwm_duty_us[i] = 1500U;
+    }
 }
 
 uint32_t time_get_ms(void) {
@@ -73,6 +94,13 @@ void bsp_pwm_set_us(uint8_t channel, uint16_t pulse_us) {
     if (channel >= 8) {
         return;
     }
+
+    if (pulse_us < 1000U) {
+        pulse_us = 1000U;
+    } else if (pulse_us > 2000U) {
+        pulse_us = 2000U;
+    }
+
     g_pwm_duty_us[channel] = pulse_us;
 
     /*
@@ -81,7 +109,7 @@ void bsp_pwm_set_us(uint8_t channel, uint16_t pulse_us) {
      * ESC Channels 4..7 -> TIM8 CCR1..CCR4
      * At 1 MHz counter clock, 1 tick = 1 microsecond.
      */
-#if defined(htim1) && defined(htim8)
+
     switch (channel) {
     case 0:
         __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_us);
@@ -110,7 +138,6 @@ void bsp_pwm_set_us(uint8_t channel, uint16_t pulse_us) {
     default:
         break;
     }
-#endif
 }
 
 uint16_t bsp_pwm_get_us(uint8_t channel) {
