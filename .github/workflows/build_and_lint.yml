@@ -40,6 +40,16 @@ jobs:
         run: |
           cmake --build build --verbose
 
+      - name: Configure Node 2 STM32G474
+        working-directory: nodes/node2_control_board
+        run: |
+          cmake --preset Debug
+
+      - name: Build Node 2 STM32G474
+        working-directory: nodes/node2_control_board
+        run: |
+          cmake --build --preset Debug
+
       - name: Run Embedded Unit Tests (CTest)
         run: |
           # Use native build for CTest since testing bare-metal arm-none-eabi logic with qemu-user

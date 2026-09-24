@@ -6,6 +6,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 enable_testing()
 
+option(X19_BUILD_NODE2_ROOT
+       "Build Node 2 using the root cross-compile toolchain"
+       OFF)
+
 # Strict compiler warnings for subsea embedded safety
 add_compile_options(
     -Wall
@@ -30,7 +34,6 @@ add_subdirectory(drivers)
 # Add application nodes (only when cross-compiling for embedded targets)
 if(CMAKE_CROSSCOMPILING)
     add_subdirectory(nodes/node1_pi_shield)
-    add_subdirectory(nodes/node2_control_board)
     add_subdirectory(nodes/node3_power_slab)
     add_subdirectory(nodes/testing_and_rnd)
 endif()
