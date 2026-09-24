@@ -3,7 +3,7 @@
 > **Purdue ROV — Modular Subsea Microcontroller Firmware Platform (Configured for X19 Subsea Vehicle)**  
 > *Standardized across 100% of nodes on STM32C542CCT6 (Cortex-M33 @ 144 MHz with single-precision FPU, 2x FDCAN) running CAN FD @ 1 Mbps / 5 Mbps*
 
-For the recommended VS Code build, SIL, and USB-connected ST-LINK workflow, see [VS Code embedded development](docs/vscode-embedded-workflow.md).
+For the recommended VS Code build, SIL, and per-node USB DFU flashing workflow, see [VS Code embedded development](docs/vscode-embedded-workflow.md).
 
 ---
 
