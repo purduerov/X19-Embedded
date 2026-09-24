@@ -120,7 +120,7 @@ def flash_node(interface: str, target_node: str, bin_path: str):
         return False
 
     for i in range(total_chunks):
-        iter_start = time.time()
+        iter_start = time.perf_counter()
         chunk = firmware_data[i * chunk_size : (i + 1) * chunk_size]
         if len(chunk) < chunk_size:
             chunk = chunk.ljust(chunk_size, b'\xFF')
@@ -133,7 +133,7 @@ def flash_node(interface: str, target_node: str, bin_path: str):
             is_fd=True
         )
         bus.send(msg)
-        elapsed = time.time() - iter_start
+        elapsed = time.perf_counter() - iter_start
         if elapsed < 0.001:
             time.sleep(0.001 - elapsed)
 
