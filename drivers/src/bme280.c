@@ -28,5 +28,5 @@ rov_status_t bme280_read_all(bme280_dev_t *dev) {
     if (mock_sensors_get_bme280(&dev->pressure_hpa, &dev->humidity_pct, &dev->temperature_c)) {
         return ROV_OK;
     }
-    return ROV_OK;
+    return ROV_ERROR;
 }

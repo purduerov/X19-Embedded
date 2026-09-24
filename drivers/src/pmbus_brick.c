@@ -69,6 +69,8 @@ float pmbus_linear11_to_float(uint16_t raw_value) {
 rov_status_t pmbus_brick_init(pmbus_brick_dev_t *dev, uint8_t pmbus_addr) {
     if (!dev)
         return ROV_ERR_INVALID_ARG;
+    if (pmbus_addr < 0x40U || pmbus_addr > 0x44U)
+        return ROV_ERR_INVALID_ARG;
     memset(dev, 0, sizeof(pmbus_brick_dev_t));
     dev->pmbus_addr = pmbus_addr;
     dev->input_voltage_v = 48.0f;
@@ -79,10 +81,12 @@ rov_status_t pmbus_brick_init(pmbus_brick_dev_t *dev, uint8_t pmbus_addr) {
 rov_status_t pmbus_brick_read_telemetry(pmbus_brick_dev_t *dev) {
     if (!dev)
         return ROV_ERR_INVALID_ARG;
-    uint8_t idx = (dev->pmbus_addr >= 0x40) ? (uint8_t)(dev->pmbus_addr - 0x40) : 0;
+    if (dev->pmbus_addr < 0x40U || dev->pmbus_addr > 0x44U)
+        return ROV_ERR_INVALID_ARG;
+    uint8_t idx = (uint8_t)(dev->pmbus_addr - 0x40U);
     if (mock_sensors_get_tps25990(idx, &dev->input_voltage_v, &dev->output_voltage_v, &dev->output_current_a,
                                   &dev->temperature_c, &dev->status_word)) {
         return ROV_OK;
     }
-    return ROV_OK;
+    return ROV_ERROR;
 }

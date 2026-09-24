@@ -225,3 +225,22 @@ void mock_bsp_set_lm74700_ok(bool ok) {
 void mock_bsp_set_pcb_temperature_c(float temp_c) {
     g_mock_pcb_temperature_c = temp_c;
 }
+
+bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {
+    (void)addr;
+    (void)data;
+    (void)len;
+    return true;
+}
+
+bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
+    (void)addr;
+    if (!data || len == 0U) {
+        return false;
+    }
+
+    for (uint16_t i = 0; i < len; i++) {
+        data[i] = 0U;
+    }
+    return true;
+}

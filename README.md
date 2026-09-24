@@ -55,6 +55,10 @@ The Python Pi Core bridge test is separate from CTest. Run it after building the
 python tests/sil_companion_bridge/test_full_system_sil.py
 ```
 
+When the embedded repository is opened from a separate worktree, the bridge test locates the sibling repositories automatically. Set `X19_WORKSPACE_ROOT` to the multi-repository workspace root, or set `X19_CORE_DIR` and `X19_SURFACE_DIR` explicitly if the repositories use another layout.
+
+Target-only startup, pin, FDCAN, and hardware sensor integration blockers are tracked in [`docs/target-integration-blockers.md`](docs/target-integration-blockers.md).
+
 ### Simulation Architecture (`tests/mocks/`)
 
 1. **Virtual Multi-Node CAN FD Bus (`mock_can.h` / `mock_can.c`)**:

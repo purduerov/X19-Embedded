@@ -149,10 +149,10 @@ void test_node2_heartbeat_timeout_failsafe(void) {
     mock_bsp_advance_time_ms(110);
     node2_app_step();
 
-    /* Target drops to 1500 us and begins ramping down */
-    assert(mock_bsp_get_pwm_us(0) < 1600);
+    /* Heartbeat loss is an immediate fail-safe, not a ramp-down request. */
+    assert(mock_bsp_get_pwm_us(0) == ROV_PWM_STOP_US);
 
-    /* After another 50 ms, reaches neutral 1500 us */
+    /* The neutral state remains latched until a new valid control cycle. */
     mock_bsp_advance_time_ms(50);
     node2_app_step();
     assert(mock_bsp_get_pwm_us(0) == ROV_PWM_STOP_US);

@@ -8,6 +8,7 @@ Connects to the X19-Embedded SIL bridge server, converting:
 4. CAN ID 0x001 Emergency Break -> Halts thrusters & alerts topside.
 """
 
+import math
 import os
 import sys
 import time
@@ -15,8 +16,14 @@ import socket
 import select
 from typing import Optional
 
-# Dynamically import from X19-Core codebase
-X19_CORE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../X19-Core"))
+# Dynamically import from the sibling X19-Core codebase.
+try:
+    from workspace_paths import find_x19_repo_dir
+except ModuleNotFoundError:
+    sys.path.insert(0, os.path.dirname(__file__))
+    from workspace_paths import find_x19_repo_dir
+
+X19_CORE_DIR = str(find_x19_repo_dir("X19-Core"))
 if X19_CORE_DIR not in sys.path:
     sys.path.insert(0, X19_CORE_DIR)
 
@@ -110,31 +117,54 @@ class PiCoreSilBridge:
         print(f"[Pi-Core SIL Bridge] Failed to connect to SIL server at {self.sil_host}:{self.sil_port}")
         return False
 
+    @staticmethod
+    def _bounded_axis(value: float) -> float:
+        if not math.isfinite(value):
+            return 0.0
+        return max(-1.0, min(1.0, float(value)))
+
+    @classmethod
+    def _mix_joystick_to_pwms(cls, cmd: telemetry_pb2.JoystickCommand) -> list[int]:
+        """Allocate horizontal and vertical thrust without nonlinear clipping.
+
+        The horizontal allocation matrix is the four-thruster X layout:
+        surge, sway, and yaw are independent signed contributions.  When a
+        combined command exceeds the normalized actuator range, scale the
+        complete vector instead of clipping individual PWM values; clipping
+        one axis first changes the requested vehicle direction.
+        """
+        fwd = cls._bounded_axis(cmd.forward)
+        strf = cls._bounded_axis(cmd.strafe)
+        vert = cls._bounded_axis(cmd.vertical)
+        yaw = cls._bounded_axis(cmd.yaw)
+        roll = cls._bounded_axis(cmd.roll)
+        pitch = cls._bounded_axis(cmd.pitch)
+
+        # Thruster order matches the SIL plant: FR, FL, RR, RL.  The signs
+        # below make pure surge/sway/yaw and heave/roll/pitch commands produce
+        # the corresponding force/moment instead of cancelling the command.
+        horizontal = [fwd - strf - yaw, fwd + strf + yaw, fwd + strf - yaw, fwd - strf + yaw]
+        horizontal_limit = max(abs(value) for value in horizontal)
+        if horizontal_limit > 1.0:
+            scale = 1.0 / horizontal_limit
+            horizontal = [value * scale for value in horizontal]
+
+        vertical_values = [vert - roll - pitch, vert + roll - pitch, vert - roll + pitch, vert + roll + pitch]
+        vertical_limit = max(abs(value) for value in vertical_values)
+        if vertical_limit > 1.0:
+            scale = 1.0 / vertical_limit
+            vertical_values = [value * scale for value in vertical_values]
+
+        normalized = horizontal + vertical_values
+        return [max(1000, min(2000, 1500 + int(value * 400))) for value in normalized]
+
     def _on_joystick_received(self, cmd: telemetry_pb2.JoystickCommand):
-        """Maps JoystickCommand from X19-Core to 8 thruster PWM values."""
+        """Map a joystick command to bounded 8-thruster PWM values."""
         self.joystick_count += 1
         if self.emergency_break_sent or self.emergency_break_received:
             self.latest_pwms = [1500] * 8
             return
-        # Simple 8-thruster holonomic mixer matching X19 geometry
-        # Forward (surge), Strafe (sway), Vertical (heave), Yaw
-        fwd = max(-1.0, min(1.0, cmd.forward))
-        strf = max(-1.0, min(1.0, cmd.strafe))
-        vert = max(-1.0, min(1.0, cmd.vertical))
-        yaw = max(-1.0, min(1.0, cmd.yaw))
-
-        # Vectorized mixing (4 vectored horizontal thrusters, 4 vertical thrusters)
-        t0 = 1500 + int((fwd + strf + yaw) * 400)
-        t1 = 1500 + int((fwd - strf - yaw) * 400)
-        t2 = 1500 + int((-fwd + strf - yaw) * 400)
-        t3 = 1500 + int((-fwd - strf + yaw) * 400)
-        t4 = 1500 + int(vert * 400)
-        t5 = 1500 + int(vert * 400)
-        t6 = 1500 + int(vert * 400)
-        t7 = 1500 + int(vert * 400)
-
-        raw_pwms = [t0, t1, t2, t3, t4, t5, t6, t7]
-        self.latest_pwms = [max(1000, min(2000, p)) for p in raw_pwms]
+        self.latest_pwms = self._mix_joystick_to_pwms(cmd)
         self.send_thruster_cmd(self.latest_pwms)
 
     def send_thruster_cmd(self, pwms: list):

@@ -22,6 +22,10 @@ rov_status_t rov_timesync_process_master(rov_timesync_state_t *ts, const rov_tim
     if (!ts || !sync)
         return ROV_ERR_INVALID_ARG;
 
+    if (ts->initial_sync_done && (int32_t)(sync->sync_seq - ts->last_seq) <= 0) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
     /* Target synchronized master time accounting for one-way bus propagation delay */
     int64_t target_offset = ((int64_t)sync->master_time_us + (int64_t)ts->one_way_delay_us) - (int64_t)local_rx_us;
 
@@ -92,7 +96,7 @@ rov_status_t rov_timesync_update_latency(rov_timesync_state_t *ts, uint32_t rtt_
 }
 
 uint64_t rov_timesync_get_time_us(const rov_timesync_state_t *ts, uint64_t local_now_us) {
-    if (!ts)
+    if (!ts || !rov_timesync_is_synchronized(ts, local_now_us))
         return local_now_us;
 
     int64_t synced = (int64_t)local_now_us + ts->clock_offset_us;

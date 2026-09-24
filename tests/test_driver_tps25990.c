@@ -14,6 +14,8 @@ void test_tps25990_driver(void) {
 
     /* Negative tests */
     assert(tps25990_init(NULL, 0x40) == ROV_ERR_INVALID_ARG);
+    assert(tps25990_init(&dev, 0x3F) == ROV_ERR_INVALID_ARG);
+    assert(tps25990_init(&dev, 0x45) == ROV_ERR_INVALID_ARG);
     assert(tps25990_read_telemetry(NULL) == ROV_ERR_INVALID_ARG);
 
     /* Initialization */
