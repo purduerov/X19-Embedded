@@ -67,10 +67,15 @@ rov_status_t lsm6dsoxtr_update_madgwick(lsm6dsoxtr_dev_t *dev, float dt_sec) {
     float q_y = dev->q_y;
     float q_z = dev->q_z;
 
-    q_w += half_dt * ((-q_x * gx) - (q_y * gy) - (q_z * gz));
-    q_x += half_dt * ((q_w * gx) + (q_y * gz) - (q_z * gy));
-    q_y += half_dt * ((q_w * gy) - (q_x * gz) + (q_z * gx));
-    q_z += half_dt * ((q_w * gz) + (q_x * gy) - (q_y * gx));
+    float dq_w = half_dt * ((-q_x * gx) - (q_y * gy) - (q_z * gz));
+    float dq_x = half_dt * ((q_w * gx) + (q_y * gz) - (q_z * gy));
+    float dq_y = half_dt * ((q_w * gy) - (q_x * gz) + (q_z * gx));
+    float dq_z = half_dt * ((q_w * gz) + (q_x * gy) - (q_y * gx));
+
+    q_w += dq_w;
+    q_x += dq_x;
+    q_y += dq_y;
+    q_z += dq_z;
 
     float norm = sqrtf((q_w * q_w) + (q_x * q_x) + (q_y * q_y) + (q_z * q_z));
     if (!isfinite(norm) || norm <= 0.00001f)

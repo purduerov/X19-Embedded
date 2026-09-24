@@ -118,10 +118,12 @@ void node2_app_step(void) {
                 node2_force_neutral();
             }
         } else if (rx_id == ROV_CAN_ID_EFUSE_FAULT_ALERT) {
-            node2_force_neutral();
-            bsp_emergency_brake_trip();
-            g_esc_state = ESC_STATE_DISARMED;
-            rov_safety_trigger_emergency_break(&g_safety_state);
+            if (rx_len >= 2 && rx_data[0] == 0xEF && rx_data[1] == 0x01) {
+                node2_force_neutral();
+                bsp_emergency_brake_trip();
+                g_esc_state = ESC_STATE_DISARMED;
+                rov_safety_trigger_emergency_break(&g_safety_state);
+            }
         } else if (rx_id == ROV_CAN_ID_THRUSTER_CMD) {
             /* Thruster commands are accepted only after ESC arming completes */
             if ((g_esc_state == ESC_STATE_ACTIVE) && (!g_safety_state.emergency_break_active)) {
@@ -223,8 +225,12 @@ void node2_app_step(void) {
                                      !isfinite(g_imu_dev.gyro_y_dps) || !isfinite(g_imu_dev.gyro_z_dps))) {
             imu_status = ROV_ERROR;
         }
-        if (depth_status == ROV_OK && (!isfinite(g_depth_dev.depth_meters) || g_depth_dev.depth_meters < 0.0f)) {
-            depth_status = ROV_ERROR;
+        if (depth_status == ROV_OK) {
+            if (!isfinite(g_depth_dev.depth_meters) || g_depth_dev.depth_meters < -0.5f) {
+                depth_status = ROV_ERROR;
+            } else if (g_depth_dev.depth_meters < 0.0f) {
+                g_depth_dev.depth_meters = 0.0f;
+            }
         }
 
         rov_nav_telemetry_t nav;

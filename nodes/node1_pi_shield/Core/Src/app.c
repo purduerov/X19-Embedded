@@ -160,11 +160,10 @@ void node1_app_step(void) {
 
         g_last_telemetry_time = current_time;
 
-        g_bme280_valid = bme280_read_all(&g_bme280_dev) == ROV_OK;
-        g_ina237_valid = ina237_read_power(&g_ina237_dev) == ROV_OK;
-        bool sensor_fault = !g_bme280_valid || !g_ina237_valid || !isfinite(g_bme280_dev.pressure_hpa) ||
-                            !isfinite(g_bme280_dev.humidity_pct) || !isfinite(g_bme280_dev.temperature_c) ||
-                            !isfinite(g_ina237_dev.bus_voltage_v) || !isfinite(g_ina237_dev.shunt_current_a);
+        g_bme280_valid = (bme280_read_all(&g_bme280_dev) == ROV_OK) && isfinite(g_bme280_dev.pressure_hpa) &&
+                         isfinite(g_bme280_dev.humidity_pct) && isfinite(g_bme280_dev.temperature_c);
+        g_ina237_valid = (ina237_read_power(&g_ina237_dev) == ROV_OK) && isfinite(g_ina237_dev.bus_voltage_v) &&
+                         isfinite(g_ina237_dev.shunt_current_a);
 
         /* Track the lowest valid pressure so a vacuum applied after startup is detectable. */
         if (g_bme280_valid && g_bme280_dev.pressure_hpa > 0.0f &&
@@ -172,15 +171,14 @@ void node1_app_step(void) {
             g_baseline_pressure_hpa = g_bme280_dev.pressure_hpa;
         }
 
-        uint8_t leak_bits = sensor_fault ? 0x01u : 0u;
+        uint8_t leak_bits = 0;
 
         /*
          * Check BME280 humidity threshold (> 80%).
          *
          * Environmental leak detection uses bit 0.
          */
-        if (g_bme280_dev.humidity_pct >= ROV_LEAK_HUMIDITY_MAX_PCT) {
-
+        if (g_bme280_valid && g_bme280_dev.humidity_pct >= ROV_LEAK_HUMIDITY_MAX_PCT) {
             leak_bits |= 0x01;
         }
 
@@ -191,9 +189,8 @@ void node1_app_step(void) {
          * more than the configured threshold, report an environmental
          * leak using bit 0.
          */
-        if (g_baseline_pressure_hpa > 0.0f &&
+        if (g_bme280_valid && g_baseline_pressure_hpa > 0.0f &&
             (g_bme280_dev.pressure_hpa - g_baseline_pressure_hpa) >= ROV_LEAK_PRESSURE_DROP_THRESHOLD_HPA) {
-
             leak_bits |= 0x01;
         }
 

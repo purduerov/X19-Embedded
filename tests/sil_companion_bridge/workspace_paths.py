@@ -22,8 +22,18 @@ def _candidate_roots() -> list[Path]:
     script_root = Path(__file__).resolve().parent
     roots.extend([script_root, *script_root.parents])
 
-    # This fallback keeps the documented Windows development layout usable when
-    # the embedded repository is opened from a separate git worktree.
+    # If running inside a git worktree, resolve the main repository and workspace root
+    git_file = script_root.parent.parent / ".git"
+    if git_file.is_file():
+        try:
+            content = git_file.read_text(encoding="utf-8").strip()
+            if content.startswith("gitdir:"):
+                worktree_gitdir = Path(content.split(":", 1)[1].strip()).resolve()
+                roots.extend([worktree_gitdir, *worktree_gitdir.parents])
+        except OSError:
+            pass
+
+    # Fallback to standard development paths if not discovered via parents
     roots.append(Path.home() / "Documents" / "Engineering" / "ROV")
 
     unique_roots: list[Path] = []
