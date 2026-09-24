@@ -42,6 +42,24 @@ uint64_t time_get_us(void);
 void delay_ms(uint32_t ms);
 
 /**
+ * @brief Write bytes to a 7-bit I2C device address.
+ * @param addr 7-bit I2C address.
+ * @param data Data buffer to transmit.
+ * @param len Number of bytes to transmit.
+ * @return true on success, false on failure.
+ */
+bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len);
+
+/**
+ * @brief Read bytes from a 7-bit I2C device address.
+ * @param addr 7-bit I2C address.
+ * @param data Destination buffer.
+ * @param len Number of bytes to read.
+ * @return true on success, false on failure.
+ */
+bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len);
+
+/**
  * @brief Toggle the board heartbeat / diagnostic indicator LED.
  */
 void led_toggle(void);

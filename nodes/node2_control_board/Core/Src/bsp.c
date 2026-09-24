@@ -30,6 +30,10 @@
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim8;
 
+#if defined(HAL_I2C_MODULE_ENABLED)
+extern I2C_HandleTypeDef hi2c1;
+#endif
+
 /* Cached PWM duty cycles for reading back */
 static uint16_t g_pwm_duty_us[8] = {1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500};
 static uint16_t g_solenoid_state_mask = 0;
@@ -73,6 +77,38 @@ void delay_ms(uint32_t ms) {
     HAL_Delay(ms);
 #else
     (void)ms;
+#endif
+}
+
+bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {
+#if defined(HAL_I2C_MODULE_ENABLED)
+    if (!data || len == 0U) {
+        return false;
+    }
+
+    return HAL_I2C_Master_Transmit(&hi2c1, (uint16_t)(addr << 1U), (uint8_t *)data, len, 10U) == HAL_OK;
+#else
+    (void)addr;
+    (void)data;
+    (void)len;
+
+    return false;
+#endif
+}
+
+bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
+#if defined(HAL_I2C_MODULE_ENABLED)
+    if (!data || len == 0U) {
+        return false;
+    }
+
+    return HAL_I2C_Master_Receive(&hi2c1, (uint16_t)(addr << 1U), data, len, 10U) == HAL_OK;
+#else
+    (void)addr;
+    (void)data;
+    (void)len;
+
+    return false;
 #endif
 }
 

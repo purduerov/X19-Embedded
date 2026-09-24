@@ -21,6 +21,22 @@ __attribute__((weak)) void delay_ms(uint32_t ms) {
     (void)ms;
 }
 
+__attribute__((weak)) bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {
+    (void)addr;
+    (void)data;
+    (void)len;
+
+    return false;
+}
+
+__attribute__((weak)) bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
+    (void)addr;
+    (void)data;
+    (void)len;
+
+    return false;
+}
+
 __attribute__((weak)) void led_toggle(void) {}
 
 __attribute__((weak)) void led_set(bool state) {
