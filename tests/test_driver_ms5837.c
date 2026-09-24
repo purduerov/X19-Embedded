@@ -15,13 +15,13 @@ void test_ms5837_driver(void) {
     /* Negative test: NULL pointer and invalid density */
     assert(ms5837_init(NULL) == ROV_ERR_INVALID_ARG);
     assert(ms5837_read_pressure_depth(NULL, 1000.0f) == ROV_ERR_INVALID_ARG);
+    mock_sensors_reset();
+    mock_sensors_set_ms5837(1013.25f, 18.0f);
     assert(ms5837_init(&dev) == ROV_OK);
     assert(ms5837_read_pressure_depth(&dev, 0.0f) == ROV_ERR_INVALID_ARG);
     assert(ms5837_read_pressure_depth(&dev, -10.0f) == ROV_ERR_INVALID_ARG);
 
     /* Test surface atmospheric pressure: depth must clamp to 0.0 meters */
-    mock_sensors_reset();
-    mock_sensors_set_ms5837(1013.25f, 18.0f);
     assert(ms5837_read_pressure_depth(&dev, 1000.0f) == ROV_OK);
     assert(dev.depth_meters == 0.0f);
 
