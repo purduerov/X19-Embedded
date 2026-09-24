@@ -1,0 +1,36 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {"major": 3, "minor": 22, "patch": 0},
+  "configurePresets": [
+    {"name": "sil-debug", "displayName": "Host SIL (Debug)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/sil-debug", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}},
+    {"name": "sil-release", "displayName": "Host SIL (Release)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/sil-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}}
+  ],
+  "buildPresets": [
+    {"name": "sil-debug", "displayName": "Build Host SIL (Debug)", "configurePreset": "sil-debug"},
+    {"name": "sil-release", "displayName": "Build Host SIL (Release)", "configurePreset": "sil-release"}
+  ],
+  "testPresets": [
+    {
+      "name": "sil-debug",
+      "displayName": "Test Host SIL (Debug)",
+      "configurePreset": "sil-debug",
+      "filter": {
+        "exclude": {
+          "name": "^target_"
+        }
+      },
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "sil-release",
+      "displayName": "Test Host SIL (Release)",
+      "configurePreset": "sil-release",
+      "filter": {
+        "exclude": {
+          "name": "^target_"
+        }
+      },
+      "output": {"outputOnFailure": true}
+    }
+  ]
+}
