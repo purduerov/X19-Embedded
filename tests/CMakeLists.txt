@@ -269,7 +269,14 @@ function(add_target_startup_contract node_id node_dir)
 endfunction()
 
 add_target_startup_contract(1 node1_pi_shield)
-add_target_startup_contract(2 node2_control_board)
+
+add_test(
+    NAME target_startup_node2
+    COMMAND ${CMAKE_COMMAND}
+        "-DMAIN_SOURCE=${PROJECT_SOURCE_DIR}/nodes/node2_control_board/Core/Src/main.c"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/hardware/check_node2_startup.cmake"
+)
+
 add_target_startup_contract(3 node3_power_slab)
 
 # Software-in-the-Loop (SIL) Bridge Server (Host Native Only)
