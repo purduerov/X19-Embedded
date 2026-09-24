@@ -96,6 +96,34 @@ void mock_bsp_set_lm74700_ok(bool ok);
  */
 void mock_bsp_set_pcb_temperature_c(float temp_c);
 
+/**
+ * @brief Set one register in the mock I2C register map.
+ *
+ * @param addr 7-bit I2C device address.
+ * @param reg Register address.
+ * @param value Value to store.
+ */
+void mock_bsp_i2c_set_reg(uint8_t addr, uint8_t reg, uint8_t value);
+
+/**
+ * @brief Set multiple consecutive registers in the mock I2C register map.
+ *
+ * @param addr 7-bit I2C device address.
+ * @param start_reg First register address.
+ * @param data Values to store.
+ * @param len Number of registers to write.
+ */
+void mock_bsp_i2c_set_regs(uint8_t addr, uint8_t start_reg, const uint8_t *data, uint16_t len);
+
+/**
+ * @brief Read one register from the mock I2C register map.
+ *
+ * @param addr 7-bit I2C device address.
+ * @param reg Register address.
+ * @return Current register value.
+ */
+uint8_t mock_bsp_i2c_get_reg(uint8_t addr, uint8_t reg);
+
 #ifdef __cplusplus
 }
 #endif
