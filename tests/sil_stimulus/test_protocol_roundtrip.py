@@ -47,6 +47,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 NEUTRAL_PWMS = [1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500]
 
 
+def _port_refuses_connections(port: int, timeout: float = 1.0) -> bool:
+    """Return True when nothing is listening on ``port`` (connect is refused)."""
+    try:
+        probe = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+    except OSError:
+        return True
+    probe.close()
+    return False
+
+
 class TestSilProtocolRoundtrip(unittest.TestCase):
     """The pure framing layer; no native binary required."""
 
@@ -114,6 +124,13 @@ class TestFrameIoHelpers(unittest.TestCase):
             probe.bind(("127.0.0.1", port))
 
     def test_recv_frames_reassembles_split_packets(self):
+        """A frame straddling two recv_frames calls must survive the call boundary.
+
+        The first write is deliberately cut mid-frame (100 bytes = one whole
+        73-byte packet plus 27 bytes of the next).  A function-local buffer
+        would drop those 27 bytes, so the second call could never reconstruct
+        the trailing packet.
+        """
         expected = [
             (CAN_ID_THRUSTER_CMD, b"\x01\x02\x03\x04"),
             (CAN_ID_SIL_OUTPUT_STATUS, b"\x05\x06\x07\x08"),
@@ -122,16 +139,34 @@ class TestFrameIoHelpers(unittest.TestCase):
         stream = b"".join(
             sil_test_support.pack_sil_can_frame(can_id, payload) for can_id, payload in expected
         )
+        packet_size = sil_test_support.SIL_PACKET_SIZE
+        self.assertEqual(len(stream), 3 * packet_size)
+
+        # Cut point sits 27 bytes into the second frame.
+        cut = packet_size + 27
+        self.assertEqual(len(stream) - cut, 119)
 
         left, right = socket.socketpair()
         self.addCleanup(left.close)
         self.addCleanup(right.close)
-        # Deliver one byte at a time to force pathological fragmentation.
-        for index in range(len(stream)):
-            left.sendall(stream[index : index + 1])
-        received = recv_frames(right, 2.0)
 
-        self.assertEqual(received, expected)
+        left.sendall(stream[:cut])
+        first_batch = recv_frames(right, 0.5)
+        self.assertEqual(
+            first_batch,
+            expected[:1],
+            "The first call must decode exactly the one complete frame and keep the "
+            "27 trailing bytes buffered",
+        )
+
+        left.sendall(stream[cut:])
+        second_batch = recv_frames(right, 0.5)
+        self.assertEqual(
+            second_batch,
+            expected[1:],
+            "The second call must reuse the 27 bytes held over from the first call to "
+            "reconstruct the remaining frames; a per-call buffer loses them",
+        )
 
     def test_recv_frames_returns_empty_list_on_timeout(self):
         left, right = socket.socketpair()
@@ -171,6 +206,12 @@ class TestSilServerProcess(unittest.TestCase):
             )
         self.assertTrue(resolved.is_file())
         self.assertEqual(Path(os.path.realpath(resolved)).stem, sil_test_support.SERVER_STEM)
+        self.assertEqual(
+            resolved,
+            SERVER_EXE,
+            "server_executable() must agree with the documented default SERVER_EXE; "
+            f"discovery returned {resolved} but the default is {SERVER_EXE}",
+        )
 
     def test_server_starts_streams_and_stops(self):
         executable = require_server_executable()
@@ -233,15 +274,39 @@ class TestSilServerProcess(unittest.TestCase):
         self.assertIsNone(server.process, "stop() must clear the process handle")
 
     def test_context_manager_terminates_server_on_failure(self):
+        """A raising test body must still leave no live child and no live listener.
+
+        ``stop()`` unconditionally sets ``self.process = None``, so the handle
+        being cleared proves nothing.  These assertions check the OS-level facts
+        instead: the child really exited, and nothing is still serving the port.
+        The post-teardown connect check is preferred over a rebind probe because
+        the C server sets ``SO_REUSEADDR`` (``sil_bridge_server.c:184``), which on
+        Windows lets a second ``bind()`` succeed against a still-listening stale
+        server and hand ``accept()`` traffic to the first listener.
+        """
         executable = require_server_executable()
         captured = SilServerProcess(executable)
+
         with self.assertRaises(ZeroDivisionError):
             with captured:
+                proc = captured.process
+                self.assertIsNotNone(proc, "start() must publish a process handle")
+                # Prove the port is genuinely served while the block is alive, so
+                # the refusal asserted below is a real signal, not a vacuous pass.
+                self.assertFalse(
+                    _port_refuses_connections(captured.port),
+                    "The SIL server must be accepting connections while the with block runs",
+                )
                 1 / 0
-        self.assertIsNone(captured.process)
+
+        self.assertIsNone(captured.process, "stop() must clear the process handle")
+        self.assertIsNotNone(
+            proc.poll(),
+            f"SIL server child must have exited after teardown; returncode={proc.poll()}",
+        )
         self.assertTrue(
-            captured.port > 0,
-            "A port must still be reserved for diagnostics after shutdown",
+            _port_refuses_connections(captured.port),
+            f"Port {captured.port} must no longer be served: a stale listener survived teardown",
         )
 
 
