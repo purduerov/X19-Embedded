@@ -40,6 +40,8 @@ from sil_protocol import (
     CAN_ID_POWER_TELEMETRY,
     CAN_ID_SIL_OUTPUT_STATUS,
     SIL_PACKET_SIZE,
+    SIL_MAGIC_HEADER,
+    SIL_MAGIC_HEADER_LEGACY,
     ThrusterCommand,
     SolenoidCommand,
     NavTelemetry,
@@ -389,87 +391,94 @@ class SilDashboardClient:
                 buf.extend(chunk)
 
                 while len(buf) >= SIL_PACKET_SIZE:
-                    packet_chunk = bytes(buf[:SIL_PACKET_SIZE])
-                    del buf[:SIL_PACKET_SIZE]
-                    can_id, payload = unpack_sil_can_frame(packet_chunk)
+                    magic = int.from_bytes(buf[:4], byteorder="little")
+                    if magic in (SIL_MAGIC_HEADER, SIL_MAGIC_HEADER_LEGACY):
+                        packet_chunk = bytes(buf[:SIL_PACKET_SIZE])
+                        del buf[:SIL_PACKET_SIZE]
+                        try:
+                            can_id, payload = unpack_sil_can_frame(packet_chunk)
 
-                    self.frame_count += 1
-                    self.last_rx_monotonic[can_id] = time.monotonic()
-                    summary = ""
+                            self.frame_count += 1
+                            self.last_rx_monotonic[can_id] = time.monotonic()
+                            summary = ""
 
-                    if can_id == CAN_ID_SIL_OUTPUT_STATUS:
-                        actual_pwms, brake_active, actual_solenoids, sim_time_ms = unpack_sil_output_status(payload)
-                        self.actual_pwms = actual_pwms
-                        self.emergency_break_tripped = brake_active
-                        self.emergency_break_requested = self.emergency_break_requested and not brake_active
-                        self.actual_solenoid_mask = actual_solenoids
-                        self.sim_time_ms = sim_time_ms
-                        self.output_status_received_monotonic = time.monotonic()
-                        summary = (
-                            f"Actual PWM: {actual_pwms}; brake={brake_active}; "
-                            f"solenoids=0x{actual_solenoids:03X}; sim={sim_time_ms} ms"
-                        )
-
-                    elif can_id == CAN_ID_NAV_TELEMETRY:
-                        nav = NavTelemetry.unpack(payload)
-                        self.nav_data = nav
-                        summary = f"Depth: {nav.depth_meters:.2f}m, YawRate: {nav.gyro_z_rad_s:.3f}rad/s, Q:({nav.q_w:.2f},{nav.q_x:.2f},{nav.q_y:.2f},{nav.q_z:.2f})"
-                        self.history_depth.append(nav.depth_meters)
-                        self.history_time.append(time.time())
-                        if len(self.history_depth) > 100:
-                            self.history_depth.pop(0)
-                            self.history_time.pop(0)
-
-                        # Update pipeline Core -> Surface translation
-                        raw_bytes = b""
-                        raw_hex = ""
-                        depth_val = nav.depth_meters
-                        temp_val = self.env_data.temperature_c if self.env_data else 22.5
-                        gx, gy, gz = nav.gyro_x_rad_s, nav.gyro_y_rad_s, nav.gyro_z_rad_s
-                        ts_us = int(time.time() * 1e6)
-
-                        if HAVE_PROTOBUF and telemetry_pb2:
-                            try:
-                                sdata = telemetry_pb2.SensorData(
-                                    timestamp_us=ts_us,
-                                    depth=depth_val,
-                                    temperature=temp_val,
-                                    angular_velocity=telemetry_pb2.Vector3D(x=gx, y=gy, z=gz),
-                                    acceleration=telemetry_pb2.Vector3D(x=0.0, y=0.0, z=9.81),
+                            if can_id == CAN_ID_SIL_OUTPUT_STATUS:
+                                actual_pwms, brake_active, actual_solenoids, sim_time_ms = unpack_sil_output_status(payload)
+                                self.actual_pwms = actual_pwms
+                                self.emergency_break_tripped = brake_active
+                                self.emergency_break_requested = self.emergency_break_requested and not brake_active
+                                self.actual_solenoid_mask = actual_solenoids
+                                self.sim_time_ms = sim_time_ms
+                                self.output_status_received_monotonic = time.monotonic()
+                                summary = (
+                                    f"Actual PWM: {actual_pwms}; brake={brake_active}; "
+                                    f"solenoids=0x{actual_solenoids:03X}; sim={sim_time_ms} ms"
                                 )
-                                raw_bytes = sdata.SerializeToString()
-                                raw_hex = " ".join(f"{b:02X}" for b in raw_bytes)
-                            except Exception:
-                                pass
 
-                        with self.lock:
-                            self.pipeline_core_to_surface = {
-                                "timestamp_us": ts_us,
-                                "depth": depth_val,
-                                "temp": temp_val,
-                                "gyro_x": gx,
-                                "gyro_y": gy,
-                                "gyro_z": gz,
-                                "accel_x": 0.0,
-                                "accel_y": 0.0,
-                                "accel_z": 9.81,
-                                "raw_hex": raw_hex or "08 00 1D 00 00 00 00 25 00 00 B4 41",
-                                "raw_bytes": raw_bytes,
-                            }
+                            elif can_id == CAN_ID_NAV_TELEMETRY:
+                                nav = NavTelemetry.unpack(payload)
+                                self.nav_data = nav
+                                summary = f"Depth: {nav.depth_meters:.2f}m, YawRate: {nav.gyro_z_rad_s:.3f}rad/s, Q:({nav.q_w:.2f},{nav.q_x:.2f},{nav.q_y:.2f},{nav.q_z:.2f})"
+                                self.history_depth.append(nav.depth_meters)
+                                self.history_time.append(time.time())
+                                if len(self.history_depth) > 100:
+                                    self.history_depth.pop(0)
+                                    self.history_time.pop(0)
 
-                    elif can_id == CAN_ID_ENV_TELEMETRY:
-                        env = EnvTelemetry.unpack(payload)
-                        self.env_data = env
-                        summary = f"Pres: {env.pressure_hpa:.1f}hPa, Hum: {env.humidity_pct:.1f}%, Leak: 0x{env.leak_flags:02X}"
-                    elif can_id == CAN_ID_POWER_TELEMETRY:
-                        pwr = PowerTelemetry.unpack(payload)
-                        self.power_data = pwr
-                        summary = f"48V Rail: {pwr.tether_voltage_mv/1000:.1f}V @ {pwr.tether_current_ma/1000:.1f}A, Temp: {pwr.pcb_temp_c_tenths/10:.1f}C"
+                                # Update pipeline Core -> Surface translation
+                                raw_bytes = b""
+                                raw_hex = ""
+                                depth_val = nav.depth_meters
+                                temp_val = self.env_data.temperature_c if self.env_data else 22.5
+                                gx, gy, gz = nav.gyro_x_rad_s, nav.gyro_y_rad_s, nav.gyro_z_rad_s
+                                ts_us = int(time.time() * 1e6)
 
-                    elif can_id == CAN_ID_EMERGENCY_BREAK:
-                        summary = "EMERGENCY BREAK LATCHED"
+                                if HAVE_PROTOBUF and telemetry_pb2:
+                                    try:
+                                        sdata = telemetry_pb2.SensorData(
+                                            timestamp_us=ts_us,
+                                            depth=depth_val,
+                                            temperature=temp_val,
+                                            angular_velocity=telemetry_pb2.Vector3D(x=gx, y=gy, z=gz),
+                                            acceleration=telemetry_pb2.Vector3D(x=0.0, y=0.0, z=9.81),
+                                        )
+                                        raw_bytes = sdata.SerializeToString()
+                                        raw_hex = " ".join(f"{b:02X}" for b in raw_bytes)
+                                    except Exception:
+                                        pass
 
-                    self._record_packet("STM32 -> Core", can_id, payload, summary)
+                                with self.lock:
+                                    self.pipeline_core_to_surface = {
+                                        "timestamp_us": ts_us,
+                                        "depth": depth_val,
+                                        "temp": temp_val,
+                                        "gyro_x": gx,
+                                        "gyro_y": gy,
+                                        "gyro_z": gz,
+                                        "accel_x": 0.0,
+                                        "accel_y": 0.0,
+                                        "accel_z": 9.81,
+                                        "raw_hex": raw_hex or "08 00 1D 00 00 00 00 25 00 00 B4 41",
+                                        "raw_bytes": raw_bytes,
+                                    }
+
+                            elif can_id == CAN_ID_ENV_TELEMETRY:
+                                env = EnvTelemetry.unpack(payload)
+                                self.env_data = env
+                                summary = f"Pres: {env.pressure_hpa:.1f}hPa, Hum: {env.humidity_pct:.1f}%, Leak: 0x{env.leak_flags:02X}"
+                            elif can_id == CAN_ID_POWER_TELEMETRY:
+                                pwr = PowerTelemetry.unpack(payload)
+                                self.power_data = pwr
+                                summary = f"48V Rail: {pwr.tether_voltage_mv/1000:.1f}V @ {pwr.tether_current_ma/1000:.1f}A, Temp: {pwr.pcb_temp_c_tenths/10:.1f}C"
+
+                            elif can_id == CAN_ID_EMERGENCY_BREAK:
+                                summary = "EMERGENCY BREAK LATCHED"
+
+                            self._record_packet("STM32 -> Core", can_id, payload, summary)
+                        except ValueError:
+                            pass
+                    else:
+                        del buf[:1]
 
             except Exception:
                 break
