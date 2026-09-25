@@ -566,8 +566,42 @@ class SilDashboardClient:
         return joined
 
     def request_stop(self) -> bool:
-        """Operator STOP: cancel the held command and drive the outputs neutral."""
+        """
+        Operator STOP: cancel the held command and drive the outputs neutral.
+
+        DELIBERATELY leaves ``self.pwms`` and ``self.pipeline_surface_cmd``
+        alone, and only neutralises the worker's held command.  Both of those
+        fields are the Streamlit dashboard's record of the operator's commanded
+        values, and the dashboard diffs its slider widgets against them on every
+        render.  If this transition published a new commanded target -- neutral,
+        or anything else -- the next render would see a change and re-send the
+        pre-stop command with no operator action, re-arming thrust.  Consumers
+        depend on this; do not reset them here.
+
+        A side effect is that the dashboard's readback of the *commanded* target
+        still shows the pre-stop value after a stop while the board reads back
+        neutral.  The real fix is to separate the display target from the diff
+        baseline, not to reset either field from here.
+        """
         return self.stop_control_loop(send_neutral=True)
+
+    @property
+    def estop_latched(self) -> bool:
+        """
+        True while the emergency-break latch is holding.
+
+        Read-only on purpose: the latch is set by
+        :meth:`request_emergency_break` and cleared only by
+        :meth:`start_server_process` (a new engine) or :meth:`connect` (a new
+        transport).  A UI has to be able to *ask* whether the latch is holding --
+        to refuse an automatic reconnect that would silently disarm it -- without
+        being able to set it.
+
+        ``control_state`` cannot answer this question: :meth:`disconnect`
+        overwrites it with ``DISCONNECTED`` while leaving the latch set, so a
+        latched client can report a non-ESTOP state.
+        """
+        return self._estop_latched
 
     def _control_loop(self, stop_event: threading.Event) -> None:
         """

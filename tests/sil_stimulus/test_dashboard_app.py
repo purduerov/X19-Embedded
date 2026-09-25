@@ -37,6 +37,7 @@ Run from the repository root::
 from __future__ import annotations
 
 import inspect
+import re
 import socket
 import sys
 import threading
@@ -124,6 +125,52 @@ WORKER_SPINUP_FRAMES = 4
 # the *whole* mask when it does, so 0x3FF never reaches the outputs.
 ENERGIZED_SOLENOID_MASK = 0x0155
 
+#: Every module-level function in dashboard_app that main() must delegate to.
+#: If one of these is inlined back into main() the safety wiring becomes
+#: untestable, so both directions are asserted.
+HANDLER_NAMES = (
+    "all_stop",
+    "trip_emergency_break",
+    "stop_engine",
+    "restart_engine",
+    "auto_refresh_due",
+    "pilot_axes_changed",
+    "thruster_targets_changed",
+    "control_state_presentation",
+    "ensure_transport",
+)
+
+#: The only conditions under which main() is allowed to transmit.  Anything else
+#: -- notably the unattended auto-refresh loop -- must not put a frame on the
+#: wire.  ``!=`` covers the inline solenoid diff, which is a comparison against
+#: the client's current mask rather than a named predicate.
+_LEGITIMATE_SEND_CONDITIONS = (
+    "st.button",
+    "changed(",
+    "!=",
+)
+
+
+def _enclosing_condition(lines, index: int) -> str:
+    """
+    Return the nearest enclosing ``if`` condition for the line at ``index``.
+
+    Walks backwards for the first line that is less indented than the target and
+    starts a block, which is the condition the target line is executed under.
+    A send at module level of main() (no enclosing ``if``) yields ``""``, which
+    no legitimate condition matches.
+    """
+    target_indent = len(lines[index]) - len(lines[index].lstrip())
+    for offset in range(index - 1, -1, -1):
+        line = lines[offset]
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent < target_indent and stripped.startswith("if "):
+            return stripped
+    return ""
+
 
 class _RecordingClient:
     """
@@ -136,9 +183,10 @@ class _RecordingClient:
     """
 
     def __init__(self, control_state: ControlState = ControlState.ARMED,
-                 connected: bool = True) -> None:
+                 connected: bool = True, estop_latched: bool = False) -> None:
         self.connected = connected
         self.control_state = control_state
+        self.estop_latched = estop_latched
         self.pwms: List[int] = list(NEUTRAL_PWMS)
         self.solenoid_mask = 0
         self.pipeline_surface_cmd = {
@@ -191,6 +239,12 @@ class _RecordingClient:
         self._record("send_solenoids", mask)
         self.solenoid_mask = mask
         return True
+
+    def start_control_loop(self) -> bool:
+        return self._record("start_control_loop")
+
+    def stop_control_loop(self, send_neutral: bool = True) -> bool:
+        return self._record("stop_control_loop", send_neutral)
 
     # -- transport ------------------------------------------------------
     def start_server_process(self) -> bool:
@@ -370,15 +424,7 @@ class TestDashboardAppModule(unittest.TestCase):
         emergency, and reconnect wiring.  This is the test that makes those
         tests possible to keep.
         """
-        handlers = (
-            "all_stop",
-            "trip_emergency_break",
-            "auto_refresh_due",
-            "pilot_axes_changed",
-            "thruster_targets_changed",
-            "control_state_presentation",
-            "ensure_transport",
-        )
+        handlers = HANDLER_NAMES
         for name in handlers:
             with self.subTest(handler=name):
                 handler = getattr(dashboard_app, name, None)
@@ -406,11 +452,108 @@ class TestDashboardAppModule(unittest.TestCase):
                     forbidden, source,
                     f"main() must delegate {forbidden} to a module-level handler",
                 )
-        for handler in ("all_stop", "trip_emergency_break", "auto_refresh_due",
-                        "pilot_axes_changed", "thruster_targets_changed",
-                        "control_state_presentation", "ensure_transport"):
+        for handler in HANDLER_NAMES:
             with self.subTest(handler=handler):
                 self.assertIn(f"{handler}(", source, f"main() must use {handler}()")
+
+    def test_every_transmission_in_main_is_a_button_or_a_diff_branch(self):
+        """
+        Invariant: ``main()`` transmits only in response to an operator action.
+
+        The auto-refresh loop runs unattended on every browser poll.  A single
+        ``client.send_pwms(...)`` there would refresh the firmware heartbeat
+        forever, which is precisely what stops Node 2 releasing the solenoids --
+        and it would do so while the dashboard reports the vehicle is stopped.
+        The loop must therefore be unable to transmit, and the only legitimate
+        transmission sites are a button press or a per-tab slider diff.
+
+        Checked structurally: every line naming a sender must sit inside a block
+        whose condition is a widget action or a diff predicate.  A bare send in
+        the refresh block has no such condition and fails here.
+        """
+        lines = inspect.getsource(dashboard_app.main).splitlines()
+        senders = ("send_pwms", "send_surface_pilot_command", "send_solenoids")
+        for index, line in enumerate(lines):
+            if not any(sender in line for sender in senders):
+                continue
+            condition = _enclosing_condition(lines, index)
+            with self.subTest(line=line.strip()):
+                self.assertTrue(
+                    any(token in condition for token in _LEGITIMATE_SEND_CONDITIONS),
+                    f"{line.strip()!r} transmits, but its enclosing condition is "
+                    f"{condition.strip()!r}. A transmission is only allowed under "
+                    f"a button press or a slider diff.",
+                )
+
+    def test_both_all_stop_buttons_call_the_same_handler(self):
+        """
+        Invariant: the two All Stop buttons cannot drift apart.
+
+        They are the operator's only way to stop simulated thrust, and they live
+        in different tabs.  Each must reach ``all_stop()`` directly, so a future
+        edit cannot leave one of them sending a command.
+        """
+        source = inspect.getsource(dashboard_app.main)
+        for label in ("All Stop (Hover)", "All Stop (1500 us)"):
+            with self.subTest(button=label):
+                self.assertIn(f'st.button("{label}"', source)
+                after = source.split(f'st.button("{label}"', 1)[1].split("st.rerun()", 1)[0]
+                self.assertIn(
+                    "all_stop(client)", after,
+                    f"the '{label}' button must call all_stop() directly",
+                )
+
+    def test_main_publishes_a_baseline_for_each_slider_tab(self):
+        """
+        Invariant: both slider tabs record their own baseline every render.
+
+        Without the trailing ``publish_tab_baseline`` a tab would never register
+        its own value, and its predicate would treat the operator's first slider
+        move as unchanged -- a dead control surface.
+        """
+        source = inspect.getsource(dashboard_app.main)
+        identifiers = re.findall(
+            r"publish_tab_baseline\(client,\s*([A-Za-z_][A-Za-z_0-9]*),", source
+        )
+        self.assertEqual(
+            len(identifiers), 2,
+            "each of the two slider tabs must publish exactly one baseline per "
+            f"render, found {identifiers}",
+        )
+        # Resolved through the module rather than matched as text, so renaming a
+        # constant does not break this while still pinning that main() uses the
+        # two distinct tab identities the predicates read.
+        self.assertEqual(
+            {getattr(dashboard_app, name, None) for name in identifiers},
+            {dashboard_app.TAB_PILOT, dashboard_app.TAB_THRUSTER},
+        )
+
+
+def _render_pilot_tab(client, surge, sway, heave, yaw) -> bool:
+    """
+    Do exactly what ``main()``'s pilot tab does on one render.  True if it sent.
+
+    Mirrors the tab's block line for line, so a test that drives this is driving
+    the real control flow rather than an approximation of it.
+    """
+    axes = (surge, sway, heave, yaw)
+    sent = False
+    if dashboard_app.pilot_axes_changed(client, *axes):
+        client.send_surface_pilot_command(*axes)
+        sent = True
+    dashboard_app.publish_tab_baseline(client, dashboard_app.TAB_PILOT, axes)
+    return sent
+
+
+def _render_thruster_tab(client, pwms) -> bool:
+    """Do exactly what ``main()``'s thruster tab does on one render."""
+    targets = list(pwms)
+    sent = False
+    if dashboard_app.thruster_targets_changed(client, targets):
+        client.send_pwms(targets)
+        sent = True
+    dashboard_app.publish_tab_baseline(client, dashboard_app.TAB_THRUSTER, targets)
+    return sent
 
 
 class TestDashboardHandlerWiring(unittest.TestCase):
@@ -459,23 +602,26 @@ class TestDashboardHandlerWiring(unittest.TestCase):
         Streamlit keeps widget state across a rerun, so the axis sliders still
         read the operator's last value.  An All Stop that republished the axes
         as all-zero would make the very next rerun see a difference and re-send
-        the pre-stop command, silently re-arming thrust.  ``request_stop()``
-        leaves ``pipeline_surface_cmd`` alone, so the diff is empty.
+        the pre-stop command, silently re-arming thrust.  The tab's own baseline
+        is untouched by the stop, so the diff is empty.
         """
         client = _RecordingClient(control_state=ControlState.RUNNING)
         # The operator drags Surge to 0.5; the pilot tab sends it.
-        client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+        _render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0)
+        self.assertTrue(_render_pilot_tab(client, 0.5, 0.0, 0.0, 0.0))
         calls_before_stop = len(client.calls)
 
         dashboard_app.all_stop(client)
         # Next rerun: the sliders still hold 0.5.
-        if dashboard_app.pilot_axes_changed(client, 0.5, 0.0, 0.0, 0.0):
-            client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+        self.assertFalse(
+            _render_pilot_tab(client, 0.5, 0.0, 0.0, 0.0),
+            "The rerun after All Stop re-sent the pilot axis; thrust would be "
+            "re-armed without any operator action",
+        )
         self.assertEqual(
             client.calls[calls_before_stop:],
             [("request_stop", ())],
-            "The rerun after All Stop re-sent the pilot axis; thrust would be "
-            "re-armed without any operator action",
+            "the pilot tab must transmit nothing after an All Stop",
         )
 
     def test_thruster_all_stop_is_not_silently_reversed_by_the_next_rerun(self):
@@ -484,35 +630,148 @@ class TestDashboardHandlerWiring(unittest.TestCase):
         that follows it.
 
         The per-thruster sliders keep the operator's last value across a rerun.
-        An All Stop that rewrote the client's commanded target to neutral would
-        make the next rerun see a difference and re-send the pre-stop PWMs.
+        An All Stop that rewrote the tab's baseline to neutral would make the
+        next rerun see a difference and re-send the pre-stop PWMs.
         """
         client = _RecordingClient(control_state=ControlState.RUNNING)
-        client.send_pwms([1650] * 8)
+        _render_thruster_tab(client, NEUTRAL_PWMS)
+        self.assertTrue(_render_thruster_tab(client, [1650] * 8))
         calls_before_stop = len(client.calls)
 
         dashboard_app.all_stop(client)
-        if dashboard_app.thruster_targets_changed(client, [1650] * 8):
-            client.send_pwms([1650] * 8)
-        self.assertEqual(
-            client.calls[calls_before_stop:],
-            [("request_stop", ())],
+        self.assertFalse(
+            _render_thruster_tab(client, [1650] * 8),
             "The rerun after All Stop re-sent the thruster targets; thrust would "
             "be re-armed without any operator action",
         )
+        self.assertEqual(
+            client.calls[calls_before_stop:],
+            [("request_stop", ())],
+            "the thruster tab must transmit nothing after an All Stop",
+        )
 
-    def test_pilot_axes_changed_is_false_when_the_axes_match(self):
+    def test_the_pilot_tab_sends_only_when_the_operator_moves_an_axis(self):
         client = _RecordingClient()
-        client.send_surface_pilot_command(0.25, -0.5, 0.5, 0.25)
-        self.assertFalse(dashboard_app.pilot_axes_changed(client, 0.25, -0.5, 0.5, 0.25))
-        self.assertTrue(dashboard_app.pilot_axes_changed(client, 0.25, -0.5, 0.5, 0.0))
-        self.assertTrue(dashboard_app.pilot_axes_changed(client, 0.26, -0.5, 0.5, 0.25))
+        # First render of a session: the tab adopts what the sliders show and
+        # transmits nothing, because the operator has not asked for anything.
+        self.assertFalse(_render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0))
+        self.assertEqual(client.send_calls(), [])
+        # An operator move sends exactly once, then renders go quiet.
+        self.assertTrue(_render_pilot_tab(client, 0.25, -0.5, 0.5, 0.25))
+        self.assertEqual(len(client.send_calls()), 1)
+        self.assertFalse(_render_pilot_tab(client, 0.25, -0.5, 0.5, 0.25))
+        self.assertEqual(len(client.send_calls()), 1)
+        # Any single axis is enough to trigger a send.
+        for axes in ((0.0, -0.5, 0.5, 0.25), (0.25, 0.0, 0.5, 0.25),
+                     (0.25, -0.5, 0.0, 0.25), (0.25, -0.5, 0.5, 0.0),
+                     (0.26, -0.5, 0.5, 0.25)):
+            with self.subTest(axes=axes):
+                self.assertTrue(_render_pilot_tab(client, *axes))
+                self.assertFalse(_render_pilot_tab(client, *axes))
 
-    def test_thruster_targets_changed_is_false_when_the_targets_match(self):
+
+    def test_the_thruster_tab_sends_only_when_the_operator_moves_a_slider(self):
         client = _RecordingClient()
-        client.send_pwms([1650] * 8)
-        self.assertFalse(dashboard_app.thruster_targets_changed(client, [1650] * 8))
-        self.assertTrue(dashboard_app.thruster_targets_changed(client, [1600] * 8))
+        self.assertFalse(_render_thruster_tab(client, NEUTRAL_PWMS))
+        self.assertEqual(client.send_calls(), [])
+        self.assertTrue(_render_thruster_tab(client, [1650] * 8))
+        self.assertEqual(client.send_calls(), [("send_pwms", ([1650] * 8,))])
+        self.assertFalse(_render_thruster_tab(client, [1650] * 8))
+        self.assertTrue(_render_thruster_tab(client, [1600] * 8))
+        self.assertFalse(_render_thruster_tab(client, [1600] * 8))
+        # A single channel is enough.
+        self.assertTrue(_render_thruster_tab(client, [1600] * 7 + [1610]))
+        self.assertFalse(_render_thruster_tab(client, [1600] * 7 + [1610]))
+
+
+    def test_a_pilot_command_does_not_rearm_the_thruster_tabs_target(self):
+        """
+        Invariant: using one control tab cannot re-arm the other tab's command.
+
+        Streamlit renders every tab on every run, so both diffs run whether or
+        not the operator touched that tab.  ``send_surface_pilot_command()`` ends
+        in ``send_pwms()``, which writes the shared ``client.pwms``; a thruster
+        diff reading that shared field sees the pilot's allocation as a slider
+        move and re-sends the thruster tab's stale target at 20 Hz, with no
+        operator action on the thruster tab.
+        """
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        # The operator sets full forward on the thruster tab: the session's first
+        # render seeds the baseline, the second carries the operator's move.
+        _render_thruster_tab(client, NEUTRAL_PWMS)
+        self.assertTrue(_render_thruster_tab(client, [1650] * 8))
+        # The operator moves to the pilot tab and asks for half surge.
+        _render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0)
+        self.assertTrue(_render_pilot_tab(client, 0.5, 0.0, 0.0, 0.0))
+
+        # Every following automatic render, with the thruster sliders untouched.
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(
+                    _render_thruster_tab(client, [1650] * 8),
+                    "the thruster tab re-sent its stale target because the pilot "
+                    "tab published a command; the vehicle would hold full "
+                    "forward on all eight thrusters with no operator action",
+                )
+        self.assertEqual(
+            [call for call in client.send_calls() if call[0] == "send_pwms"],
+            [("send_pwms", ([1650] * 8,))],
+            "only the operator's own thruster command may be sent",
+        )
+
+    def test_a_thruster_command_does_not_cancel_pilot_input(self):
+        """
+        Invariant: the mirror direction.  A thruster command must not make the
+        pilot tab re-send or re-publish anything on the next render.
+
+        This also pins the precondition of the All Stop guarantee across tabs:
+        after an All Stop on either tab, the *other* tab's next render is silent.
+        """
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        _render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0)
+        self.assertTrue(_render_pilot_tab(client, 0.5, 0.0, 0.0, 0.0))
+        # The operator reaches for the thruster tab directly.
+        _render_thruster_tab(client, NEUTRAL_PWMS)
+        self.assertTrue(_render_thruster_tab(client, [1700] * 8))
+
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(
+                    _render_pilot_tab(client, 0.5, 0.0, 0.0, 0.0),
+                    "the pilot tab re-sent because the thruster tab published a "
+                    "command, so the two tabs fight over the vehicle",
+                )
+
+        # An All Stop on the thruster tab must not be undone by the pilot tab.
+        dashboard_app.all_stop(client)
+        for render in range(2):
+            with self.subTest(after_stop=render):
+                self.assertFalse(_render_pilot_tab(client, 0.5, 0.0, 0.0, 0.0))
+                self.assertFalse(_render_thruster_tab(client, [1700] * 8))
+
+    def test_stop_engine_does_not_clear_a_latched_estop(self):
+        """
+        Invariant: shutting the engine down is not a way to disarm the E-stop.
+        """
+        client = _RecordingClient(control_state=ControlState.ESTOP,
+                                  connected=False, estop_latched=True)
+        dashboard_app.stop_engine(client)
+        self.assertIn("stop_server_process", [name for name, _ in client.calls])
+        self.assertNotIn("start_server_process", [name for name, _ in client.calls])
+        self.assertNotIn("connect", [name for name, _ in client.calls])
+
+    def test_restart_engine_is_the_explicit_path_that_clears_the_latch(self):
+        """
+        Invariant: restarting the engine is the only dashboard action that
+        starts a new engine, and it is the documented way out of a latch.
+        """
+        client = _RecordingClient(control_state=ControlState.ESTOP,
+                                  connected=False, estop_latched=True)
+        self.assertTrue(dashboard_app.restart_engine(client, settle_s=0.0))
+        self.assertEqual(
+            [name for name, _ in client.calls],
+            ["stop_server_process", "start_server_process", "connect"],
+        )
 
     def test_auto_refresh_loop_sends_no_second_command(self):
         """
@@ -563,16 +822,48 @@ class TestDashboardHandlerWiring(unittest.TestCase):
             len(set(labels)), len(labels),
             f"all five control states need distinguishable labels, got {labels}",
         )
-        self.assertNotEqual(
-            presentations[ControlState.ESTOP][1],
-            presentations[ControlState.STOPPED][1],
-            "ESTOP must not be color-coded like a safe idle state",
+        colors = [color for _, color, _ in presentations.values()]
+        self.assertEqual(
+            len(set(colors)), len(colors),
+            f"all five control states need distinguishable colours, got {colors}; "
+            f"a shared colour would hide the difference between two states",
         )
-        self.assertNotEqual(
-            presentations[ControlState.RUNNING][1],
-            presentations[ControlState.ARMED][1],
-            "RUNNING must not be color-coded like a safe idle state",
-        )
+
+        # The wording has to describe what the state does, not merely exist.
+        # Swapping two help strings fails here.
+        expected_meaning = {
+            # A running worker is what keeps the board out of its failsafe.
+            ControlState.RUNNING: ("refresh", "20 hz", "transmitting"),
+            # Armed is the state whose whole point is that the watchdog lapses.
+            ControlState.ARMED: ("watchdog", "lapse", "not refreshed"),
+            # Stopped is an explicit stop, and nothing is being transmitted.
+            ControlState.STOPPED: ("explicit", "no command", "transmitted"),
+            # A latched break refuses every command until the engine restarts.
+            ControlState.ESTOP: ("latched", "refused", "restarted"),
+            # Disconnected means the control path is dead, not merely idle.
+            ControlState.DISCONNECTED: ("no sil transport", "nothing is transmitted", "dead"),
+        }
+        for state, keywords in expected_meaning.items():
+            help_text = presentations[state][2].lower()
+            for keyword in keywords:
+                with self.subTest(state=state, keyword=keyword):
+                    self.assertIn(
+                        keyword, help_text,
+                        f"the {state.name} help text must say {keyword!r}; it "
+                        f"reads {presentations[state][2]!r}",
+                    )
+
+    def test_an_unrecognised_control_state_is_presented_as_unsafe(self):
+        """
+        Invariant: a state this dashboard does not know about is shown as
+        unknown and unsafe, never silently rendered as a safe idle state.
+        """
+        exotic = _RecordingClient(control_state=ControlState.ARMED)
+        exotic.control_state = "some_future_state"
+        label, color, help_text = dashboard_app.control_state_presentation(exotic)
+        self.assertEqual(label, "UNKNOWN")
+        self.assertEqual(color, "red")
+        self.assertIn("unsafe", help_text.lower())
 
     def test_latched_estop_blocks_automatic_reconnect(self):
         """
@@ -583,7 +874,8 @@ class TestDashboardHandlerWiring(unittest.TestCase):
         error would silently disarm a tripped emergency break with no operator
         action.  The reconnect therefore requires an explicit button press.
         """
-        client = _RecordingClient(control_state=ControlState.ESTOP, connected=False)
+        client = _RecordingClient(control_state=ControlState.ESTOP, connected=False,
+                                  estop_latched=True)
         self.assertFalse(dashboard_app.ensure_transport(client))
         self.assertEqual(
             client.calls, [],
@@ -591,6 +883,27 @@ class TestDashboardHandlerWiring(unittest.TestCase):
         )
         self.assertFalse(client.started_server)
         self.assertFalse(client.connected_after_start)
+
+    def test_the_latch_gate_does_not_depend_on_the_displayed_state(self):
+        """
+        Invariant: the interlock keys off the latch itself, not off
+        ``control_state``.
+
+        ``disconnect()`` overwrites ``control_state`` with ``DISCONNECTED`` while
+        leaving the latch set, so a gate that read the state would let "Stop
+        Engine" -- whose intent is to shut the engine *down* -- clear a tripped
+        emergency break on the very next render.
+        """
+        for state in ControlState:
+            with self.subTest(state=state):
+                client = _RecordingClient(control_state=state, connected=False,
+                                          estop_latched=True)
+                self.assertFalse(
+                    dashboard_app.ensure_transport(client),
+                    f"a latched E-stop must block the reconnect whatever the "
+                    f"displayed state is (it was {state.name})",
+                )
+                self.assertEqual(client.calls, [])
 
     def test_automatic_reconnect_still_happens_without_a_latched_estop(self):
         """
@@ -688,6 +1001,60 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
         self.assertEqual(self.recorder.count(), baseline)
         self.assertEqual(self.recorder.thruster_pwms()[-1], NEUTRAL_PWMS)
 
+    def test_a_pilot_command_does_not_rearm_the_thruster_tabs_stale_target(self):
+        """
+        Invariant: the C-1 hazard, on the wire, with the real client.
+
+        The operator sets full forward on the thruster tab, then asks for half
+        surge on the pilot tab.  ``send_surface_pilot_command`` ends in
+        ``send_pwms``, so the shared ``client.pwms`` becomes the pilot's
+        allocation.  If the thruster tab's diff read that shared field, the next
+        render would treat the pilot's allocation as a slider move and re-send the
+        thruster tab's stale target -- no operator action on that tab, at 20 Hz,
+        vertical bank included.  The refreshed heartbeat would then stop the
+        firmware watchdog from ever releasing the solenoids.
+
+        Both directions are driven, because the tabs share one vehicle.
+        """
+        self._reset_to_armed()
+        # The operator sets full forward on the thruster tab: the session's first
+        # render seeds the baseline, the second carries the operator's move.
+        _render_thruster_tab(self.client, NEUTRAL_PWMS)
+        self.assertTrue(_render_thruster_tab(self.client, [1650] * 8))
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        self.assertTrue(
+            self.recorder.wait_for_count(WORKER_SPINUP_FRAMES, WORKER_SPINUP_S)
+        )
+
+        # The operator moves to the pilot tab and asks for half surge.
+        _render_pilot_tab(self.client, 0.0, 0.0, 0.0, 0.0)
+        self.assertTrue(_render_pilot_tab(self.client, 0.5, 0.0, 0.0, 0.0))
+        expected_held = compute_thrust_allocation(0.5, 0.0, 0.0, 0.0)
+        self.assertEqual(self.client._last_command, expected_held)
+
+        # Every following automatic render, with the thruster sliders untouched.
+        for render in range(3):
+            with self.subTest(direction="pilot_then_thruster", render=render):
+                self.assertFalse(
+                    _render_thruster_tab(self.client, [1650] * 8),
+                    "the thruster tab re-sent its stale target because the pilot "
+                    "tab published a command",
+                )
+                self.assertEqual(
+                    self.client._last_command, expected_held,
+                    "the held command was replaced by the other tab's target",
+                )
+                self.assertFalse(
+                    _render_pilot_tab(self.client, 0.5, 0.0, 0.0, 0.0),
+                    "the pilot tab re-sent because the thruster tab published a "
+                    "command; the two tabs must not fight over the vehicle",
+                )
+                self.assertEqual(self.client._last_command, expected_held)
+
+        # And the command path is still sending exactly the pilot's command.
+        time.sleep(2 * CONTROL_PERIOD_S)
+        self.assertEqual(self.recorder.thruster_pwms()[-1], expected_held)
+
     def test_neither_all_stop_button_is_reversed_by_the_next_rerun(self):
         """
         Invariant: the rerun after an All Stop transmits nothing, on both tabs.
@@ -703,9 +1070,11 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
             with self.subTest(tab=tab):
                 self._reset_to_armed()
                 if tab == "pilot":
-                    self.assertTrue(self.client.send_surface_pilot_command(*pending))
+                    _render_pilot_tab(self.client, 0.0, 0.0, 0.0, 0.0)
+                    self.assertTrue(_render_pilot_tab(self.client, *pending))
                 else:
-                    self.assertTrue(self.client.send_pwms(*pending))
+                    _render_thruster_tab(self.client, NEUTRAL_PWMS)
+                    self.assertTrue(_render_thruster_tab(self.client, *pending))
                 self.assertIs(self.client.control_state, ControlState.RUNNING)
                 self.assertTrue(
                     self.recorder.wait_for_count(WORKER_SPINUP_FRAMES, WORKER_SPINUP_S)
@@ -714,28 +1083,128 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
                 dashboard_app.all_stop(self.client)
                 after_stop = self.recorder.settle()
 
-                # Streamlit rerun: the widgets still hold the operator's values.
-                if tab == "pilot":
-                    changed = dashboard_app.pilot_axes_changed(self.client, *pending)
-                    if changed:
-                        self.client.send_surface_pilot_command(*pending)
-                else:
-                    changed = dashboard_app.thruster_targets_changed(
-                        self.client, list(pending[0])
-                    )
-                    if changed:
-                        self.client.send_pwms(*pending)
-
-                self.assertFalse(
-                    changed,
-                    f"The {tab} tab would re-send the pre-stop command on the "
-                    f"next rerun, re-arming thrust with no operator action",
-                )
+                # Every following render: the operator touched nothing.
+                for render in range(2):
+                    with self.subTest(render=render):
+                        if tab == "pilot":
+                            sent = _render_pilot_tab(self.client, *pending)
+                        else:
+                            sent = _render_thruster_tab(self.client, *pending)
+                        self.assertFalse(
+                            sent,
+                            f"the {tab} tab re-sent the pre-stop command on a "
+                            f"later render, re-arming thrust with no operator "
+                            f"action",
+                        )
                 time.sleep(2 * CONTROL_PERIOD_S)
                 self.assertEqual(
                     self.recorder.count(), after_stop,
                     f"A frame was transmitted after the {tab} tab's All Stop",
                 )
+
+    def test_neither_tab_rearms_the_others_command_after_a_stop(self):
+        """
+        Invariant: an All Stop on one tab is not undone by the *other* tab's
+        diff on a later render.
+
+        Streamlit renders every tab every run, so both diffs run regardless of
+        which tab the operator is looking at.
+        """
+        self._reset_to_armed()
+        _render_thruster_tab(self.client, NEUTRAL_PWMS)
+        self.assertTrue(_render_thruster_tab(self.client, [1650] * 8))
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        self.assertTrue(
+            self.recorder.wait_for_count(WORKER_SPINUP_FRAMES, WORKER_SPINUP_S)
+        )
+
+        dashboard_app.all_stop(self.client)
+        after_stop = self.recorder.settle()
+
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(_render_pilot_tab(self.client, 0.5, 0.0, 0.0, 0.0))
+                self.assertFalse(_render_thruster_tab(self.client, [1650] * 8))
+        self.assertIs(self.client.control_state, ControlState.STOPPED)
+        self.assertTrue(
+            self.recorder.quiet_for(QUIET_WINDOW_S),
+            "a cross-tab render re-armed the command path after an All Stop",
+        )
+        self.assertEqual(self.recorder.thruster_pwms()[-1], NEUTRAL_PWMS)
+
+    def test_stop_engine_does_not_restart_a_latched_emergency_break(self):
+        """
+        Invariant: the real client's latch survives "Stop Engine" and the next
+        automatic render.
+
+        This is the I-1 hole: ``stop_server_process()`` calls ``disconnect()``,
+        which overwrites ``control_state`` with ``DISCONNECTED`` while leaving the
+        latch set.  A gate that read ``control_state`` would therefore start a
+        new engine on the next render, and ``start_server_process()`` clears the
+        latch -- disarming a tripped emergency break as the side effect of an
+        operator asking for the engine to be shut *down*.
+
+        The engine calls are recorded rather than delegated, so the test stays
+        hermetic and cannot actually launch the native simulator.
+        """
+        engine_calls = []
+        self.client.start_server_process = lambda: (
+            engine_calls.append("start_server_process"), True
+        )[1]
+        self.client.connect = lambda: (engine_calls.append("connect"), True)[1]
+
+        self.assertTrue(self.client.request_emergency_break())
+        self.assertTrue(self.client.estop_latched)
+        self.assertIs(self.client.control_state, ControlState.ESTOP)
+
+        # The operator clicks "Stop Engine".
+        dashboard_app.stop_engine(self.client)
+        self.assertFalse(self.client.connected)
+        self.assertTrue(
+            self.client.estop_latched,
+            "stop_server_process() must not clear the latch",
+        )
+        self.assertIsNot(
+            self.client.control_state, ControlState.ESTOP,
+            "precondition: disconnect() overwrites the state, which is exactly "
+            "why the gate cannot read it",
+        )
+
+        # The next automatic render must not bring the engine back.
+        self.assertFalse(
+            dashboard_app.ensure_transport(self.client),
+            "ensure_transport restarted the engine while an E-stop was latched",
+        )
+        self.assertEqual(
+            engine_calls, [],
+            f"a latched E-stop must not be cleared by an automatic reconnect; "
+            f"got {engine_calls}",
+        )
+        self.assertTrue(self.client.estop_latched, "the latch must still be set")
+
+    def test_restart_engine_clears_the_latch_for_real(self):
+        """
+        Invariant: the operator's documented escape hatch works.
+
+        ``restart_engine`` is the one dashboard action allowed to start a new
+        engine, and ``start_server_process()`` is what clears the latch.  Only
+        the engine start is recorded, so no simulator is launched, but the latch
+        clear itself is the real client's own behaviour.
+        """
+        self.assertTrue(self.client.request_emergency_break())
+        self.assertTrue(self.client.estop_latched)
+
+        def _fake_start() -> bool:
+            # Mirror the real start_server_process(), which clears the latch.
+            self.client._estop_latched = False
+            return True
+
+        self.client.start_server_process = _fake_start
+        dashboard_app.restart_engine(self.client, settle_s=0.0)
+        self.assertFalse(
+            self.client.estop_latched,
+            "Restart Engine is the documented way out of a latched E-stop",
+        )
 
     def _reset_to_armed(self) -> None:
         """
@@ -753,6 +1222,7 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
         self.client._control_thread = None
         self.client._estop_latched = False
         self.transport.attach(self.client)
+        dashboard_app.forget_tab_baselines(self.client)
         self.client.pwms = list(NEUTRAL_PWMS)
         self.client.pipeline_surface_cmd.update(
             {"surge": 0.0, "sway": 0.0, "heave": 0.0, "yaw": 0.0}
@@ -1092,6 +1562,10 @@ class _StreamlitFakeClient(_RecordingClient):
         self.pwms = list(NEUTRAL_PWMS)
         self.solenoid_mask = 0
         self.control_state = ControlState.ARMED
+        # The per-tab diff baselines live in dashboard_app keyed by client, and
+        # this fake is a process-wide singleton behind st.cache_resource, so they
+        # have to be cleared explicitly or one test would inherit another's.
+        dashboard_app.forget_tab_baselines(self)
         self.pipeline_surface_cmd.update(
             {"surge": 0.0, "sway": 0.0, "heave": 0.0, "yaw": 0.0}
         )
@@ -1193,6 +1667,10 @@ class TestDashboardUiThroughStreamlit(unittest.TestCase):
         """
         Invariant: the deadman state is actually on screen, not just in the
         client.  A missing metric is a failed lookup, not a silent pass.
+
+        Asserts the metric's value *and* the colour-coded line carrying the
+        presentation's own label and colour, so the two cannot drift apart and
+        the check cannot be satisfied by the metric's title alone.
         """
         self._run()
         metric = next(
@@ -1202,10 +1680,36 @@ class TestDashboardUiThroughStreamlit(unittest.TestCase):
             metric, "the sidebar must render a 'Control State' metric"
         )
         self.assertEqual(metric.value, self.client.control_state.value)
+        label, color, _ = dashboard_app.control_state_presentation(self.client)
         rendered = " ".join(c.value for c in self.at.sidebar.markdown)
         self.assertIn(
-            "Control State", rendered,
-            "the colour-coded control-state line is missing from the sidebar",
+            f":{color}[{label}]", rendered,
+            "the sidebar must render the colour-coded control-state line for "
+            f"{label} in {color}; rendered markdown was {rendered!r}",
+        )
+
+    def test_main_does_not_transmit_with_a_live_transport(self):
+        """
+        Invariant: a render with a live SIL transport transmits nothing.
+
+        This is the end-to-end version of the refresh-loop guarantee.  The
+        transport is engaged and the auto-refresh toggle left on, so ``main()``
+        reaches its trailing ``sleep; st.rerun()`` block -- the one piece of
+        ``main()`` that runs with nobody watching.  Whatever that block does, it
+        must not put a command frame on the wire: a 20 Hz neutral resend would
+        refresh the firmware heartbeat forever and hold the solenoids energized
+        behind a dashboard that reports the vehicle is stopped.
+
+        ``MAX_CONNECTED_READS`` in the fake bounds the rerun loop this provokes.
+        """
+        self._run()
+        self.client.calls.clear()
+        self.client.engage(ControlState.RUNNING)
+        self._run()
+        self.assertEqual(
+            self.client.send_calls(), [],
+            f"a render with a live transport transmitted {self.client.send_calls()}; "
+            f"only an operator action may put a command on the wire",
         )
 
     def _assert_single_stop(self, label: str) -> None:

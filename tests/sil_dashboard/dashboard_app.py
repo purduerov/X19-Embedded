@@ -16,6 +16,7 @@ Enables live hardware-free testing and end-to-end verification strictly within X
 import os
 import sys
 import time
+import weakref
 
 import streamlit as st
 
@@ -94,13 +95,39 @@ def all_stop(client) -> bool:
 
     This must be ``request_stop()`` and not a neutral PWM command.  A neutral
     command goes to ARMED and stops the worker, which is safe, but it leaves the
-    operator in the same state as merely releasing the stick, and it publishes a
-    new commanded target that the per-slider diff on the *next* Streamlit rerun
-    would treat as a change -- re-sending the pre-stop command with no operator
-    action.  ``request_stop()`` also leaves the last commanded target alone,
-    which is what keeps the following rerun silent.
+    operator in the same state as merely releasing the stick.  ``request_stop()``
+    is also the transition that keeps the dashboard's slider diffs quiet: it
+    leaves the client's record of the operator's commanded values alone, so the
+    next render finds nothing to re-send.
     """
     return bool(client.request_stop())
+
+
+def stop_engine(client) -> None:
+    """
+    Operator "Stop Engine": shut the SIL engine down.
+
+    Intentionally does *not* clear a latched E-stop -- see :func:`ensure_transport`.
+    Shutting the engine down is the operator asking for less, never for the
+    emergency break to be disarmed.
+    """
+    client.stop_server_process()
+
+
+def restart_engine(client, settle_s: float = 0.3) -> bool:
+    """
+    Operator "Restart Engine": the explicit action that clears a latched E-stop.
+
+    ``start_server_process()`` is one of exactly two ways out of a latched ESTOP
+    (the other is a fresh transport via ``connect()``), and the dashboard offers
+    this as the only one.  ``settle_s`` is the pause that lets the old engine
+    release the port; it is a parameter so tests need not wait for it.
+    """
+    client.stop_server_process()
+    time.sleep(settle_s)
+    started = client.start_server_process()
+    connected = client.connect()
+    return bool(started and connected)
 
 
 def trip_emergency_break(client) -> bool:
@@ -127,20 +154,80 @@ def auto_refresh_due(client, auto_refresh: bool, refresh_rate: float) -> bool:
     return bool(auto_refresh) and bool(client.connected)
 
 
+# --- Per-tab diff baselines -------------------------------------------------
+# Streamlit renders every tab on every run, and each control tab diffs its
+# slider widgets against a baseline to decide "did the operator move something?".
+#
+# The baseline must be owned by the tab that published it.  A shared client field
+# cannot do that job: ``send_surface_pilot_command()`` ends in ``send_pwms()``,
+# which writes the shared ``client.pwms``, so the thruster tab's diff would read
+# the pilot's allocation as a slider move and re-send the thruster tab's stale
+# target -- with no operator action on that tab, at 20 Hz, vertical bank
+# included.  Symmetrically, a thruster command must not make the pilot tab
+# re-send.  One baseline per tab closes both directions.
+#
+# Keyed weakly by client so a replaced client cannot leak baselines, and held in
+# the UI rather than the client because these are dashboard-owned records of
+# what the operator last dialled in, not protocol state.
+_TAB_BASELINES = weakref.WeakKeyDictionary()
+
+#: Stable identifiers for the two slider-diff baselines.
+TAB_PILOT = "pilot"
+TAB_THRUSTER = "thruster"
+
+
+def tab_baseline(client, tab: str):
+    """
+    Return the last value *this tab* published, or None if it never has.
+
+    None means "this session has not published anything yet", and the predicates
+    below treat that as "nothing to send" rather than "everything changed".  The
+    sliders are seeded from the client's own current values, so adopting them
+    without transmitting is both safe and correct.
+    """
+    return _TAB_BASELINES.get(client, {}).get(tab)
+
+
+def publish_tab_baseline(client, tab: str, values) -> None:
+    """
+    Record what a tab is now displaying, so its next diff finds no change.
+
+    Called once per tab per render, after the send decision: it records the
+    transmitted value when a send happened and the unchanged widget value when it
+    did not, which are the same thing in both cases.
+    """
+    _TAB_BASELINES.setdefault(client, {})[tab] = tuple(values)
+
+
+def forget_tab_baselines(client) -> None:
+    """Drop a client's per-tab baselines, e.g. when a session's controls reset."""
+    _TAB_BASELINES.pop(client, None)
+
+
 def pilot_axes_changed(client, surge: float, sway: float, heave: float, yaw: float) -> bool:
-    """True when the 6-DOF sliders differ from the last accepted pilot command."""
-    command = client.pipeline_surface_cmd
-    return (
-        surge != command["surge"]
-        or sway != command["sway"]
-        or heave != command["heave"]
-        or yaw != command["yaw"]
-    )
+    """
+    True when the 6-DOF sliders differ from the last axes *this tab* published.
+
+    Reads the pilot tab's own baseline, never ``client.pwms`` and never a field
+    the thruster tab writes.
+    """
+    axes = (surge, sway, heave, yaw)
+    baseline = tab_baseline(client, TAB_PILOT)
+    return baseline is not None and axes != baseline
 
 
 def thruster_targets_changed(client, pwms) -> bool:
-    """True when the 8 per-channel sliders differ from the last accepted command."""
-    return list(pwms) != list(client.pwms)
+    """
+    True when the 8 per-channel sliders differ from the last targets *this tab*
+    published.
+
+    Deliberately does not read ``client.pwms``: every sender writes that field,
+    including the pilot tab, so diffing against it re-arms the thruster tab's
+    stale target whenever the operator uses the other tab.
+    """
+    targets = tuple(pwms)
+    baseline = tab_baseline(client, TAB_THRUSTER)
+    return baseline is not None and targets != tuple(baseline)
 
 
 def control_state_presentation(client):
@@ -160,16 +247,19 @@ def ensure_transport(client) -> bool:
     """
     Bring up the SIL engine and connect, unless an E-stop is latched.
 
-    A latched ESTOP is not cleared here.  ``SilDashboardClient.connect()`` clears
-    the latch, and this function runs on every Streamlit rerun whenever the
-    transport looks down, so auto-reconnecting would let a reader-thread hiccup
-    disarm a tripped emergency break with no operator action at all.  Clearing it
-    requires the explicit "Restart Engine" button, which calls
-    ``start_server_process()``.
+    Gates on ``client.estop_latched`` and NOT on ``client.control_state``:
+    ``disconnect()`` overwrites the state with ``DISCONNECTED`` while leaving the
+    latch set, so a state check lets "Stop Engine" -- whose whole intent is to
+    shut the engine *down* -- clear a tripped emergency break on the very next
+    render, because ``start_server_process()`` and ``connect()`` both clear the
+    latch.
+
+    Clearing it therefore requires the explicit "Restart Engine" button, which
+    calls :func:`restart_engine`.
     """
     if client.connected:
         return True
-    if client.control_state is ControlState.ESTOP:
+    if client.estop_latched:
         return False
     client.start_server_process()
     return bool(client.connect())
@@ -196,12 +286,12 @@ def main():
         st.subheader("SIL Server State")
         # A latched E-stop deliberately blocks the automatic reconnect.
         if not ensure_transport(client):
-            if client.control_state is ControlState.ESTOP:
+            if client.estop_latched:
                 st.error(
                     "Emergency break latched on the dashboard. Automatic reconnect "
-                    "is disabled so a transport hiccup cannot clear the latch. "
-                    "Click **Restart Engine** to start a new SIL engine and re-arm "
-                    "the control path."
+                    "is disabled so neither a transport hiccup nor Stop Engine can "
+                    "clear the latch. Click **Restart Engine** to start a new SIL "
+                    "engine and re-arm the control path."
                 )
             else:
                 st.error(
@@ -212,14 +302,11 @@ def main():
         col_srv1, col_srv2 = st.columns(2)
         with col_srv1:
             if st.button("Restart Engine", width="stretch"):
-                client.stop_server_process()
-                time.sleep(0.3)
-                client.start_server_process()
-                client.connect()
+                restart_engine(client)
                 st.rerun()
         with col_srv2:
             if st.button("Stop Engine", width="stretch"):
-                client.stop_server_process()
+                stop_engine(client)
                 st.rerun()
 
         status_color = "green" if client.connected else "red"
@@ -352,8 +439,14 @@ UPLINK (mock sensors to dashboard views):
                     client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.5)
                     st.rerun()
 
-            if pilot_axes_changed(client, surge, sway, heave, yaw):
-                client.send_surface_pilot_command(surge, sway, heave, yaw)
+            # Diff against the pilot tab's OWN baseline, then record what the tab
+            # is showing.  The thruster tab's sliders keep their own baseline, so
+            # a command published by either tab cannot be read as a slider move
+            # on the other.
+            pilot_axes = (surge, sway, heave, yaw)
+            if pilot_axes_changed(client, *pilot_axes):
+                client.send_surface_pilot_command(*pilot_axes)
+            publish_tab_baseline(client, TAB_PILOT, pilot_axes)
 
         st.divider()
         st.markdown("### 2. Live End-to-End Message Flow Inspector")
@@ -570,6 +663,7 @@ UPLINK (mock sensors to dashboard views):
 
         if thruster_targets_changed(client, new_pwms):
             client.send_pwms(new_pwms)
+        publish_tab_baseline(client, TAB_THRUSTER, new_pwms)
 
         st.divider()
         st.subheader("10-Channel Pneumatic Solenoid Drivers (AO3400A)")
