@@ -28,9 +28,151 @@ from sil_dashboard_client import (
     CAN_ID_ENV_TELEMETRY,
     CAN_ID_POWER_TELEMETRY,
     CAN_ID_SIL_OUTPUT_STATUS,
+    ControlState,
     SilDashboardClient,
     stream_age_label,
 )
+
+# --- Control-surface handlers ------------------------------------------------
+# Every action that can put a command on the wire, or decide that the command
+# path is live, lives in a module-level function rather than inline in main().
+# main() is Streamlit code: it cannot be imported and called without a running
+# Streamlit server, so inlining these would make the safety wiring untestable.
+# tests/sil_stimulus/test_dashboard_app.py drives them directly.
+#
+# None of these helpers hold a Streamlit reference and none of them may transmit
+# on their own except through the client: the 20 Hz control worker owns the
+# command cadence, and the UI only decides *what* is held.
+
+# Colour, label, and operator-facing explanation for each deadman state.
+# RUNNING and ESTOP are visually separated from the two safe idle states
+# (ARMED, STOPPED) because they are the states in which the vehicle can move.
+_CONTROL_STATE_PRESENTATION = {
+    ControlState.RUNNING: (
+        "RUNNING",
+        "green",
+        "20 Hz control worker is transmitting. Node 2's heartbeat is being "
+        "refreshed, so the board is out of its failsafe.",
+    ),
+    ControlState.ARMED: (
+        "ARMED",
+        "blue",
+        "Transport up, no command held. Outputs are neutral and the heartbeat "
+        "is deliberately not refreshed, so the firmware watchdog can lapse and "
+        "release the solenoids.",
+    ),
+    ControlState.STOPPED: (
+        "STOPPED",
+        "orange",
+        "Explicit operator stop. Outputs are neutral and no command is being "
+        "transmitted.",
+    ),
+    ControlState.ESTOP: (
+        "ESTOP",
+        "red",
+        "Emergency break latched. Every command is refused until the SIL engine "
+        "is explicitly restarted.",
+    ),
+    ControlState.DISCONNECTED: (
+        "DISCONNECTED",
+        "gray",
+        "No SIL transport. Nothing is transmitted and the control path is dead.",
+    ),
+}
+
+_UNKNOWN_STATE_PRESENTATION = (
+    "UNKNOWN",
+    "red",
+    "The client reported a control state this dashboard does not recognise. "
+    "Treat the control path as unsafe.",
+)
+
+
+def all_stop(client) -> bool:
+    """
+    Operator STOP: cancel the held command and drive the outputs neutral.
+
+    This must be ``request_stop()`` and not a neutral PWM command.  A neutral
+    command goes to ARMED and stops the worker, which is safe, but it leaves the
+    operator in the same state as merely releasing the stick, and it publishes a
+    new commanded target that the per-slider diff on the *next* Streamlit rerun
+    would treat as a change -- re-sending the pre-stop command with no operator
+    action.  ``request_stop()`` also leaves the last commanded target alone,
+    which is what keeps the following rerun silent.
+    """
+    return bool(client.request_stop())
+
+
+def trip_emergency_break(client) -> bool:
+    """
+    Trip the authorized emergency break and latch ESTOP.
+
+    Uses the canonical ``request_emergency_break()``.  ``trigger_emergency_break``
+    is a zero-argument alias for the same method in sil_dashboard_client, so
+    either name sends the identical 0xAA 0x55 0x01 frame and latches the same
+    way; the canonical name is preferred because the alias exists only for
+    backwards compatibility.
+    """
+    return bool(client.request_emergency_break())
+
+
+def auto_refresh_due(client, auto_refresh: bool, refresh_rate: float) -> bool:
+    """
+    True when the render loop should sleep and re-run.
+
+    Deliberately transmits nothing.  The 20 Hz control worker owns the command
+    cadence; a second sender here would emit an extra command frame at whatever
+    rate the operator's browser happened to poll.
+    """
+    return bool(auto_refresh) and bool(client.connected)
+
+
+def pilot_axes_changed(client, surge: float, sway: float, heave: float, yaw: float) -> bool:
+    """True when the 6-DOF sliders differ from the last accepted pilot command."""
+    command = client.pipeline_surface_cmd
+    return (
+        surge != command["surge"]
+        or sway != command["sway"]
+        or heave != command["heave"]
+        or yaw != command["yaw"]
+    )
+
+
+def thruster_targets_changed(client, pwms) -> bool:
+    """True when the 8 per-channel sliders differ from the last accepted command."""
+    return list(pwms) != list(client.pwms)
+
+
+def control_state_presentation(client):
+    """
+    Return ``(label, color, help_text)`` for the client's current control state.
+
+    The operator has to be able to tell at a glance whether the control path is
+    transmitting, because ARMED and STOPPED are both safe but mean different
+    things and neither is what RUNNING or ESTOP is.
+    """
+    return _CONTROL_STATE_PRESENTATION.get(
+        client.control_state, _UNKNOWN_STATE_PRESENTATION
+    )
+
+
+def ensure_transport(client) -> bool:
+    """
+    Bring up the SIL engine and connect, unless an E-stop is latched.
+
+    A latched ESTOP is not cleared here.  ``SilDashboardClient.connect()`` clears
+    the latch, and this function runs on every Streamlit rerun whenever the
+    transport looks down, so auto-reconnecting would let a reader-thread hiccup
+    disarm a tripped emergency break with no operator action at all.  Clearing it
+    requires the explicit "Restart Engine" button, which calls
+    ``start_server_process()``.
+    """
+    if client.connected:
+        return True
+    if client.control_state is ControlState.ESTOP:
+        return False
+    client.start_server_process()
+    return bool(client.connect())
 
 # Global client cache
 @st.cache_resource
@@ -52,9 +194,20 @@ def main():
         st.markdown("**Subsea Node Firmware Simulation**")
 
         st.subheader("SIL Server State")
-        if not client.connected:
-            client.start_server_process()
-            client.connect()
+        # A latched E-stop deliberately blocks the automatic reconnect.
+        if not ensure_transport(client):
+            if client.control_state is ControlState.ESTOP:
+                st.error(
+                    "Emergency break latched on the dashboard. Automatic reconnect "
+                    "is disabled so a transport hiccup cannot clear the latch. "
+                    "Click **Restart Engine** to start a new SIL engine and re-arm "
+                    "the control path."
+                )
+            else:
+                st.error(
+                    "SIL engine unreachable on 127.0.0.1:8765. Use **Restart "
+                    "Engine** in this panel to start it."
+                )
 
         col_srv1, col_srv2 = st.columns(2)
         with col_srv1:
@@ -71,6 +224,16 @@ def main():
 
         status_color = "green" if client.connected else "red"
         st.markdown(f"**Connection Status:** :{status_color}[{'ONLINE (127.0.0.1:8765)' if client.connected else 'OFFLINE'}]")
+
+        # Deadman readout. The two safe idle states (ARMED, STOPPED) are shown
+        # differently from each other and from the two states in which the
+        # vehicle can move (RUNNING, ESTOP), so the operator never has to guess
+        # whether the control path is live.
+        state_label, state_color, state_help = control_state_presentation(client)
+        st.metric("Control State", client.control_state.value)
+        st.markdown(f"**Control State:** :{state_color}[{state_label}]")
+        st.caption(state_help)
+
         st.metric("SIL Virtual Time", f"{client.sim_time_ms / 1000.0:.2f} s")
         frame_cols = st.columns(2)
         frame_cols[0].metric("Received Frames", client.frame_count)
@@ -93,7 +256,7 @@ def main():
         st.divider()
         st.subheader("Fault & Safety Injection")
         if st.button("TRIP EMERGENCY BREAK (0x001)", type="primary", width="stretch", disabled=not client.connected):
-            client.trigger_emergency_break()
+            trip_emergency_break(client)
             st.warning("Emergency-break command sent. Waiting for the simulated board readback to confirm the latch.")
 
         if client.emergency_break_tripped:
@@ -164,7 +327,7 @@ UPLINK (mock sensors to dashboard views):
             preset_cols = st.columns(3)
             with preset_cols[0]:
                 if st.button("All Stop (Hover)", width="stretch"):
-                    client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.0)
+                    all_stop(client)
                     st.rerun()
             with preset_cols[1]:
                 if st.button("Forward (+0.5 Surge)", width="stretch"):
@@ -189,10 +352,7 @@ UPLINK (mock sensors to dashboard views):
                     client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.5)
                     st.rerun()
 
-            if (surge != client.pipeline_surface_cmd["surge"] or
-                sway != client.pipeline_surface_cmd["sway"] or
-                heave != client.pipeline_surface_cmd["heave"] or
-                yaw != client.pipeline_surface_cmd["yaw"]):
+            if pilot_axes_changed(client, surge, sway, heave, yaw):
                 client.send_surface_pilot_command(surge, sway, heave, yaw)
 
         st.divider()
@@ -371,7 +531,7 @@ UPLINK (mock sensors to dashboard views):
         col_all1, col_all2, col_all3 = st.columns([1, 1, 2])
         with col_all1:
             if st.button("All Stop (1500 us)", width="stretch", key="btn_all_stop_tab2"):
-                client.send_pwms([1500] * 8)
+                all_stop(client)
                 st.rerun()
         with col_all2:
             if st.button("All Forward (1650 us)", width="stretch", key="btn_all_fwd_tab2"):
@@ -408,7 +568,7 @@ UPLINK (mock sensors to dashboard views):
                 st.progress((val - 1000) / 1000.0)
                 st.caption(f"Effort: {delta:+d} us ({'Forward' if delta > 0 else 'Reverse' if delta < 0 else 'Neutral'})")
 
-        if new_pwms != client.pwms:
+        if thruster_targets_changed(client, new_pwms):
             client.send_pwms(new_pwms)
 
         st.divider()
@@ -600,8 +760,10 @@ UPLINK (mock sensors to dashboard views):
             """
         )
 
-    # Controlled auto-refresh loop
-    if client.connected and auto_refresh:
+    # Controlled auto-refresh loop. This sends nothing: the 20 Hz control worker
+    # owns the command cadence, and a second sender here would emit an extra
+    # command frame at whatever rate the operator's browser happened to poll.
+    if auto_refresh_due(client, auto_refresh, refresh_rate):
         time.sleep(refresh_rate)
         st.rerun()
 
