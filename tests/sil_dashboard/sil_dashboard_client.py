@@ -10,6 +10,7 @@ import threading
 import subprocess
 from collections import deque
 from dataclasses import dataclass
+from enum import Enum
 from typing import List, Optional, Dict, Any
 
 # Path configuration strictly within X19-Embedded
@@ -63,6 +64,81 @@ SERVER_EXE_PATH = os.environ.get("X19_SIL_SERVER") or next(
     ),
     os.path.join(REPO_ROOT, "build-native", "tests", "sil_bridge_server.exe"),
 )
+
+# --- Deadman control constants -------------------------------------------------
+# These mirror the firmware in shared/include/rov_parameters.h.  They are the
+# only place the host is allowed to encode the PWM envelope or the watchdog
+# window; nothing here may widen them.
+PWM_MIN_US = 1000          # ROV_PWM_MIN_US
+PWM_MAX_US = 2000          # ROV_PWM_MAX_US
+NEUTRAL_PWM_US = 1500      # ROV_PWM_STOP_US
+NEUTRAL_PWMS = [NEUTRAL_PWM_US] * 8
+
+# The control worker resends the last accepted command every 50 ms so Node 2's
+# 100 ms heartbeat watchdog never expires while the operator holds a command.
+CONTROL_PERIOD_S = 0.050
+HEARTBEAT_TIMEOUT_S = 0.100
+CONTROL_JOIN_TIMEOUT_S = 1.0
+
+# Node 2 only accepts a thruster command after this authorized signature check
+# (nodes/node2_control_board/Core/Src/app.c).  The exact bytes are load-bearing.
+EMERGENCY_BREAK_SIGNATURE = b"\xAA\x55\x01"
+
+
+class ControlState(str, Enum):
+    """
+    Explicit dashboard deadman state.
+
+        DISCONNECTED -> STOPPED -> ARMED -> RUNNING
+              ^            |          |         |
+              +------------+----------+---------+
+                           STOP / ESTOP
+
+    * ``DISCONNECTED``: no SIL transport, no frames are ever sent.
+    * ``STOPPED``: no command accepted; the last command is neutral.
+    * ``ARMED``: transport up, no non-neutral command active.
+    * ``RUNNING``: the last accepted command is resent every 50 ms (20 Hz).
+    * ``ESTOP``: the authorized emergency frame was sent and outputs are forced
+      neutral.  This state LATCHES: only ``connect()`` (a new transport) or
+      ``start_server_process()`` (a new engine) clears it.
+    """
+
+    DISCONNECTED = "disconnected"
+    STOPPED = "stopped"
+    ARMED = "armed"
+    RUNNING = "running"
+    ESTOP = "estop"
+
+
+def _validate_pwms(pwms: Any) -> List[int]:
+    """
+    Reject anything that is not exactly eight PWM values inside 1000-2000 us.
+
+    The firmware clamps out-of-range values, but silently clamping a host bug
+    would hide it, so the host refuses instead.  Integral floats are accepted
+    because Streamlit slider values are not guaranteed to be ``int``.
+    """
+    if pwms is None or isinstance(pwms, (str, bytes)):
+        raise ValueError(f"PWM command must be a sequence of 8 values, got {pwms!r}")
+    values = list(pwms)
+    if len(values) != 8:
+        raise ValueError(f"PWM command requires exactly 8 values, got {len(values)}")
+    validated: List[int] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"PWM values must be numbers, got {value!r}")
+        numeric = float(value)
+        # is_integer() is False for NaN and both infinities.
+        if not numeric.is_integer():
+            raise ValueError(f"PWM values must be finite whole microseconds, got {value!r}")
+        clamped = int(numeric)
+        if clamped < PWM_MIN_US or clamped > PWM_MAX_US:
+            raise ValueError(
+                f"PWM values must stay within {PWM_MIN_US}-{PWM_MAX_US} us, got {clamped}"
+            )
+        validated.append(clamped)
+    return validated
+
 
 CAN_ID_MAP = {
     CAN_ID_EMERGENCY_BREAK: ("EMERGENCY_BREAK", "Priority 0: Hardware Cutoff"),
@@ -147,6 +223,19 @@ class SilDashboardClient:
         self.connected = False
         self.running = False
         self.lock = threading.Lock()
+        # Serializes socket writes only. It is deliberately NOT the state lock:
+        # holding self.lock across a blocking sendall would stall _rx_loop and
+        # blind the dashboard to telemetry exactly when something has gone wrong.
+        # Re-entrant because the worker can fault while already inside a write.
+        self._send_lock = threading.RLock()
+
+        # 20 Hz deadman control worker
+        self.control_state = ControlState.DISCONNECTED
+        self._last_command: List[int] = list(NEUTRAL_PWMS)
+        self._control_stop = threading.Event()
+        self._control_thread: Optional[threading.Thread] = None
+        self._estop_latched = False
+        self.worker_thread: Optional[threading.Thread] = None
 
         # Packet history & C console stream
         self.packet_log = deque(maxlen=250)
@@ -206,6 +295,9 @@ class SilDashboardClient:
             )
             stdout_reader = threading.Thread(target=self._read_c_stdout, daemon=True)
             stdout_reader.start()
+            # Restarting the engine is one of the two explicit, operator-driven
+            # ways out of a latched ESTOP (the other is a fresh connect()).
+            self._estop_latched = False
             time.sleep(0.4)
             return True
         return True
@@ -235,6 +327,7 @@ class SilDashboardClient:
         with self.lock:
             if self.connected:
                 return True
+            s = None
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect((self.host, self.port))
@@ -242,15 +335,35 @@ class SilDashboardClient:
                 self.sock = s
                 self.connected = True
                 self.running = True
+                # A genuinely new transport is the operator explicitly
+                # reconnecting, so it clears a latched ESTOP and hands the
+                # control path back in a neutral, non-RUNNING state.
+                self._estop_latched = False
+                self._last_command = list(NEUTRAL_PWMS)
+                self._control_stop = threading.Event()
+                self._control_thread = None
+                self.control_state = ControlState.ARMED
                 self.worker_thread = threading.Thread(target=self._rx_loop, daemon=True)
                 self.worker_thread.start()
                 return True
             except (ConnectionRefusedError, OSError):
+                if s is not None:
+                    try:
+                        s.close()
+                    except OSError:
+                        pass
+                self.sock = None
                 self.connected = False
+                self.control_state = ControlState.DISCONNECTED
                 return False
 
     def disconnect(self):
+        # Stop transmitting BEFORE the socket goes away, so no frame can be
+        # written to a closing transport. The neutral frame is deliberately not
+        # sent here: the firmware heartbeat watchdog is what guarantees neutral
+        # once the transport is gone, and writing to a dead socket cannot.
         self.running = False
+        self.stop_control_loop(send_neutral=False)
         with self.lock:
             if self.sock:
                 try:
@@ -259,13 +372,18 @@ class SilDashboardClient:
                     pass
                 self.sock = None
             self.connected = False
+            self.control_state = ControlState.DISCONNECTED
 
-    def send_surface_pilot_command(self, surge: float, sway: float, heave: float, yaw: float, pitch: float = 0.0, roll: float = 0.0):
+    def send_surface_pilot_command(self, surge: float, sway: float, heave: float, yaw: float, pitch: float = 0.0, roll: float = 0.0) -> bool:
         """
         Executes the full Topside Surface -> Core -> STM32 pipeline:
         1. Packs Surface Protobuf JoystickCommand.
         2. Computes Core 8-Thruster Allocation Matrix.
-        3. Encodes CAN ID 0x100 and sends to STM32 over SIL bus.
+        3. Hands CAN ID 0x100 to the 20 Hz control worker.
+
+        This is a deadman input, not a one-shot: while the operator holds the
+        axis the worker resends the allocation at 20 Hz, and any STOP / ESTOP /
+        disconnect forces neutral.
         """
         timestamp_us = int(time.time() * 1e6)
         raw_pb_bytes = b""
@@ -304,54 +422,286 @@ class SilDashboardClient:
             }
             self.pipeline_core_pwms = list(pwms)
             self.pipeline_core_can_hex = can_hex
-            self.pwms = list(pwms)
 
-        self.send_pwms(pwms)
+        return self.send_pwms(pwms)
 
-    def send_pwms(self, pwms: List[int]):
+    # ------------------------------------------------------------------
+    # Transport primitives
+    # ------------------------------------------------------------------
+
+    def _send_frame(self, direction: str, can_id: int, payload: bytes, summary: str) -> None:
+        """
+        Push one complete SIL frame down the wire.
+
+        The state lock is never held here: a blocking or contended send must not
+        be able to stall _rx_loop. Only _send_lock is taken, so a 73-byte write
+        from the UI thread cannot interleave with a worker write and corrupt the
+        framing. Raises OSError if the transport is gone.
+        """
+        sock = self.sock
+        if sock is None or not self.connected:
+            raise OSError("SIL transport is not connected")
+        frame = pack_sil_can_frame(can_id, payload)
+        with self._send_lock:
+            sock.sendall(frame)
+        self._record_packet(direction, can_id, payload, summary)
+
+    def _send_thruster_frame(self, pwms: List[int]) -> None:
+        """Transmit one CAN ID 0x100 frame. Raises OSError on transport failure."""
+        channels = list(pwms)
+        payload = ThrusterCommand(pwm_us=channels).pack()
+        self._send_frame("Core -> STM32", CAN_ID_THRUSTER_CMD, payload, f"PWMs: {channels}")
+
+    # ------------------------------------------------------------------
+    # Deadman control state machine
+    # ------------------------------------------------------------------
+
+    def _transition_stopped(self, send_neutral: bool = True) -> None:
+        """
+        Single fail-safe transition shared by worker faults, explicit stop, and
+        emergency break, so every exit path behaves identically.
+
+        Never downgrades a latched ESTOP: a socket error arriving after an
+        emergency break must not make the UI look safe.
+        """
+        self._control_stop.set()
+        if send_neutral and self.connected and self.sock is not None:
+            try:
+                self._send_thruster_frame(list(NEUTRAL_PWMS))
+            except OSError:
+                # The firmware watchdog is the backstop once the transport is
+                # gone; there is nothing further this process can transmit.
+                self.connected = False
         with self.lock:
-            self.pwms = list(pwms)
-            cmd = ThrusterCommand(pwm_us=self.pwms)
-            payload = cmd.pack()
+            self._last_command = list(NEUTRAL_PWMS)
+            if self._estop_latched:
+                # A latched ESTOP outranks every other transition: a socket
+                # error arriving after an emergency break must not make the
+                # dashboard look safe again.
+                return
+            if self.connected and self.sock is not None:
+                self.control_state = ControlState.STOPPED
+            else:
+                self.control_state = ControlState.DISCONNECTED
+
+    def start_control_loop(self) -> bool:
+        """
+        Start the 20 Hz resend worker, at most once per transport.
+
+        Returns True when a worker is running (including one this call started
+        earlier) and False when the transport is down or ESTOP is latched.
+        """
+        with self.lock:
+            if self._estop_latched:
+                return False
+            if not self.connected or self.sock is None:
+                return False
+            existing = self._control_thread
+            if existing is not None and existing.is_alive():
+                return True
+            # A fresh event per generation: if a previous worker ever failed to
+            # join, clearing the shared event would resurrect its stop signal.
+            stop_event = threading.Event()
+            self._control_stop = stop_event
+            self.control_state = ControlState.RUNNING
+            thread = threading.Thread(
+                target=self._control_loop,
+                args=(stop_event,),
+                name="sil-dashboard-control",
+                daemon=True,
+            )
+            self._control_thread = thread
+        thread.start()
+        return True
+
+    def stop_control_loop(self, send_neutral: bool = True) -> bool:
+        """
+        Signal the worker, join it with a bounded timeout, and force neutral.
+
+        Idempotent, and never writes a frame once the transport is down.
+        Returns False only if a worker refused to stop within the join timeout,
+        which is a test failure, not a normal outcome.
+        """
+        thread = self._control_thread
+        self._control_stop.set()
+        joined = True
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=CONTROL_JOIN_TIMEOUT_S)
+            joined = not thread.is_alive()
+        if joined:
+            self._control_thread = None
+        # _transition_stopped also sets _control_stop and clears the command; it
+        # deliberately does not join, so the worker may call it on its own way out.
+        self._transition_stopped(send_neutral=send_neutral)
+        return joined
+
+    def request_stop(self) -> bool:
+        """Operator STOP: cancel the held command and drive the outputs neutral."""
+        return self.stop_control_loop(send_neutral=True)
+
+    def _control_loop(self, stop_event: threading.Event) -> None:
+        """
+        Resend the last accepted command every CONTROL_PERIOD_S until stopped.
+
+        Pacing is a monotonic deadline, not ``Event.wait(0.05)``. A bare wait
+        pays the send duration twice on some ticks and not at all on others, so
+        the cadence becomes bursty: a run of over-long gaps followed by a
+        catch-up tick with a near-zero gap. Measured with a 12 ms send cost, a
+        bare wait spans 12-78 ms per gap while this loop holds 46-64 ms. The
+        stop event is only ever used to end the wait early.
+        """
+        next_tick = time.monotonic()
+        while not stop_event.is_set():
+            with self.lock:
+                if self.control_state is not ControlState.RUNNING:
+                    return
+                pwms = list(self._last_command)
+
+            if not self.connected or self.sock is None:
+                # The transport died under us: stop transmitting immediately and
+                # let the firmware watchdog force neutral.
+                with self.lock:
+                    if not self._estop_latched:
+                        self.control_state = ControlState.DISCONNECTED
+                return
+
+            try:
+                self._send_thruster_frame(pwms)
+            except OSError:
+                # The socket is already broken, so a neutral frame cannot be
+                # delivered; retrying would only spin against a dead transport.
+                self.connected = False
+                self._transition_stopped(send_neutral=False)
+                return
+            except Exception:
+                # A non-transport fault (a bug, not a dead socket) leaves the
+                # transport usable, so the neutral frame must really go out.
+                self._transition_stopped(send_neutral=True)
+                return
+
+            next_tick += CONTROL_PERIOD_S
+            remaining = next_tick - time.monotonic()
+            if remaining > 0.0:
+                if stop_event.wait(remaining):
+                    return
+            else:
+                # A send overran its own period. Resync instead of firing a
+                # catch-up burst; the next deadline is a full period out, so the
+                # watchdog is fed as fast as the transport allows without
+                # emitting a pair of back-to-back command frames.
+                next_tick = time.monotonic()
+
+    def send_pwms(self, pwms: List[int]) -> bool:
+        """
+        Accept a thruster command, transmit it now, and hold it at 20 Hz.
+
+        Compatibility entry point: the Streamlit UI still calls this. It is no
+        longer a one-shot; the value becomes the worker's held command until
+        request_stop(), an emergency break, a transport error, or disconnect.
+        """
+        validated = _validate_pwms(pwms)
+        with self.lock:
+            latched = self._estop_latched
+            transport_up = self.connected and self.sock is not None
+
+        if latched:
+            # A refused command must not be able to overwrite the held command
+            # or the dashboard readback: ESTOP has to look and behave neutral.
+            return False
+
+        if not transport_up:
+            # No transport, so nothing can be transmitted. Mirror the value for
+            # the UI only, and leave the worker's command neutral so a later
+            # connect() can never resurrect a stale non-neutral command.
+            with self.lock:
+                self.pwms = list(validated)
+                payload = ThrusterCommand(pwm_us=self.pwms).pack()
+                self.pipeline_core_can_hex = " ".join(f"{b:02X}" for b in payload)
+                self.control_state = ControlState.DISCONNECTED
+            return False
+
+        with self.lock:
+            self.pwms = list(validated)
+            self._last_command = list(validated)
+            payload = ThrusterCommand(pwm_us=self.pwms).pack()
             self.pipeline_core_can_hex = " ".join(f"{b:02X}" for b in payload)
 
-            if not self.connected or not self.sock:
-                return
+        self.control_state = ControlState.RUNNING
+        if not self.start_control_loop():
+            return False
+        try:
+            # Send the operator's command straight away so UI response is not
+            # quantized to the next 50 ms tick; the worker sustains it after this.
+            self._send_thruster_frame(list(validated))
+        except OSError:
+            self.connected = False
+            self._transition_stopped(send_neutral=False)
+            return False
+        return True
 
-            frame = pack_sil_can_frame(CAN_ID_THRUSTER_CMD, payload)
-            try:
-                self.sock.sendall(frame)
-                self._record_packet("Core -> STM32", CAN_ID_THRUSTER_CMD, payload, f"PWMs: {self.pwms}")
-            except OSError:
-                self.connected = False
+    def request_emergency_break(self) -> bool:
+        """
+        Trip the authorized emergency break and latch ESTOP.
 
-    def send_solenoids(self, mask: int):
+        Node 2 only accepts 0xAA 0x55 (PR #46), so those bytes are sent exactly
+        as the firmware requires. The state latches until connect() or
+        start_server_process(): a latched ESTOP refuses every later command.
+        """
+        self._estop_latched = True
+        # Stop the worker without a neutral frame first: the emergency frame is
+        # the higher-priority message and must be the next thing on the wire.
+        self.stop_control_loop(send_neutral=False)
+        with self.lock:
+            self.control_state = ControlState.ESTOP
+            self._last_command = list(NEUTRAL_PWMS)
+        if not self.connected or self.sock is None:
+            return False
+        try:
+            self._send_frame(
+                "Core -> STM32",
+                CAN_ID_EMERGENCY_BREAK,
+                EMERGENCY_BREAK_SIGNATURE,
+                "EMERGENCY CUTOFF TRIGGERED (Authorized)",
+            )
+            self.emergency_break_requested = True
+        except OSError:
+            self.connected = False
+            return False
+        # The board forces neutral the instant it latches; sending the neutral
+        # thruster frame as well keeps the dashboard readback and the packet log
+        # consistent with what the firmware is doing.
+        try:
+            self._send_thruster_frame(list(NEUTRAL_PWMS))
+        except OSError:
+            self.connected = False
+            return False
+        return True
+
+    def trigger_emergency_break(self) -> bool:
+        """
+        Backwards-compatible alias for request_emergency_break().
+
+        Kept because the Streamlit UI and existing operator runbooks call this
+        name; the authorized 0xAA 0x55 0x01 signature is unchanged.
+        """
+        return self.request_emergency_break()
+
+    def send_solenoids(self, mask: int) -> bool:
         with self.lock:
             self.solenoid_mask = mask & 0x03FF
-            if not self.connected or not self.sock:
-                return
-            cmd = SolenoidCommand(solenoid_mask=self.solenoid_mask)
-            payload = cmd.pack()
-            frame = pack_sil_can_frame(CAN_ID_SOLENOID_CMD, payload)
-            try:
-                self.sock.sendall(frame)
-                self._record_packet("Core -> STM32", CAN_ID_SOLENOID_CMD, payload, f"Bitmask: 0x{self.solenoid_mask:04X}")
-            except OSError:
-                self.connected = False
-
-    def trigger_emergency_break(self):
-        with self.lock:
-            # Magic signature (0xAA, 0x55) required by Node 2 authorization check (PR #46)
-            payload = b"\xAA\x55\x01"
-            if not self.connected or not self.sock:
-                return
-            frame = pack_sil_can_frame(CAN_ID_EMERGENCY_BREAK, payload)
-            try:
-                self.sock.sendall(frame)
-                self.emergency_break_requested = True
-                self._record_packet("Core -> STM32", CAN_ID_EMERGENCY_BREAK, payload, "EMERGENCY CUTOFF TRIGGERED (Authorized)")
-            except OSError:
-                self.connected = False
+            solenoid_mask = self.solenoid_mask
+        if not self.connected or self.sock is None:
+            return False
+        cmd = SolenoidCommand(solenoid_mask=solenoid_mask)
+        payload = cmd.pack()
+        try:
+            self._send_frame(
+                "Core -> STM32", CAN_ID_SOLENOID_CMD, payload, f"Bitmask: 0x{solenoid_mask:04X}"
+            )
+        except OSError:
+            self.connected = False
+            return False
+        return True
 
     def _record_packet(self, direction: str, can_id: int, payload: bytes, summary: str):
         now = time.monotonic()
