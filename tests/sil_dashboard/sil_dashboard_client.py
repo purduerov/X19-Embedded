@@ -89,18 +89,34 @@ class ControlState(str, Enum):
     """
     Explicit dashboard deadman state.
 
-        DISCONNECTED -> STOPPED -> ARMED -> RUNNING
-              ^            |          |         |
-              +------------+----------+---------+
-                           STOP / ESTOP
+        DISCONNECTED --connect()--> ARMED --non-neutral cmd--> RUNNING
+              ^                       ^                        |
+              |                       +-- neutral cmd / stop --+
+              |                       +-- explicit request_stop-+
+              |                                                |
+              +-- disconnect / transport loss -------------------+
+              |                                                |
+              +-- emergency break, from any state --------------> ESTOP
 
-    * ``DISCONNECTED``: no SIL transport, no frames are ever sent.
-    * ``STOPPED``: no command accepted; the last command is neutral.
-    * ``ARMED``: transport up, no non-neutral command active.
-    * ``RUNNING``: the last accepted command is resent every 50 ms (20 Hz).
-    * ``ESTOP``: the authorized emergency frame was sent and outputs are forced
-      neutral.  This state LATCHES: only ``connect()`` (a new transport) or
-      ``start_server_process()`` (a new engine) clears it.
+    * ``DISCONNECTED``: no SIL transport. No frame is ever sent. Written by
+      ``connect()`` on failure, ``disconnect()``, and the worker when it finds
+      the transport gone.
+    * ``STOPPED``: an explicit ``request_stop()``, or a worker fault, cancelled
+      the held command. ``_last_command`` is neutral and no worker is running.
+    * ``ARMED``: transport up, no non-neutral command held, and deliberately
+      **no 20 Hz worker**. Written by ``connect()`` and by an all-neutral
+      ``send_pwms()``. The absence of the worker is the safety property: the
+      firmware heartbeat watchdog only latches when no thruster command refreshes
+      it, and that latch is what forces PWM neutral *and* releases the solenoids
+      via ``node2_force_neutral()``
+      (nodes/node2_control_board/Core/Src/app.c).
+    * ``RUNNING``: a non-neutral command is held and resent every 50 ms (20 Hz).
+      The refreshed heartbeat is what keeps the board out of its failsafe while
+      the operator is commanding thrust.
+    * ``ESTOP``: the authorized emergency frame was sent and the outputs are
+      forced neutral. This state LATCHES: it is never downgraded by a later
+      stop, worker fault, or transport error, and only ``connect()`` (a new
+      transport) or ``start_server_process()`` (a new engine) clears it.
     """
 
     DISCONNECTED = "disconnected"
@@ -117,16 +133,30 @@ def _validate_pwms(pwms: Any) -> List[int]:
     The firmware clamps out-of-range values, but silently clamping a host bug
     would hide it, so the host refuses instead.  Integral floats are accepted
     because Streamlit slider values are not guaranteed to be ``int``.
+
+    The failure modes follow the usual Python split, so a caller can tell a
+    caller bug from a bad value:
+
+    * ``TypeError`` -- ``pwms`` is not a sequence of real numbers at all
+      (``None``, a string, a bare ``int``, or a non-numeric element).
+    * ``ValueError`` -- the type is fine but the content is not: the wrong
+      number of channels, a non-finite or fractional microsecond value, or a
+      value outside 1000-2000.
     """
     if pwms is None or isinstance(pwms, (str, bytes)):
-        raise ValueError(f"PWM command must be a sequence of 8 values, got {pwms!r}")
-    values = list(pwms)
+        raise TypeError(f"PWM command must be a sequence of 8 values, got {type(pwms).__name__}")
+    try:
+        values = list(pwms)
+    except TypeError:
+        raise TypeError(
+            f"PWM command must be a sequence of 8 values, got {type(pwms).__name__}"
+        ) from None
     if len(values) != 8:
         raise ValueError(f"PWM command requires exactly 8 values, got {len(values)}")
     validated: List[int] = []
     for value in values:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"PWM values must be numbers, got {value!r}")
+            raise TypeError(f"PWM values must be numbers, got {value!r}")
         numeric = float(value)
         # is_integer() is False for NaN and both infinities.
         if not numeric.is_integer():
@@ -595,9 +625,24 @@ class SilDashboardClient:
         """
         Accept a thruster command, transmit it now, and hold it at 20 Hz.
 
-        Compatibility entry point: the Streamlit UI still calls this. It is no
-        longer a one-shot; the value becomes the worker's held command until
+        Compatibility entry point: the Streamlit UI still calls this.  A
+        non-neutral value becomes the worker's held command until
         request_stop(), an emergency break, a transport error, or disconnect.
+
+        An all-neutral value is the operator's All Stop and deliberately does
+        NOT keep the worker alive.  A 20 Hz resend refreshes the firmware
+        heartbeat, and the heartbeat is the only thing that makes Node 2 release
+        the solenoids: ``node2_force_neutral()`` calls ``bsp_solenoid_set(0)`` and
+        is called on ``heartbeat_lost``
+        (nodes/node2_control_board/Core/Src/app.c).  Resending neutral would
+        therefore hold the solenoids energized forever behind a dashboard that
+        claims to be running.  So a neutral command goes to ARMED with no
+        worker, and the watchdog lapses.
+
+        Returns False when the command was refused (ESTOP latched, or no
+        transport).  Raises ``TypeError`` for a non-numeric argument and
+        ``ValueError`` for the wrong channel count or an out-of-range,
+        non-finite, or fractional value; see :func:`_validate_pwms`.
         """
         validated = _validate_pwms(pwms)
         with self.lock:
@@ -620,11 +665,20 @@ class SilDashboardClient:
                 self.control_state = ControlState.DISCONNECTED
             return False
 
+        neutral = all(value == NEUTRAL_PWM_US for value in validated)
         with self.lock:
             self.pwms = list(validated)
             self._last_command = list(validated)
             payload = ThrusterCommand(pwm_us=self.pwms).pack()
             self.pipeline_core_can_hex = " ".join(f"{b:02X}" for b in payload)
+
+        if neutral:
+            # stop_control_loop sends the one confirming neutral frame and joins
+            # the worker. ARMED must be written *after* it, because
+            # _transition_stopped would otherwise overwrite it with STOPPED.
+            self.stop_control_loop(send_neutral=True)
+            self.control_state = ControlState.ARMED
+            return True
 
         self.control_state = ControlState.RUNNING
         if not self.start_control_loop():
