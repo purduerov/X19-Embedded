@@ -139,12 +139,30 @@ def _rx_buffer(sock: socket.socket) -> bytearray:
 
 def recv_frames(sock: socket.socket, timeout: float) -> List[Tuple[int, bytes]]:
     """
-    Collect complete SIL frames from ``sock`` for up to ``timeout`` seconds.
+    Drain-window read: collect every complete SIL frame available for up to
+    ``timeout`` seconds.
 
-    Partial TCP reads are buffered on the socket and only whole
-    ``SIL_PACKET_SIZE`` packets are returned, in arrival order.  An exhausted
-    timeout yields an empty list so callers can poll.  Malformed packets raise
-    ``ValueError`` as soon as a full packet is available to validate.
+    This is not a read-one-frame primitive.  It keeps reading until the window
+    closes, so a burst is returned in one call and an idle period costs the full
+    ``timeout``.  Return value semantics:
+
+    * Frames arrive in order, and only whole ``SIL_PACKET_SIZE`` packets are
+      returned; a trailing partial packet is retained, not emitted.
+    * An exhausted window with nothing complete yields ``[]`` so callers can
+      poll without exception handling.
+    * A closed peer ends the window early and returns whatever was collected.
+
+    Cross-call buffering: leftover bytes are kept per-socket in
+    ``_RX_BUFFERS`` (a :class:`weakref.WeakKeyDictionary`), so a frame straddling
+    two calls is reassembled.  The buffer must not be per-call; that would drop
+    the partial tail and desynchronise every later frame boundary.
+
+    Buffer-poisoning policy: a malformed packet (bad magic, or a length field
+    above 64) raises ``ValueError`` from :func:`unpack_sil_can_frame` and the
+    offending bytes are deliberately *left in place* with no resynchronisation
+    scan.  The stream is therefore unrecoverable at that point: callers must
+    close and reopen the socket rather than keep reading, because the framing
+    offset is no longer known.  There is no attempt to skip to the next magic.
     """
     buffer = _rx_buffer(sock)
     frames: List[Tuple[int, bytes]] = []
