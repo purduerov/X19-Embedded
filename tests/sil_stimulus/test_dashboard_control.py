@@ -27,12 +27,14 @@ try:
     from .sil_test_support import (
         REPO_ROOT,
         SilServerProcess,
+        free_tcp_port,
         require_server_executable,
     )
 except ImportError:  # pragma: no cover - direct execution fallback
     from sil_test_support import (  # type: ignore[no-redef]
         REPO_ROOT,
         SilServerProcess,
+        free_tcp_port,
         require_server_executable,
     )
 
@@ -52,6 +54,16 @@ PWM_MAX_US = 2000
 NEUTRAL_PWMS = [NEUTRAL_US] * 8
 HEARTBEAT_TIMEOUT_S = 0.100
 CONTROL_PERIOD_S = 0.050
+# Semantic upper bound on the mean control period, expressed against the firmware
+# watchdog budget rather than against CONTROL_PERIOD_S.  Node 2 forces neutral
+# when the newest thruster command is older than HEARTBEAT_TIMEOUT_S, so the
+# period has to fit inside that budget with margin.  Half the window would be the
+# obvious choice, but it happens to equal CONTROL_PERIOD_S exactly, which makes
+# the bound degenerate (a correct loop sits precisely on it).  Three quarters
+# says what actually matters: a correct 50 ms period spends half the budget and
+# keeps a 50% safety factor, and any loop drifting past 75 ms is unambiguously
+# broken.
+SEMANTIC_MEAN_GAP_MAX_S = HEARTBEAT_TIMEOUT_S * 0.75
 # Node 2 refuses thruster commands until ESC_ARMING_TIME_MS of virtual time has
 # elapsed (nodes/node2_control_board/Core/Src/app.c).
 ESC_ARMING_SIM_MS = 3000
@@ -70,7 +82,10 @@ class _ThrusterSendSpy:
 
     def __init__(self, client: SilDashboardClient) -> None:
         self._client = client
-        self.delegate = client._send_thruster_frame
+        # Captured before the attribute is replaced, so restore() can put the
+        # real bound method back.
+        self._original = client._send_thruster_frame
+        self.delegate = self._original
         # [start_time, duration_or_None] pairs. The slot is published under the
         # lock before the send runs, so a reader can never observe a start with
         # no matching entry, and the duration is filled in afterwards.
@@ -99,8 +114,9 @@ class _ThrusterSendSpy:
             return [list(entry) for entry in self.entries if entry[1] is not None]
 
     def restore(self) -> None:
-        self.delegate = self._client._send_thruster_frame
-        self._client._send_thruster_frame = self.delegate
+        """Put the real ``_send_thruster_frame`` back on the client."""
+        self.delegate = self._original
+        self._client._send_thruster_frame = self._original
 
     def snapshot(self):
         with self.lock:
@@ -209,6 +225,20 @@ class TestDashboardControlStateMachine(unittest.TestCase):
             with self.subTest(pwm=bad):
                 with self.assertRaises(ValueError):
                     self.client.send_pwms([bad] * 8)
+
+    def test_send_pwms_rejects_a_non_numeric_command_with_typeerror(self):
+        """
+        Invariant: the failure modes follow the usual Python split, so a caller
+        bug (wrong type) is distinguishable from a bad value.
+        """
+        for bad in (None, "1500,1500,1500,1500,1500,1500,1500,1500", 1650, 3.5):
+            with self.subTest(command=bad):
+                with self.assertRaises(TypeError):
+                    self.client.send_pwms(bad)
+        for bad in ([None] * 8, ["1650"] * 8, [True] * 8, [object()] * 8):
+            with self.subTest(command=bad[0]):
+                with self.assertRaises(TypeError):
+                    self.client.send_pwms(bad)
 
     def test_rejected_command_leaves_the_worker_command_untouched(self):
         out_of_range = [1650] * 8
@@ -354,9 +384,14 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
         Invariant: the worker is paced by a monotonic deadline, not by a bare
         sleep, so the observed rate stays at 20 Hz and no gap ever reaches the
         100 ms firmware heartbeat window while the transport is loaded.
+
+        A NON-neutral command is used deliberately: 20 Hz resend is only correct
+        while the operator is actually commanding thrust.  An all-neutral
+        command must stop the worker so the watchdog lapses, which
+        ``test_all_neutral_command_arms_and_stops_the_worker`` pins.
         """
         window_s = 2.0
-        self.client.send_pwms([NEUTRAL_US] * 8)
+        self.client.send_pwms([1600] * 8)
         self.assertTrue(self.client.start_control_loop())
         self.assertIs(self.client.control_state, ControlState.RUNNING)
 
@@ -385,6 +420,19 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
             f"gaps={[round(g, 4) for g in gaps]}",
         )
         mean_gap = sum(gaps) / len(gaps)
+        # Semantic bound first, then the tight band.  Mean gap is the number the
+        # firmware actually cares about: the watchdog compares the newest command
+        # timestamp against now, so the mean is the margin that keeps a healthy
+        # heartbeat alive with twice the timeout to spare.  The tight band then
+        # says the same thing precisely and catches per-iteration drift the mean
+        # would average away.
+        self.assertLess(
+            mean_gap, SEMANTIC_MEAN_GAP_MAX_S,
+            f"Mean gap {mean_gap * 1000:.1f} ms must fit inside the "
+            f"{HEARTBEAT_TIMEOUT_S * 1000:.0f} ms firmware watchdog budget with margin "
+            f"(limit {SEMANTIC_MEAN_GAP_MAX_S * 1000:.0f} ms), so a single slow tick "
+            f"cannot expire the heartbeat. gaps={[round(g, 4) for g in gaps]}",
+        )
         self.assertAlmostEqual(
             mean_gap, CONTROL_PERIOD_S, delta=0.006,
             msg=(f"Mean gap drifted to {mean_gap * 1000:.2f} ms instead of "
@@ -415,7 +463,9 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
         cheap_s, expensive_s = 0.004, 0.020
         window_s = 2.0
 
-        self.client.send_pwms([NEUTRAL_US] * 8)
+        # Non-neutral on purpose: the 20 Hz resend is only correct while the
+        # operator is commanding thrust.
+        self.client.send_pwms([1600] * 8)
         with self.spy.inject_send_latency(cheap_s, expensive_s):
             self.assertTrue(self.client.start_control_loop())
             # Discard the immediate send_pwms frame and the worker's first tick,
@@ -460,11 +510,88 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
                 mean, CONTROL_PERIOD_S, delta=0.006,
                 msg=f"Mean {label} period drifted to {mean * 1000:.2f} ms",
             )
+        overall_mean = sum(all_gaps) / len(all_gaps)
+        self.assertLess(
+            overall_mean, SEMANTIC_MEAN_GAP_MAX_S,
+            f"Overall mean period {overall_mean * 1000:.1f} ms must fit inside the "
+            f"{HEARTBEAT_TIMEOUT_S * 1000:.0f} ms firmware watchdog budget with margin "
+            f"(limit {SEMANTIC_MEAN_GAP_MAX_S * 1000:.0f} ms). "
+            f"cheap={cheap_mean * 1000:.1f} ms expensive={expensive_mean * 1000:.1f} ms",
+        )
         self.assertLessEqual(
             max(all_gaps), HEARTBEAT_TIMEOUT_S,
             f"A drifting period eventually crosses the 100 ms firmware heartbeat window; "
             f"worst gap was {max(all_gaps) * 1000:.1f} ms.",
         )
+
+    def test_all_neutral_command_arms_and_stops_the_worker(self):
+        """
+        Invariant: an all-neutral command is the operator's All Stop. It must
+        leave the control path ARMED with no worker, and it must stop emitting
+        frames so the firmware heartbeat lapses.
+
+        This is the safety ruling, not a cosmetic one.  ``node2_force_neutral()``
+        calls ``bsp_solenoid_set(0)`` and is invoked on ``heartbeat_lost``
+        (nodes/node2_control_board/Core/Src/app.c), so the heartbeat is the
+        only thing that releases the solenoids.  A 20 Hz resend of a neutral
+        command would refresh that heartbeat forever and hold every solenoid
+        energized behind a dashboard that claims to be running.
+        """
+        self.client.send_pwms([1650] * 8)
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        self.assertIsNotNone(self.client._control_thread)
+        self.assertTrue(self.client._control_thread.is_alive())
+        self.assertTrue(self.spy.wait_for_count(1, timeout_s=1.0))
+        # Let the worker prove it really is transmitting at 20 Hz.
+        self.assertTrue(self.spy.wait_for_count(6, timeout_s=1.0))
+
+        self.assertTrue(self.client.send_pwms(NEUTRAL_PWMS))
+
+        self.assertIs(
+            self.client.control_state, ControlState.ARMED,
+            "An all-neutral command must ARM, not RUN: a running worker would keep "
+            "refreshing the firmware heartbeat and never release the solenoids",
+        )
+        self.assertIsNone(self.client._control_thread, "The 20 Hz worker must be stopped by All Stop")
+        self.assertEqual(self.client._last_command, NEUTRAL_PWMS)
+
+        # The only frame this may put on the wire is the one confirming neutral
+        # inside stop_control_loop; after that the worker must be silent so the
+        # watchdog can lapse. 0.20 s is four control periods.
+        self.assertTrue(
+            self.spy.quiet_for(0.20),
+            "A neutral command must stop the 20 Hz cadence so the firmware heartbeat "
+            "lapses and node2_force_neutral() releases the solenoids",
+        )
+        _, payloads = self.spy.snapshot()
+        self.assertEqual(payloads[-1], NEUTRAL_PWMS, "The last frame on the wire must be neutral")
+
+        # ARMED is not terminal: a new non-neutral command re-arms RUNNING.
+        self.assertTrue(self.client.send_pwms([1600] * 8))
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        self.assertIsNotNone(self.client._control_thread)
+        self.assertTrue(self.client._control_thread.is_alive())
+
+    def test_all_neutral_pilot_command_also_stops_the_worker(self):
+        """
+        Invariant: the same ruling holds for the pilot adapter. Centering the
+        stick maps to all-neutral, so it must stop the worker exactly as the
+        explicit All Stop button does.
+        """
+        self.client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        self.assertIsNotNone(self.client._control_thread)
+        self.assertTrue(self.client._control_thread.is_alive())
+
+        self.client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.0)
+        self.assertEqual(self.client.pwms, NEUTRAL_PWMS)
+        self.assertIs(
+            self.client.control_state, ControlState.ARMED,
+            "Centering the pilot stick must ARM and stop the worker, not keep "
+            "refreshing the firmware heartbeat",
+        )
+        self.assertIsNone(self.client._control_thread)
+        self.assertTrue(self.spy.quiet_for(0.20), "A centered stick must silence the 20 Hz cadence")
 
     def test_start_control_loop_is_idempotent(self):
         """Invariant: a second start call must not spawn a second worker."""
@@ -737,18 +864,159 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
         self.assertIs(self.client.control_state, ControlState.ARMED)
         self.assertTrue(self.client.send_pwms([1600] * 8), "A reconnect must re-arm the control path")
 
-    def test_emergency_break_disarm_clears_the_latch(self):
-        """Invariant: restarting the engine is the only other way out of ESTOP."""
+    def test_stop_after_emergency_break_cannot_downgrade_the_estop_latch(self):
+        """
+        Invariant: the ESTOP latch outranks every later stop transition.
+
+        ``_transition_stopped`` is the single shared exit path, so an explicit
+        ``request_stop()`` issued *after* an emergency break runs the same code
+        as a worker fault would.  If the latch-preserving guard were dropped, a
+        post-E-stop stop or socket error would rewrite ``control_state`` to
+        STOPPED and the dashboard would present a tripped emergency break as a
+        routine, already-handled stop.  That is the "looks safe again" failure,
+        and it is why this is asserted directly rather than only incidentally.
+        """
+        self._wait_until_esc_armed()
+        self.client.send_pwms([1650] * 8)
+        self._wait_for(
+            lambda: self.client.actual_pwms == [1650] * 8,
+            timeout_s=2.0,
+            what="the outputs to reach 1650 us",
+        )
+
         self.assertTrue(self.client.trigger_emergency_break())
         self.assertIs(self.client.control_state, ControlState.ESTOP)
-        self.assertFalse(self.client.send_pwms([1650] * 8))
+        self._wait_for(
+            lambda: self.client.emergency_break_tripped,
+            timeout_s=2.0,
+            what="the board to latch the emergency brake",
+        )
+        frames_at_estop = self.spy.count()
 
-        self.client._estop_latched = False  # simulate the engine-restart path
-        self.client.disconnect()
-        self.assertTrue(self.client.connect())
+        # The dangerous ordering: a stop arriving after the latch.
+        self.assertTrue(self.client.request_stop())
+        self.assertIs(
+            self.client.control_state, ControlState.ESTOP,
+            "An explicit stop after an emergency break must not downgrade ESTOP; "
+            "otherwise a tripped brake is presented as a routine handled stop",
+        )
+
+        # stop_control_loop still does its job: one neutral frame, worker joined.
+        self.assertEqual(self.client._last_command, NEUTRAL_PWMS)
+        self.assert_worker_stopped()
+        _, payloads = self.spy.snapshot()
+        self.assertEqual(payloads[frames_at_estop:], [NEUTRAL_PWMS], "A post-E-stop stop may only re-assert neutral")
+        self.assertTrue(
+            all(p == NEUTRAL_PWMS for p in payloads[frames_at_estop:]),
+            "No non-neutral frame may be emitted after the ESTOP latch",
+        )
+
+        # And the latch is still fully in force.
+        self.assertFalse(self.client.start_control_loop())
+        self.assertFalse(self.client.send_pwms([1700] * 8))
+        self.assertIs(self.client.control_state, ControlState.ESTOP)
+        self.assertTrue(self.spy.quiet_for(0.20))
+        self._wait_for_neutral(timeout_s=1.0)
+
+
+class TestDashboardEngineRestart(unittest.TestCase):
+    """
+    The engine-restart disarm path, driven through the real production code.
+
+    Separate from ``TestDashboardControlAgainstServer`` because this class lets
+    the client own the SIL server process itself (via
+    ``start_server_process()``) instead of sharing one started by
+    ``SilServerProcess``. Two servers cannot bind the same port, so the two
+    fixtures are mutually exclusive.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        require_server_executable()
+
+    def setUp(self) -> None:
+        self.client = SilDashboardClient(port=free_tcp_port())
+        self.addCleanup(self.client.stop_server_process)
+        self.assertTrue(
+            self.client.start_server_process(),
+            "start_server_process() must launch the real sil_bridge_server",
+        )
+        self._connect()
+
+    def _connect(self) -> None:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if self.client.connect():
+                return
+            time.sleep(0.05)
+        self.fail("The client never connected to the engine it started")
+
+    def test_engine_restart_clears_the_estop_latch(self):
+        """
+        Invariant: ``start_server_process()`` is a real, independent disarm
+        mechanism for the ESTOP latch, not just ``connect()`` in disguise.
+
+        The dashboard's "Restart Engine" button calls stop_server_process() then
+        start_server_process() then connect(), so both are live disarm paths and
+        the latch must clear at the restart step itself.  The latch is observed
+        (not assigned) between the restart and the reconnect, which is what
+        distinguishes the two mechanisms.
+        """
+        self.assertTrue(self.client.trigger_emergency_break())
+        self.assertIs(self.client.control_state, ControlState.ESTOP)
+        self.assertFalse(
+            self.client.send_pwms([1650] * 8),
+            "A latched ESTOP must refuse commands before the restart",
+        )
+        self.assertTrue(
+            self.client._estop_latched,
+            "request_emergency_break() must set the latch",
+        )
+
+        # Exactly what the "Restart Engine" button does.
+        self.client.stop_server_process()
+        self.assertIs(
+            self.client.control_state, ControlState.DISCONNECTED,
+            "stop_server_process() disconnects but must NOT clear the latch",
+        )
+        self.assertTrue(
+            self.client._estop_latched,
+            "stop_server_process() must leave the ESTOP latch in place",
+        )
+
+        self.assertTrue(
+            self.client.start_server_process(),
+            "Restarting the engine must launch a new sil_bridge_server",
+        )
+        self.assertFalse(
+            self.client._estop_latched,
+            "start_server_process() is the operator's explicit restart and must "
+            "clear the ESTOP latch by itself, before any reconnect",
+        )
+
+        self._connect()
         self.assertIs(self.client.control_state, ControlState.ARMED)
-        self.assertTrue(self.client.send_pwms([1650] * 8))
+        self.assertTrue(
+            self.client.send_pwms([1650] * 8),
+            "After an engine restart the control path must accept commands again",
+        )
         self.assertIs(self.client.control_state, ControlState.RUNNING)
+
+    def test_engine_restart_is_required_to_rearm_after_estop(self):
+        """
+        Invariant: while the engine keeps running the latch holds, so a stop and
+        reconnect without a restart does not silently hand thrust back.
+        """
+        self.assertTrue(self.client.trigger_emergency_break())
+        self.assertIs(self.client.control_state, ControlState.ESTOP)
+
+        self.client.disconnect()
+        self.assertIs(self.client.control_state, ControlState.DISCONNECTED)
+        self.assertTrue(
+            self.client._estop_latched,
+            "A bare disconnect must not clear the ESTOP latch; the operator has to "
+            "restart the engine",
+        )
 
 
 if __name__ == "__main__":
