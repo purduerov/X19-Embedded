@@ -241,11 +241,11 @@ A nonzero exit means a required SIL observation was **missing, malformed, stale,
 
 ```
 [FAIL] node2_arming: the arming gate was already open when the first snapshot arrived
-(sim_time_ms=4090 >= 3000), so the mandatory 3000 ms window could not be observed.
+(sim_time_ms=NNNN >= 3000), so the mandatory 3000 ms window could not be observed.
 Restart the engine (or let this tool launch one) and run the arming check first.
 ```
 
-Run it first, against a fresh engine. That is why `--auto` puts it first, and why every per-node integration test starts an engine of its own.
+Run it first, against a fresh engine. That is why `--auto` puts it first, and why every per-node integration test starts an engine of its own. `NNNN` is whatever the engine's virtual clock had already reached; a real capture on a developer machine read `4090`.
 
 ### 7.5 Pointing the tools at a build tree: `X19_SIL_SERVER`
 
@@ -289,10 +289,22 @@ python -m py_compile tests/sil_dashboard/*.py tests/sil_companion_bridge/*.py to
 The `tests/sil_stimulus/` suites import only the Python standard library, this repository's own modules, and `streamlit` (which `tests/sil_dashboard/dashboard_app.py` imports at module scope). `streamlit` is therefore required, not optional: `test_dashboard_app.py` raises `SkipTest` from `setUpModule` when `dashboard_app.py` cannot be imported, which costs all 55 of its tests at once. Install it before running the discovery:
 
 ```powershell
-python -m pip install "streamlit>=1.40,<2"
+python -m pip install --upgrade "streamlit>=1.40,<2"
 ```
 
+That bound is the single source of truth for CI: the workflow step holds it in one variable, installs from it, and then greps this guide for the same string, so the two cannot drift apart silently. If you change one, change both or the step fails. Use `--upgrade` locally too, or a Streamlit already installed outside the range will simply be kept.
+
 The 26 tests in `test_dashboard_control.py` cover the 20 Hz deadman in the client itself and need no Streamlit at all, so a missing install degrades to 229 passing plus 55 skipped rather than to a total loss.
+
+CI runs Python 3.14, because that is the interpreter this suite was verified on: the 284/284 result, the timing, the companion result, and the log shape all come from 3.14. The pin is a choice, not a necessity — the suite was also run end to end on 3.11.15 and passed there too, so the code is not version-fragile:
+
+| Interpreter | Streamlit | Result |
+| :--- | :--- | :--- |
+| 3.14.0 (what CI pins) | 1.55.0 | `Ran 284 tests in 206.329s` — `OK`, exit 0 |
+| 3.14.0 (what CI pins) | 1.64.0 | `Ran 284 tests in 213.870s` — `OK`, exit 0 |
+| 3.11.15 | 1.64.0 | `Ran 284 tests in 212.034s` — `OK`, exit 0 |
+
+If you change the pin, re-run the discovery on the new version before trusting it. A version error that raises is loud and self-correcting; the dangerous direction is one that turns into a skip, which is why the CI step asserts on the executed-test count and on the skip count rather than on the exit code.
 
 `tests/sil_companion_bridge/` additionally needs `pyzmq`, `protobuf`, and sibling `X19-Core` and `X19-Surface` checkouts, so run it from the multi-repository workspace rather than from this repository alone.
 
@@ -310,7 +322,7 @@ To tell a real pass from a silent skip:
 - Remember that one missing dependency can cost a whole module. `test_dashboard_app.py` skips all 55 of its tests at once when `streamlit` is absent, and reports that as a single skip, so `OK (skipped=1)` does not mean one test was skipped.
 - Confirm the engine was found. Point `X19_SIL_SERVER` at the binary (7.5) instead of relying on the default search, so a renamed or relocated build tree cannot silently convert the suite into skips.
 
-Continuous integration applies the same rule: the CI step prints its `ok` and `skipped` counts next to the exit status for exactly this reason.
+Continuous integration applies the same rule, and enforces it rather than only reporting it. The step prints its `ok` and `skipped` counts and then asserts on both: it fails when fewer than **250** tests reported `ok`, and it fails on **any** skip at all. The floor catches the catastrophic cases (a total skip reads `ok=0`; a whole-module skip reads `ok=229`); the zero-skip rule catches the partial cases no floor can, such as a future release renaming `streamlit.testing.v1`, where only the 7 AppTest tests skip and the count still reads a comfortable 277.
 
 ### 7.8 Host SIL results are not target readiness
 
@@ -322,4 +334,16 @@ Target readiness is a separate, currently **red** CTest group:
 ctest --test-dir build-native -R "^target_" --output-on-failure
 ```
 
-Those acceptance contracts compile each node's real `main.c` and `bsp.c` against a strict fake HAL. Five of the six fail today: `target_startup_node1` and `target_startup_node3` report that `HAL_Init`, `SystemClock_Config`, `MX_GPIO_Init`, `MX_FDCAN1_Init`, and `MX_I2C1_Init` never run before `app_main`, and the three `target_bsp_node*` tests report that no solenoid bit drives its own GPIO output and that the emergency brake neither asserts the hardware cutoff nor exposes the hardware latch. `target_startup_node2` passes. In CI that whole step is deliberately `continue-on-error`. A green host SIL run is not evidence that any of the failing contracts work, and **no physical hardware has been validated**. The remaining blockers are tracked in [`target-integration-blockers.md`](target-integration-blockers.md).
+Five of the six fail today, and each fails for its own reason, so read the one you are chasing rather than assuming a shared cause:
+
+| Test | Fails because |
+| :--- | :--- |
+| `target_startup_node1` | `HAL_Init`, `SystemClock_Config`, `MX_GPIO_Init`, `MX_FDCAN1_Init`, and `MX_I2C1_Init` never run before `app_main` (5 failures) |
+| `target_startup_node3` | the same five startup calls (5 failures) |
+| `target_bsp_node1` | no CAN controller in `bsp_init`, leak probes 0 and 1 not configured as pulled-up inputs, emergency cutoff not configured as an output (4 failures). **No solenoid assertion at all** — this is the Pi Shield, which has none. |
+| `target_bsp_node2` | no CAN controller, solenoid outputs not initialized as GPIO outputs, none of the ten solenoid bits drives its own output, the emergency brake does not assert the hardware cutoff and does not expose the latch (13 failures) |
+| `target_bsp_node3` | no CAN controller, logic voltage not sourced from INA237 data, PCB temperature not sourced from TMP1075 data, converter enable pins not initialized as outputs, ideal-diode status pin not initialized as a pulled-up input (5 failures). **Neither solenoids nor the emergency brake** — this is the Power Slab, which has neither. |
+
+`target_startup_node2` passes, and it is not the same kind of check as its two siblings. Nodes 1 and 3 are compiled contracts: `tests/CMakeLists.txt` builds `hardware/test_target_startup.c` against the node's real `main.c` under a strict fake HAL. Node 2's is a **text scan** — `cmake -P tests/hardware/check_node2_startup.cmake` reads `nodes/node2_control_board/Core/Src/main.c` and asserts, by `string(FIND)`, that eight calls appear in order (`HAL_Init`, `SystemClock_Config`, `MX_GPIO_Init`, `MX_FDCAN1_Init`, `MX_I2C1_Init`, `MX_TIM1_Init`, `MX_TIM8_Init`, `app_main`). It passes because node 2's `main.c` is fully CubeMX-generated at 553 lines, while the `main.c` of nodes 1 and 3 are 26-line hand-written stubs that call `app_main()` and nothing else. So node 2 passing is weaker evidence than a compiled pass, not a different flavour of the same evidence.
+
+In CI that whole step is deliberately `continue-on-error`. A green host SIL run is not evidence that any of the failing contracts work, and **no physical hardware has been validated**. The remaining blockers are tracked in [`target-integration-blockers.md`](target-integration-blockers.md).

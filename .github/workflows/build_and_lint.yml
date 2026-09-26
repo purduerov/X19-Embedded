@@ -62,17 +62,26 @@ jobs:
       - name: Set Up Python for SIL Checks
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          # 3.14 is the interpreter the whole SIL verification transcript was
+          # produced on (284/284, the companion 4/4, and the log shape that
+          # motivated the ok-counting fix), so the gate runs where it was measured.
+          # The pin is a choice, not a necessity: the discovery was also run end to
+          # end on 3.11.15 and passed there (284/284 in 212 s). Both figures are in
+          # docs/sil_simulation_guide.md section 7.6.
+          python-version: '3.14'
 
       - name: Run Python SIL and Dashboard Checks
         shell: bash
         run: |
           # The host SIL surface is a blocking contract, exactly like the CTest step
           # above. Target readiness stays non-blocking in the next step, because 5 of
-          # its 6 acceptance contracts are red on the missing CubeMX startup and
-          # peripheral-init calls, the missing per-solenoid GPIO outputs, and the
-          # missing hardware emergency-brake latch. A green run here is evidence about
-          # the host simulation, never about hardware.
+          # its 6 acceptance contracts are red, each for its own reason: nodes 1 and 3
+          # are missing the CubeMX startup and peripheral-init calls, node 1's BSP is
+          # missing its leak-probe inputs and the emergency-cutoff output, node 2's is
+          # missing the solenoid outputs and the emergency-brake cutoff and latch, and
+          # node 3's is missing INA237 and TMP1075 sourcing, the converter enable pins,
+          # and the ideal-diode status pin. A green run here is evidence about the host
+          # simulation, never about hardware.
           #
           # streamlit is the only third-party package the suites need, and it is
           # required rather than optional: tests/sil_stimulus/test_dashboard_app.py
@@ -80,17 +89,24 @@ jobs:
           # imported, which costs all 55 of its tests. Relying on that clean skip
           # would drop the whole UI safety layer - the button-to-handler bindings,
           # the per-tab re-arm veto, and the E-stop latch gate - out of CI while
-          # still reporting success. Bounded rather than exact-pinned so the pin
-          # cannot rot; the ok/skipped counts printed below are the tripwire if a
-          # future release ever renames streamlit.testing.v1 and that layer starts
-          # skipping.
+          # still reporting success. --upgrade is deliberate: without it a cached or
+          # self-hosted runner that already has a streamlit outside this range would
+          # silently keep it and the <2 bound would not be enforced.
           #
           # pyzmq and protobuf are deliberately NOT installed. Only
           # tests/sil_companion_bridge/ needs them, and it also needs the sibling
           # X19-Core / X19-Surface checkouts that are not part of this repository, so
           # it is syntax-checked here and executed from the multi-repository
           # workspace instead.
-          python -m pip install --disable-pip-version-check "streamlit>=1.40,<2"
+          #
+          # Single source of truth for the bound, so the documented version in
+          # docs/sil_simulation_guide.md cannot drift away from the installed one.
+          STREAMLIT_SPEC="streamlit>=1.40,<2"
+          python -m pip install --disable-pip-version-check --upgrade "$STREAMLIT_SPEC"
+          grep -qF "$STREAMLIT_SPEC" docs/sil_simulation_guide.md || {
+            echo "::error title=Streamlit bound drift::docs/sil_simulation_guide.md no longer states the bound this step installs ($STREAMLIT_SPEC). Update the guide and this step together."
+            exit 1
+          }
           python -m py_compile tests/sil_dashboard/*.py tests/sil_companion_bridge/*.py tools/can_stimulus.py tools/node2_stimulus.py
 
           # Runs after the native build so the engine exists. X19_SIL_SERVER is passed
@@ -99,13 +115,40 @@ jobs:
           X19_SIL_SERVER="$PWD/build-native/tests/sil_bridge_server" \
             python -m unittest discover -s tests/sil_stimulus -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/sil-unittest.log"
 
-          # unittest exits 0 when every test skipped, so a silent all-skip run is
-          # indistinguishable from green by exit code alone. Print both counts: a real
-          # run is a large "ok" count beside few or no named skips. An application
-          # that logs to stdout can split a "ok" token onto its own line, so accept
-          # either shape rather than under-counting the run.
-          echo "python SIL checks: ok=$(grep -cE '^ok$|\.\.\. ok$' "$RUNNER_TEMP/sil-unittest.log" || true) skipped=$(grep -c '\.\.\. skipped' "$RUNNER_TEMP/sil-unittest.log" || true)"
+          # unittest exits 0 when every test skipped, so an all-skip run is
+          # indistinguishable from green by exit code alone. Count the results, and
+          # accept either shape of the "ok" token: an application that logs to stdout
+          # can push it onto a line of its own, which would under-count the run.
+          ok=$(grep -cE '^ok$|\.\.\. ok$' "$RUNNER_TEMP/sil-unittest.log" || true)
+          skipped=$(grep -c '\.\.\. skipped' "$RUNNER_TEMP/sil-unittest.log" || true)
+          echo "python SIL checks: ok=$ok skipped=$skipped"
           tail -n 3 "$RUNNER_TEMP/sil-unittest.log"
+
+          # Those two numbers are only worth printing if something consumes them, so
+          # consume them. Each assertion below covers a failure the other cannot.
+          #
+          # Floor of 250 on the executed-test count. The verified full run is 284; 229
+          # is what executes when the 55-test dashboard module skips whole, which is
+          # the exact failure this step is meant to catch. 250 sits above that with
+          # about 12% headroom for ordinary test consolidation, and it is a round
+          # number that does not track the current count, so nobody can shrink the
+          # suite into quiet compliance.
+          if [ "$ok" -lt 250 ]; then
+            echo "::error title=Python SIL executed too few tests::only $ok test(s) reported ok and the floor is 250. A module that skipped whole, or a build tree the suites could not find, looks exactly like this."
+            exit 1
+          fi
+
+          # And no skips at all. CI builds the engine and installs streamlit, so a
+          # verified run skips nothing; any skip means a check was claimed and not
+          # performed. This is what catches the partial cases no count floor can: if a
+          # future streamlit release renames streamlit.testing.v1, only the 7 AppTest
+          # tests skip, the count still reads 277, and that is comfortably above any
+          # floor worth setting.
+          if [ "$skipped" -ne 0 ]; then
+            echo "::error title=Python SIL tests skipped::a verified CI run must not skip anything, but $skipped entry did. Skipped lines:"
+            grep '\.\.\. skipped' "$RUNNER_TEMP/sil-unittest.log"
+            exit 1
+          fi
 
       - name: Check Target Hardware Readiness (Acceptance Contracts)
         continue-on-error: true
