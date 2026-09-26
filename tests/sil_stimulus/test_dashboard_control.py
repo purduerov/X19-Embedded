@@ -28,21 +28,29 @@ from pathlib import Path
 
 try:
     from .sil_test_support import (
+        CAN_ID_SIL_OUTPUT_STATUS,
         REPO_ROOT,
+        SIL_PACKET_SIZE,
         ServerBackedTestCase,
         SilServerProcess,
         describe_exit,
         free_tcp_port,
+        recv_frames,
         require_server_executable,
+        unpack_sil_output_status,
     )
 except ImportError:  # pragma: no cover - direct execution fallback
     from sil_test_support import (  # type: ignore[no-redef]
+        CAN_ID_SIL_OUTPUT_STATUS,
         REPO_ROOT,
+        SIL_PACKET_SIZE,
         ServerBackedTestCase,
         SilServerProcess,
         describe_exit,
         free_tcp_port,
+        recv_frames,
         require_server_executable,
+        unpack_sil_output_status,
     )
 
 # tests/sil_stimulus/test_dashboard_control.py -> tests/sil_stimulus -> tests
@@ -1381,6 +1389,280 @@ class TestEngineFailureDiagnostics(unittest.TestCase):
             self.assertIn("unnamed", pipe)
 
 
+# The engine's one loop iteration: ``platform_sleep_ms(10)`` at
+# sil_bridge_server.c:427.  Every iteration advances the simulation by 10 ms,
+# calls accept(), calls recv() on the current client, and then transmits the
+# 0x7FE snapshot plus any pending CAN frames on that same client.  So a peer that
+# has gone away is written to once per iteration, and this is the interval after
+# which such a write is not a hope but a certainty.
+SERVER_LOOP_PERIOD_S = 0.010
+
+#: A backlog this many bytes in the receive buffer is far past the point where
+#: ``close()`` could be mistaken for a graceful shutdown.  0x7FE is one packet per
+#: iteration and 0x200 nav telemetry is two, so this is a few tens of
+#: milliseconds of a client that simply stopped reading -- which is what a
+#: browser tab, a suspended laptop, or a paused dashboard does.
+RUDE_CLOSE_BACKLOG_BYTES = 4 * SIL_PACKET_SIZE
+
+#: How many loop iterations to let the engine run after the rude close, so its
+#: next ``send()`` to the departed peer is guaranteed to have been attempted.
+#: Twenty iterations is 200 ms, against a per-iteration send that happens
+#: unconditionally while a client is attached.  This is the one wall-clock term
+#: in the test and it cannot be turned into a poll on the engine's own output,
+#: because the engine prints nothing on the departure path it takes once the
+#: signal is ignored: ``send()`` simply fails and the existing handler at
+#: sil_bridge_server.c:406-409 closes the client silently.  Waiting for a
+#: *visible* event would therefore mean waiting for the very log line the fix
+#: removes.  What replaces the sleep as evidence is the assertion that follows:
+#: the process is reaped-or-not by the OS, and a fresh client is served.
+RUDE_CLOSE_SETTLE_ITERATIONS = 20
+RUDE_CLOSE_SETTLE_S = SERVER_LOOP_PERIOD_S * RUDE_CLOSE_SETTLE_ITERATIONS
+
+
+class TestEngineSurvivesARudeClient(ServerBackedTestCase):
+    """
+    Invariant: the engine outlives a client that disconnects without warning.
+
+    This is the contract behind the Linux-only CI failure
+    ``test_disconnect_stops_transmission_and_the_watchdog_drops_to_neutral``,
+    where the client's reconnect found nothing listening.
+
+    The mechanism, in the engine's own terms.  The engine streams 0x7FE and 0x200
+    at 100 Hz, so a client that stops reading accumulates a backlog.  A client
+    that then closes with that backlog still unread is closed *rudely*: the
+    kernel answers the peer with RST instead of FIN.  RST is the whole difference
+    between the two exits the engine already handles.  A clean FIN shows up as
+    ``recv() == 0`` and the engine takes the branch at
+    sil_bridge_server.c:313-323, which closes the client and keeps the listener.
+    A RST shows up as ``recv() < 0``, which is also what ``EAGAIN`` looks like on
+    this non-blocking socket, so neither branch can distinguish it -- the client
+    descriptor stays attached, the engine transmits to it again, and on Linux
+    that ``send()`` fails *and* raises SIGPIPE, whose default action terminates
+    the process.  The engine's own recovery path (a ``send()`` returning ``<= 0``
+    closes the client and serving continues) was already correct and never got to
+    run.
+
+    Cross-platform strength, stated plainly because it is not uniform:
+
+    * **On Linux this test fails without the fix and passes with it.**  It is the
+      only place in the suite that can observe the defect at all, and it is why
+      the fix is trusted rather than assumed.  This was verified, not assumed:
+      building the pre-fix source and the post-fix source with the same compiler
+      and running this file against each gives one failure without the fix and a
+      clean pass with it.
+    * **On Windows this test passes either way.**  Winsock has no SIGPIPE: a send
+      to a reset peer returns ``SOCKET_ERROR``/``WSAECONNRESET`` and the existing
+      handler runs, so the engine was never at risk here and the test has nothing
+      to discriminate.  Treat a green run on Windows as evidence that the
+      scenario is *survivable*, not that the fix is present.
+      ``test_a_close_before_any_telemetry_arrives_does_not_need_the_fix`` is the
+      control that makes the difference legible: it passes against both binaries
+      on Linux, which is what shows the backlog -- not the disconnect -- is the
+      variable.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.server_exe = require_server_executable()
+
+    def setUp(self) -> None:
+        self.server = SilServerProcess(self.server_exe)
+        self.server.start()
+        self.addCleanup(self.server.stop)
+
+    def _wait_for_unread_backlog(self, sock: socket.socket, minimum: int, timeout_s: float) -> bool:
+        """
+        Block until at least ``minimum`` bytes sit UNREAD in the receive buffer.
+
+        Polls :meth:`_peek_pending`, which uses ``MSG_PEEK`` and so consumes
+        nothing: the bytes are still unread when the socket is closed, which is
+        the entire precondition for the RST that triggers the bug.  Sleeping for a
+        fixed time instead would leave the test asserting on a condition it had
+        never checked, and would silently become vacuous on a host slow enough
+        that no telemetry arrived at all.
+        """
+        deadline = time.monotonic() + timeout_s
+        while True:
+            if self._peek_pending(sock) >= minimum:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.005)
+
+    def test_a_rude_disconnect_does_not_kill_the_engine_and_a_new_client_is_served(self):
+        """
+        The load-bearing half, and the whole point of this class.
+
+        Step by step, with each step justified by the engine's source rather than
+        by what usually happens to work:
+
+        1. connect, and never read.  The engine's loop transmits 0x7FE and 0x200
+           every 10 ms into a receive buffer nobody is draining, so a backlog is
+           guaranteed rather than hoped for;
+        2. confirm the backlog with ``MSG_PEEK`` -- precondition established, not
+           assumed;
+        3. ``close()`` with those bytes still unread.  On Linux this is a RST;
+        4. let the engine run :data:`RUDE_CLOSE_SETTLE_ITERATIONS` loop
+           iterations, during which it is guaranteed to have called ``send()`` on
+           the departed client at least once;
+        5. assert the process was not reaped, and that it is still *serving* --
+           a fresh client is accepted and receives a real 0x7FE snapshot.
+
+        Step 5's second half matters as much as the first: a process that is
+        alive but wedged would satisfy a bare liveness check, and the operator
+        symptom is a dashboard that cannot reconnect, not a dashboard that can
+        read a PID file.
+        """
+        rude = socket.create_connection(("127.0.0.1", self.server.port), timeout=3.0)
+        self.addCleanup(rude.close)
+
+        self.assertTrue(
+            self._wait_for_unread_backlog(
+                rude, RUDE_CLOSE_BACKLOG_BYTES, timeout_s=2.0
+            ),
+            f"precondition failed: the engine never queued {RUDE_CLOSE_BACKLOG_BYTES} "
+            f"unread bytes for a client that was not reading, so the close below "
+            f"would be graceful and would prove nothing about a rude one.",
+        )
+
+        # Deliberately NO drain, and no shutdown(SHUT_WR).  close() on a socket
+        # whose receive buffer still holds data is what turns this into an RST.
+        rude.close()
+
+        # Precondition wait, not a tolerance: the engine has one loop iteration
+        # per SERVER_LOOP_PERIOD_S and transmits to the attached client on every
+        # one, so this is the interval after which the send that would raise
+        # SIGPIPE is a certainty rather than a race.
+        time.sleep(RUDE_CLOSE_SETTLE_S)
+
+        self.assertIsNone(
+            self.server.process.poll(),
+            "the SIL engine was killed by a client that disconnected with "
+            "telemetry still unread in its receive buffer. A client closing a "
+            "browser tab does exactly this, and the engine must survive it.\n"
+            f"{self.server.failure_report()}",
+        )
+
+        # Still serving: a new client is accepted and gets a fresh snapshot.  The
+        # engine restarts nothing here, so any data at all is proof that the
+        # original process is still the one doing the work.
+        replacement = socket.create_connection(("127.0.0.1", self.server.port), timeout=3.0)
+        self.addCleanup(replacement.close)
+        frames = recv_frames(replacement, timeout=2.0)
+        self.assertTrue(
+            frames,
+            "a fresh client was accepted but received no telemetry, so the engine "
+            "is not actually serving after the rude disconnect.\n"
+            f"{self.server.failure_report()}",
+        )
+        self.assertIn(
+            CAN_ID_SIL_OUTPUT_STATUS,
+            [can_id for can_id, _ in frames],
+            "the replacement client must be served the 0x7FE output snapshot, "
+            "which is what the dashboard reads its state from",
+        )
+        pwms, brake_active, solenoids, sim_time_ms = unpack_sil_output_status(
+            next(payload for can_id, payload in frames if can_id == CAN_ID_SIL_OUTPUT_STATUS)
+        )
+        self.assertEqual(
+            len(pwms), 8,
+            "a 0x7FE snapshot carries one PWM per thruster; a short record is a "
+            "framing fault, not a live engine",
+        )
+        self.assertGreater(
+            sim_time_ms,
+            0,
+            "a zero simulation clock means the engine stopped stepping, so its "
+            "survival is not the survival the operator needs",
+        )
+
+    def test_a_close_before_any_telemetry_arrives_does_not_need_the_fix(self):
+        """
+        The control: the same close, but with no backlog behind it.
+
+        This is what makes the sibling test's result readable.  A client that
+        connects and goes away before the engine has transmitted anything leaves
+        nothing unread, so ``close()`` sends FIN, the engine's ``recv() == 0``
+        branch (sil_bridge_server.c:313-323) fires, and the engine carries on by
+        itself -- on every platform, with or without SIGPIPE ignored.  Same close,
+        different kernel behaviour, different engine branch, opposite outcome.  If
+        both tests ever fail together, the backlog is not what the result is
+        about.
+
+        Why "close immediately" rather than "drain, then close": draining cannot
+        win.  The engine transmits 0x7FE and 0x200 on *every* loop iteration, so
+        the stream never falls quiet, and a reader that stops draining is always
+        racing fresh bytes into the buffer.  An earlier version of this test
+        drained for two seconds and then closed, and it still produced RST often
+        enough to fail against an unfixed engine -- i.e. it was quietly a second
+        copy of the rude test while claiming to be the graceful one.  Connecting
+        and closing inside one millisecond removes the race instead of losing it:
+        the engine needs a full loop iteration (10 ms) to accept and transmit, so
+        there is nothing to leave unread.  The residual risk is the microseconds
+        between this test's peek and its close against that 10 ms interval, and
+        even if it were lost the consequence is only that this control degrades
+        into the case its sibling already covers.
+        """
+        transient = socket.create_connection(("127.0.0.1", self.server.port), timeout=3.0)
+        # Precondition, not assumption: nothing may be queued, or the close
+        # below is not the graceful one this test claims to be exercising.
+        self.assertEqual(
+            self._peek_pending(transient),
+            0,
+            "the engine transmitted to a client that had not even been accepted "
+            "yet, so this can no longer be the no-backlog control",
+        )
+        transient.close()
+        time.sleep(RUDE_CLOSE_SETTLE_S)
+
+        self.assertIsNone(
+            self.server.process.poll(),
+            "a client that disconnects with nothing unread must not kill the "
+            "engine; the engine's own recv() == 0 branch is supposed to handle "
+            f"it.\n{self.server.failure_report()}",
+        )
+        replacement = socket.create_connection(("127.0.0.1", self.server.port), timeout=3.0)
+        self.addCleanup(replacement.close)
+        self.assertTrue(
+            recv_frames(replacement, timeout=2.0),
+            "the engine stopped serving after a client that never received "
+            f"telemetry.\n{self.server.failure_report()}",
+        )
+
+    def _peek_pending(self, sock: socket.socket) -> int:
+        """
+        Bytes the kernel has queued in ``sock``'s receive buffer, without reading.
+
+        ``MSG_PEEK`` leaves the bytes in place, which is what makes both tests in
+        this class honest: it reports a condition rather than creating it.  A
+        fixed sleep would leave the rude test asserting on a backlog it had never
+        checked, and would make the no-backlog control vacuous on a host slow
+        enough to have delivered nothing.
+
+        Strictly non-blocking, and that is load-bearing rather than incidental.
+        A peek with any real timeout *waits* for data to show up, so it would
+        report a backlog on a client that had received nothing at all -- which is
+        exactly the confusion the no-backlog control exists to avoid, and which a
+        first version of this helper suffered from: it reported 292 queued bytes
+        for a client the engine had not yet been able to accept.
+        """
+        sock.setblocking(False)
+        try:
+            try:
+                return len(sock.recv(65536, socket.MSG_PEEK))
+            except (BlockingIOError, InterruptedError):
+                return 0
+        except OSError as exc:
+            self.fail(
+                f"the client could not inspect its own receive buffer: {exc}\n"
+                f"{self.server.failure_report()}"
+            )
+        finally:
+            # Blocking again, because the tests that read from this socket use
+            # recv_frames(), which manages its own window.
+            sock.setblocking(True)
+
+
 class TestServerBackedDiagnosticsAreWired(unittest.TestCase):
     """
     Invariant: a failure in a server-backed class really does carry the evidence.
@@ -1431,6 +1713,35 @@ class TestServerBackedDiagnosticsAreWired(unittest.TestCase):
             "the engine diagnostics must be appended to the failure, or a dead "
             "engine and a refused connect stay indistinguishable",
         )
+
+    def test_an_inlined_report_is_not_appended_a_second_time(self):
+        """
+        Invariant: a test that quotes the engine report itself does not get it twice.
+
+        Several tests inline ``failure_report()`` so their evidence survives even
+        if this base class is ever dropped.  Appending a second copy would print
+        the same seven lines twice and bury the assertion's own text, which is
+        the opposite of what the diagnostics are for.
+        """
+        class _Quoting(ServerBackedTestCase):
+            def setUp(self) -> None:
+                self.server = self.OUTER._Stub()
+
+            def test_it_fails(self) -> None:
+                self.assertTrue(False, "quoted inline\n" + self.server.failure_report())
+
+        _Quoting.OUTER = self
+        result = unittest.TestResult()
+        _Quoting("test_it_fails").run(result)
+        self.assertEqual(len(result.failures), 1, f"expected one failure: {result.errors}")
+        text = result.failures[0][1]
+        self.assertEqual(
+            text.count("sil_bridge_server diagnostics"),
+            1,
+            "the engine report must appear exactly once, or the failure text is "
+            "half duplicated noise:\n" + text,
+        )
+        self.assertIn("quoted inline", text, "the assertion's own message must survive")
 
     def test_a_passing_test_is_left_completely_alone(self):
         class _Passing(ServerBackedTestCase):
