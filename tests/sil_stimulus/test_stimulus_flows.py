@@ -62,7 +62,12 @@ from tools.can_stimulus import (  # noqa: E402
     pack_sil_can_frame,
     run_selected_action,
 )
-from sil_protocol import SIL_OUTPUT_STATUS_STRUCT  # noqa: E402  (via can_stimulus's sys.path setup)
+from sil_protocol import (  # noqa: E402  (via can_stimulus's sys.path setup)
+    SIL_OUTPUT_STATUS_STRUCT,
+    EnvTelemetry,
+    PowerTelemetry,
+    ThrusterCommand,
+)
 
 try:
     from .sil_test_support import SilServerProcess, free_tcp_port, require_server_executable
@@ -2024,6 +2029,726 @@ class TestStimulusAgainstServer(unittest.TestCase):
         self.assertEqual(status_code, 0, f"an armed board must pass:\n{printed}")
         self.assertIn("The latch claim is earned", printed)
         self.assertIn("ESC ACTIVE, accepting thrust", printed)
+
+
+# --------------------------------------------------------------------------
+# Real-engine integration coverage
+# --------------------------------------------------------------------------
+#
+# Everything above proves what the TOOL does with a scripted bus. What follows
+# drives each vehicle node through the real C engine, so a regression in a
+# node's own firmware is caught rather than asserted about in prose.
+#
+# The numbers asserted below are read out of the node firmware and the mock plant
+# that the SIL engine actually links (tests/CMakeLists.txt:288-299), not guessed.
+# A range would be the wrong instrument here: a node that started reporting a
+# different but still plausible pressure would sail through a range assertion,
+# and this suite is only worth having if the exact reported value is pinned.
+
+# Node 1 (0x210) is a fixed synthetic BME280 reading. The 6-DOF plant drives the
+# MS5837, the IMU, the TPS25990 bricks and the INA226
+# (tests/mocks/mock_physics.c:332-361) but never the BME280, so the enclosure
+# values are exactly the sensor mock's reset defaults, sampled by node 1 at 10 Hz
+# (nodes/node1_pi_shield/Core/Src/app.c:159) and copied straight into the record
+# at nodes/node1_pi_shield/Core/Src/app.c:206-212.
+SIL_ENV_PRESSURE_HPA = 1013.25  # tests/mocks/mock_sensors.c:50
+SIL_ENV_HUMIDITY_PCT = 35.0     # tests/mocks/mock_sensors.c:51
+SIL_ENV_TEMPERATURE_C = 24.0    # tests/mocks/mock_sensors.c:52
+# Dry, and provably so: 35 % is below the 80 % humidity trip
+# (shared/include/rov_safety.h:19) evaluated at node1 app.c:181, the constant
+# pressure gives a 0 hPa rise against the 15 hPa vacuum-decay trip
+# (shared/include/rov_safety.h:18) at node1 app.c:192-194, and both floor probes
+# read dry (tests/mocks/mock_bsp.c:33-34 via node1 app.c:204).
+SIL_ENV_LEAK_FLAGS = 0
+SIL_ENV_PAYLOAD_LEN = 13  # struct "<3fB" (sil_protocol._STRUCT_3FB)
+
+# Node 3 (0x300) IS plant driven: the engine enables the plant
+# (tests/sil_bridge_server.c:218) and every 10 ms tick the plant overwrites the
+# brick sensors (tests/mocks/mock_bsp.c:50-53 -> mock_physics_step). With all
+# eight thrusters at neutral the reported numbers are fixed, not sampled.
+SIL_TETHER_MV = 48000  # mock_physics.c:80 holds the tether at 48.0 V;
+                       # nodes/node3_power_slab/Core/Src/app.c:176-181 scales it by 1000
+SIL_V5_MV = 5200       # mock_physics.c:350 writes 5.2 V for brick 0 (the logic rail);
+                       # node3 app.c:100-105
+SIL_V5_MA = 2500       # mock_physics.c:350 writes 2.5 A for brick 0; node3 app.c:101-106
+# mock_physics.c:176 sums two thruster currents per brick and
+# mock_physics.c:71-74 gives a neutral thruster 0.2 A, so 0.4 A per brick;
+# node3 app.c:111-115 scales that by 1000.
+SIL_V12_MA = (400, 400, 400, 400)
+# node3 app.c:87 seeds the maximum at 250 tenths, the logic brick reports 30.0 C
+# (mock_physics.c:350 -> 300 tenths) and node3 app.c:128-130 keeps the largest.
+SIL_PCB_TENTHS_C = 300
+SIL_POWER_PAYLOAD_LEN = 20  # struct "<HHHH4HhH" (sil_protocol._STRUCT_POWER)
+# The tether current is a quotient rather than a literal: node3 app.c:121 sums
+# the five brick output powers and node3 app.c:160-161 divides by the measured
+# 48.0 V tether, giving about 32.2 W / 48.0 V = 0.671 A, which node3 app.c:182
+# truncates to milliamps. Asserted as a tight band because it is a float
+# truncation of a computed sum, not a constant anybody chose.
+SIL_TETHER_MA_MIN = 600
+SIL_TETHER_MA_MAX = 800
+
+# The emergency break latches for the life of the engine
+# (nodes/node2_control_board/Core/Src/app.c:116 sets ESC_STATE_DISARMED and
+# shared/src/rov_safety.c has no clear path), so it is always the last thing a
+# test asks a fresh engine to do.
+AUTHORIZED_BREAK_FRAME = can_stimulus.EMERGENCY_FRAME
+UNAUTHORIZED_BREAK_FRAME = can_stimulus.UNAUTHORIZED_FRAME
+
+
+class ObservingSilBackend(SilSocketBackend):
+    """
+    The real SIL transport plus a test-side witness.
+
+    Three observations the checks themselves do not keep, so a test can assert on
+    what the firmware actually produced instead of on the check's summary of it:
+
+    * ``readbacks`` - every 0x7FE output-status snapshot, in arrival order, with
+      the engine's own virtual clock attached;
+    * ``received`` - every non-0x7FE frame the engine published;
+    * ``sent_frames`` - every frame written, with its wall-clock time, so a 20 Hz
+      resend is measured rather than assumed.
+
+    It subclasses :class:`SilSocketBackend` rather than wrapping it, so the
+    framing, the decoding, and the 0x7FE routing all remain the tool's: nothing
+    here can make a test agree with the tool by disagreeing with the wire. A
+    malformed 0x7FE still raises from ``OutputStatus.decode`` inside
+    ``drain_frames``, which is the correct outcome - a decode error is a failed
+    test, never a warning.
+
+    ``received`` is collected from ``drain_frames``' own return value rather than
+    from a frame listener, because ``_pump`` installs and then restores its own
+    listener around every check; a listener registered at connect time would only
+    ever see the gaps between checks.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.readbacks = []
+        self.received = []
+        self.sent_frames = []
+        self._last_readback = None
+
+    def send_frame(self, can_id, payload):
+        self.sent_frames.append((time.monotonic(), can_id, bytes(payload)))
+        super().send_frame(can_id, payload)
+
+    def drain_frames(self, timeout_s=0.0):
+        collected = super().drain_frames(timeout_s)
+        for can_id, payload in collected:
+            if can_id != CAN_ID_SIL_OUTPUT_STATUS:
+                self.received.append((can_id, payload))
+        self._capture_readback()
+        return collected
+
+    def _capture_readback(self):
+        current = self.latest_outputs()
+        if current is not None and current is not self._last_readback:
+            self._last_readback = current
+            self.readbacks.append(current)
+        return current
+
+    def pump_until(self, predicate, timeout_s):
+        """
+        Bounded wait for a 0x7FE snapshot satisfying ``predicate``.
+
+        This is a *precondition* wait, not a stimulus check: it answers "is the
+        engine in the state this test needs", and returns ``None`` when it is not
+        so the caller can fail with a message that names the missing
+        precondition. No verdict about the vehicle is ever taken from here, and
+        the tool's own checks are never driven through it.
+        """
+        deadline = time.monotonic() + max(0.0, timeout_s)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return None
+            self.drain_frames(min(can_stimulus.READ_POLL_S, remaining))
+            current = self._capture_readback()
+            if current is not None and predicate(current):
+                return current
+
+    def sends_of(self, can_id):
+        """Every frame written to ``can_id``, as ``(monotonic, payload)`` pairs."""
+        return [(when, payload) for when, frame_id, payload in self.sent_frames if frame_id == can_id]
+
+
+@contextlib.contextmanager
+def _engine(executable):
+    """
+    A private engine and a connected observing backend.
+
+    Each test gets its own process on its own ephemeral port - ``SilServerProcess``
+    reserves the port through ``free_tcp_port``, so no two tests and nothing
+    outside this file can collide on 8765 - and the server is terminated on
+    every exit path, including an assertion failure or a skip raised inside the
+    block. The caller can assert ``server.is_running`` afterwards to prove
+    nothing was left behind.
+    """
+    server = SilServerProcess(executable)
+    with server:
+        backend = ObservingSilBackend("127.0.0.1", server.port, auto_start=False)
+        backend.connect()
+        try:
+            yield server, backend
+        finally:
+            backend.close()
+
+
+class SilNodeIntegrationTests(unittest.TestCase):
+    """
+    One end-to-end test per vehicle node, each against its own real engine.
+
+    Every assertion here is made twice over, deliberately: once on the
+    ``CheckResult`` the tool returned, and once on the bytes the C engine
+    actually put on the wire. The first pins the tool's verdict; the second pins
+    the vehicle, and the second is the one that fails when a node's firmware
+    regresses. Nothing is asserted on "the send did not throw".
+    """
+
+    def setUp(self):
+        # Resolved per test rather than per class, so an unbuilt binary skips
+        # every integration test with the build instructions instead of erroring
+        # on a missing file. A skip is honest here; a false pass is not.
+        self.server_exe = require_server_executable()
+
+    # -- node 1: Pi shield -------------------------------------------------
+    def test_node1_reports_the_simulated_bme280_on_0x210(self):
+        """
+        Node 1's environment telemetry, decoded from the real engine.
+
+        Asserts the 0x210 frames really arrived (at least two, which is what
+        distinguishes a live stream from one stale frame, because the server
+        emits the first immediately and then 1 Hz -
+        tests/sil_bridge_server.c:376-382), that each is a full 13-byte record,
+        and that every field is the value the firmware computes from the sensor
+        mock. The 6-DOF plant never drives the BME280
+        (tests/mocks/mock_physics.c:332-361), so 1013.25 hPa / 35 % / 24.0 C /
+        leak_flags 0 is a determinate expectation, not a plausible range: a
+        regression that halved the reported humidity would be caught here and
+        would sail through a range check.
+        """
+        with _engine(self.server_exe) as (server, backend):
+            result = VehicleStimulusTester(backend).monitor_node1_env(3.0)
+            self.assertTrue(result.passed, result.detail)
+
+            frames = [payload for can_id, payload in backend.received if can_id == CAN_ID_ENV_TELEMETRY]
+            self.assertGreaterEqual(
+                len(frames), 2, f"expected a live 0x210 stream, got {len(frames)} frame(s)"
+            )
+            for index, payload in enumerate(frames):
+                self.assertEqual(
+                    len(payload),
+                    SIL_ENV_PAYLOAD_LEN,
+                    f"0x210 frame {index} is {len(payload)} B; the packed rov_env_telemetry_t "
+                    "is 13 B and a short record cannot be a valid reading",
+                )
+                record = EnvTelemetry.unpack(payload)
+                self.assertAlmostEqual(
+                    record.pressure_hpa,
+                    SIL_ENV_PRESSURE_HPA,
+                    places=3,
+                    msg=f"0x210 frame {index}: node1 app.c:206 publishes the BME280 reading verbatim",
+                )
+                self.assertAlmostEqual(
+                    record.humidity_pct,
+                    SIL_ENV_HUMIDITY_PCT,
+                    places=3,
+                    msg=f"0x210 frame {index}: node1 app.c:208",
+                )
+                self.assertAlmostEqual(
+                    record.temperature_c,
+                    SIL_ENV_TEMPERATURE_C,
+                    places=3,
+                    msg=f"0x210 frame {index}: node1 app.c:210",
+                )
+                self.assertEqual(
+                    record.leak_flags,
+                    SIL_ENV_LEAK_FLAGS,
+                    f"0x210 frame {index} flags a leak; a set bit means node 1 should already "
+                    "have broadcast an emergency break (node1 app.c:220-222)",
+                )
+        self.assertFalse(server.is_running, "the engine must not outlive the test")
+
+    # -- node 2: control board --------------------------------------------
+    def test_node2_arming_gate_is_neutral_before_3000ms_and_open_after(self):
+        """
+        The mandatory ESC arming gate, in both directions, on the real board.
+
+        A fresh engine per test is mandatory, not a nicety: the gate opens on the
+        engine's virtual clock and cannot be observed retroactively, so
+        ``test_node2_arming`` legitimately fails against a board whose sim clock
+        has already passed ``ESC_ARMING_TIME_MS``.
+
+        Asserts on the engine's own 0x7FE readback, independently of the check:
+        that at least ``MIN_ARMING_SAMPLES`` snapshots landed strictly inside the
+        window, that every one of them held all eight channels at 1500 us while a
+        1700 us command was being resent, and that the first snapshot to leave
+        neutral is at or after the boundary. That third assertion is what
+        separates a real arming gate from "the outputs happened to be neutral".
+        """
+        with _engine(self.server_exe) as (server, backend):
+            result = VehicleStimulusTester(backend).test_node2_arming()
+            self.assertTrue(result.passed, result.detail)
+
+            inside = [s for s in backend.readbacks if s.sim_time_ms < ESC_ARMING_SIM_MS]
+            self.assertGreaterEqual(
+                len(inside),
+                can_stimulus.MIN_ARMING_SAMPLES,
+                "the arming window must be watched, not inferred from a single post-boundary "
+                f"snapshot; only {len(inside)} readback(s) landed inside {ESC_ARMING_SIM_MS} ms",
+            )
+            intruders = [s for s in inside if tuple(s.pwms) != NEUTRAL_PWMS]
+            self.assertFalse(
+                intruders,
+                "a channel left neutral while the arming gate was still open "
+                f"(node2 app.c:192-194 must hold {NEUTRAL_US} us throughout); first offender "
+                f"sim_time_ms={intruders[0].sim_time_ms} showing {list(intruders[0].pwms)}"
+                if intruders
+                else "",
+            )
+            after = [s for s in backend.readbacks if s.sim_time_ms >= ESC_ARMING_SIM_MS]
+            self.assertTrue(after, "no readback was published after the arming window closed")
+            moving = [s for s in after if any(pulse != NEUTRAL_US for pulse in s.pwms)]
+            self.assertTrue(
+                moving,
+                f"the gate never opened: every readback at or after {ESC_ARMING_SIM_MS} ms of sim "
+                f"time was still neutral, last was {after[-1].describe()}",
+            )
+            self.assertGreaterEqual(
+                moving[0].sim_time_ms,
+                ESC_ARMING_SIM_MS,
+                "the board started moving before its arming window closed",
+            )
+            self.assertEqual(
+                [s.sim_time_ms for s in backend.readbacks],
+                sorted(s.sim_time_ms for s in backend.readbacks),
+                "the engine's virtual clock must never run backwards",
+            )
+        self.assertFalse(server.is_running, "the engine must not outlive the test")
+
+    def test_node2_pwm_resends_at_20hz_and_holds_on_the_firmware_readback(self):
+        """
+        One thruster channel, driven and held, on the real board.
+
+        Two independent claims:
+
+        1. the tool resends the 0x100 frame at 20 Hz, measured from the recorded
+           sends, and no gap between two commands reaches the firmware's 100 ms
+           heartbeat window (shared/include/rov_parameters.h:71);
+        2. the ENGINE-produced 0x7FE readback shows the commanded value on the
+           driven channel and 1500 us on the other seven, for several snapshots -
+           not merely that the write did not raise.
+
+        The gate is established first with ``test_node2_arming`` rather than
+        assumed: node2 app.c:127-129 refuses thruster commands until the ESC
+        state is ACTIVE, so a cold engine cannot hold a PWM at all.
+
+        The tail of the test then demonstrates *why* 20 Hz matters, on real
+        firmware: the command is resent, thrust is observed, the resend stops,
+        and node2 app.c:183-189 must force every channel back to neutral
+        immediately (``node2_force_neutral`` writes 1500 us with no slew, so the
+        drop is not gradual).
+        """
+        channel = 3
+        pulse_us = 1750
+        hold_s = 1.0
+        with _engine(self.server_exe) as (server, backend):
+            tester = VehicleStimulusTester(backend)
+            armed = tester.test_node2_arming()
+            self.assertTrue(armed.passed, f"arming precondition failed: {armed.detail}")
+
+            send_mark = len(backend.sent_frames)
+            result = tester.test_node2_pwm(channel, pulse_us, duration_s=hold_s)
+            self.assertTrue(result.passed, result.detail)
+
+            # Only this check's traffic: the arming precondition above wrote its
+            # own 0x100 frames (1700 us, can_stimulus.SMOKE_SINGLE_PWM_US) and
+            # those are not evidence about this command.
+            phase = backend.sent_frames[send_mark:]
+            for _, frame_id, _ in phase:
+                self.assertEqual(frame_id, CAN_ID_THRUSTER_CMD, "this check writes nothing else")
+            vectors = [ThrusterCommand.unpack(payload).pwm_us for _, _, payload in phase]
+            # The check holds the command and then releases it, so the 0x100
+            # stream legitimately carries two vectors: the commanded one and the
+            # all-neutral one. Each is asserted against its own role.
+            release_at = next(
+                (index for index, pwms in enumerate(vectors) if all(p == NEUTRAL_US for p in pwms)),
+                None,
+            )
+            self.assertIsNotNone(release_at, "the command was never released back to neutral")
+            commanded, released = vectors[:release_at], vectors[release_at:]
+            self.assertGreaterEqual(
+                len(commanded),
+                10,
+                f"only {len(commanded)} 0x100 frame(s) carried the command; the 20 Hz resend is the point",
+            )
+            for pwms in commanded:
+                self.assertEqual(len(pwms), 8, "an 8-channel frame is required")
+                self.assertEqual(
+                    pwms[channel],
+                    pulse_us,
+                    f"a resent frame carried {pwms[channel]} us on channel {channel} instead of "
+                    f"{pulse_us}: the resend must repeat the command, not the first one only",
+                )
+            self.assertTrue(
+                all(all(p == NEUTRAL_US for p in pwms) for pwms in released),
+                "the release must command neutral on every channel",
+            )
+            sends = [when for when, _, _ in phase[:release_at]]
+            gaps = [later - earlier for earlier, later in zip(sends, sends[1:])]
+            resend_hz = (len(sends) - 1) / (sends[-1] - sends[0])
+            self.assertLessEqual(
+                max(gaps),
+                can_stimulus.HEARTBEAT_TIMEOUT_S,
+                f"the longest gap between 0x100 frames was {max(gaps) * 1000:.1f} ms, which the "
+                "100 ms watchdog (rov_parameters.h:71, node2 app.c:183-189) would have turned "
+                "into a neutral drop",
+            )
+            self.assertGreaterEqual(
+                resend_hz, 15.0, f"0x100 arrived at only {resend_hz:.1f} Hz, not the 20 Hz resend"
+            )
+            self.assertLessEqual(
+                resend_hz, 25.0, f"0x100 arrived at {resend_hz:.1f} Hz, faster than the 20 Hz resend"
+            )
+
+            # The evidence is the readback, not the write.
+            held = [s for s in backend.readbacks if s.pwms[channel] == pulse_us]
+            self.assertGreaterEqual(
+                len(held), 3, f"only {len(held)} 0x7FE snapshot(s) showed {pulse_us} us on channel {channel}"
+            )
+            for snapshot in held:
+                self.assertEqual(snapshot.pwms[channel], pulse_us)
+                others = [index for index in range(8) if index != channel]
+                self.assertEqual(
+                    [snapshot.pwms[index] for index in others],
+                    [NEUTRAL_US] * len(others),
+                    f"an uncommanded channel moved at sim_time_ms={snapshot.sim_time_ms}",
+                )
+
+            # Why the resend exists: go silent and the board must fail safe.
+            # The command is fed at the same 20 Hz the tool uses, because a
+            # slower feed would itself trip the 100 ms watchdog and the board
+            # would never reach the target - which is the coupling this test
+            # exists to make visible.
+            thrust = ThrusterCommand(
+                pwm_us=[pulse_us if index == channel else NEUTRAL_US for index in range(8)]
+            ).pack()
+            deadline = time.monotonic() + 3.0
+            next_send = time.monotonic()
+            driven = None
+            while driven is None:
+                now = time.monotonic()
+                if now >= deadline:
+                    break
+                if now >= next_send:
+                    backend.send_frame(CAN_ID_THRUSTER_CMD, thrust)
+                    next_send = now + can_stimulus.COMMAND_PERIOD_S
+                driven = backend.pump_until(
+                    lambda s: s.pwms[channel] == pulse_us,
+                    min(can_stimulus.COMMAND_PERIOD_S, deadline - time.monotonic()),
+                )
+            self.assertIsNotNone(
+                driven,
+                "an armed board must accept a fresh thruster command; if it does not, every "
+                "observation above is vacuous",
+            )
+            self.assertTrue(
+                any(pulse != NEUTRAL_US for pulse in backend.readbacks[-1].pwms),
+                "the last readback before the silence must still show thrust, or the drop below "
+                "proves nothing",
+            )
+            silence_start = backend.readbacks[-1]
+            dropped = backend.pump_until(lambda s: tuple(s.pwms) == NEUTRAL_PWMS, 2.0)
+            self.assertIsNotNone(
+                dropped,
+                f"the 100 ms heartbeat did not fire: the board stayed at "
+                f"{list(silence_start.pwms)} after the command stopped arriving",
+            )
+            self.assertLessEqual(
+                dropped.sim_time_ms - silence_start.sim_time_ms,
+                250,
+                f"the watchdog took {dropped.sim_time_ms - silence_start.sim_time_ms} ms of sim time "
+                "to drop the channel; shared/src/rov_safety.c:34 fires on the first tick past 100 ms",
+            )
+            # Between the last fed command and the trip the board must still be
+            # HOLDING the commanded value: a decaying channel here would mean the
+            # drop below was a slew, not the watchdog.
+            stragglers = [
+                s
+                for s in backend.readbacks
+                if silence_start.sim_time_ms < s.sim_time_ms < dropped.sim_time_ms
+            ]
+            self.assertTrue(
+                stragglers,
+                "the channel dropped instantly instead of after the 100 ms heartbeat window, so "
+                "the drop below is not evidence that the watchdog fired",
+            )
+            for snapshot in stragglers:
+                self.assertEqual(
+                    snapshot.pwms[channel],
+                    pulse_us,
+                    f"the channel decayed to {snapshot.pwms[channel]} us at "
+                    f"sim_time_ms={snapshot.sim_time_ms} while the command was still being fed",
+                )
+            # Keep reading past the trip so the "nothing came back" claim below is
+            # an observation rather than a gap in the record.
+            backend.pump_until(lambda s: s.sim_time_ms > dropped.sim_time_ms, 0.6)
+            after_drop = [
+                s
+                for s in backend.readbacks
+                if s.sim_time_ms > dropped.sim_time_ms and any(p != NEUTRAL_US for p in s.pwms)
+            ]
+            self.assertEqual(
+                after_drop,
+                [],
+                f"thrust came back after the watchdog dropped the channel, at "
+                f"sim_time_ms={after_drop[0].sim_time_ms}" if after_drop else "",
+            )
+        self.assertFalse(server.is_running, "the engine must not outlive the test")
+
+    def test_node2_solenoid_mask_changes_the_firmware_readback(self):
+        """
+        A single-coil valve mask, on the real board.
+
+        ``SMOKE_SOLENOID_MASK`` (0x0001, valve 0 coil A) is the known-good input:
+        it energises exactly one of the two opposing coils per valve, so the
+        interlock at shared/src/rov_can_protocol.c:120-126 accepts it and
+        nodes/node2_control_board/Core/Src/app.c:150-153 actually calls
+        ``bsp_solenoid_set``. A mask with both coils of a pair set would be
+        zeroed and rejected, and the readback would then report the *previous*
+        mask - which is why the mask is validated before it is used as evidence.
+
+        Asserts the change rather than the value: a snapshot showing the mask
+        must be preceded by one that did not, and followed by one back at 0x0000.
+        """
+        mask = can_stimulus.SMOKE_SOLENOID_MASK
+        self.assertIsNone(
+            can_stimulus.conflicting_solenoid_valve(mask),
+            f"0x{mask:04X} energises both coils of a valve and the firmware would reject it",
+        )
+        with _engine(self.server_exe) as (server, backend):
+            result = VehicleStimulusTester(backend).test_node2_solenoid(mask)
+            self.assertTrue(result.passed, result.detail)
+
+            first_on = next(
+                (index for index, s in enumerate(backend.readbacks) if s.solenoids == mask),
+                None,
+            )
+            self.assertIsNotNone(
+                first_on,
+                "the engine's own 0x7FE readback must show the mask the board was given",
+            )
+            self.assertTrue(
+                any(s.solenoids != mask for s in backend.readbacks[:first_on]),
+                f"every readback up to the first match already reported 0x{mask:04X}; the board "
+                "starts at 0x0000 (node2 app.c:72), so a pre-existing match would mean the "
+                "frame was ignored and the change never observed",
+            )
+            self.assertTrue(
+                any(s.solenoids == 0 for s in backend.readbacks[first_on + 1:]),
+                "the board must return to 0x0000 after being commanded to release",
+            )
+        self.assertFalse(server.is_running, "the engine must not outlive the test")
+
+    def test_node2_emergency_break_latches_the_brake_at_neutral(self):
+        """
+        The emergency break, on the real board, with the signature check intact.
+
+        Asserts that both frames the check sends really went out - the authorized
+        ``AA 55`` and the unauthorized ``AA 56`` that must be ignored
+        (nodes/node2_control_board/Core/Src/app.c:112) - and that the engine's own
+        0x7FE readback shows the brake latched with all eight channels at 1500 us
+        (app.c:115-118) and that nothing moved afterwards. ``test_emergency_break``
+        arranges its own precondition, so this cannot pass against a board that
+        was never ACTIVE.
+        """
+        with _engine(self.server_exe) as (server, backend):
+            result = VehicleStimulusTester(backend).test_emergency_break()
+            self.assertTrue(result.passed, result.detail)
+
+            written = [payload for _, payload in backend.sends_of(CAN_ID_EMERGENCY_BREAK)]
+            self.assertIn(
+                AUTHORIZED_BREAK_FRAME,
+                written,
+                "the authorized 0xAA 0x55 frame must actually be written, signature included",
+            )
+            self.assertIn(
+                UNAUTHORIZED_BREAK_FRAME,
+                written,
+                "the negative case is the check's own evidence: without the 0xAA 0x56 frame "
+                "there is nothing showing the signature is enforced",
+            )
+
+            braked = [s for s in backend.readbacks if s.brake_active]
+            self.assertTrue(
+                braked,
+                "no 0x7FE snapshot reported brake_active, so the latch was never observed on the "
+                "firmware readback",
+            )
+            for snapshot in braked:
+                self.assertEqual(
+                    tuple(snapshot.pwms),
+                    NEUTRAL_PWMS,
+                    f"the brake latched at sim_time_ms={snapshot.sim_time_ms} with "
+                    f"{list(snapshot.pwms)}; app.c:118 calls node2_force_neutral()",
+                )
+            latch_at = backend.readbacks.index(braked[0])
+            resumed = [
+                s
+                for s in backend.readbacks[latch_at:]
+                if any(pulse != NEUTRAL_US for pulse in s.pwms)
+            ]
+            self.assertFalse(
+                resumed,
+                "a channel left neutral after the brake latched, at "
+                f"sim_time_ms={resumed[0].sim_time_ms} showing {list(resumed[0].pwms)}; app.c:116 "
+                "sets ESC_STATE_DISARMED, which never clears"
+                if resumed
+                else "",
+            )
+        self.assertFalse(server.is_running, "the engine must not outlive the test")
+
+    # -- node 3: power slab -----------------------------------------------
+    def test_node3_reports_the_plant_power_telemetry_on_0x300(self):
+        """
+        Node 3's power telemetry, decoded from the real engine.
+
+        Requires at least one 0x300 frame (the server emits the first on connect
+        and then 1 Hz - tests/sil_bridge_server.c:383-389), that it is a full
+        20-byte ``PowerTelemetry`` record, and that every field carries the value
+        the power slab computes from the plant-driven brick sensors. The tether
+        current is a computed quotient, so it is asserted as a tight band with
+        its derivation; everything else is pinned exactly. The fault bit must be
+        clear: a set bit means the slab latched a fault and broadcast a 0x005
+        eFuse alert (nodes/node3_power_slab/Core/Src/app.c:185-195), which would
+        have tripped this board's brake.
+        """
+        with _engine(self.server_exe) as (server, backend):
+            result = VehicleStimulusTester(backend).monitor_node3_power(3.0)
+            self.assertTrue(result.passed, result.detail)
+
+            frames = [payload for can_id, payload in backend.received if can_id == CAN_ID_POWER_TELEMETRY]
+            self.assertGreaterEqual(
+                len(frames), 2, f"expected a live 0x300 stream, got {len(frames)} frame(s)"
+            )
+            for index, payload in enumerate(frames):
+                self.assertEqual(
+                    len(payload),
+                    SIL_POWER_PAYLOAD_LEN,
+                    f"0x300 frame {index} is {len(payload)} B; the packed rov_power_telemetry_t "
+                    "is 20 B and a short record cannot be a valid reading",
+                )
+                record = PowerTelemetry.unpack(payload)
+                self.assertEqual(
+                    record.tether_voltage_mv,
+                    SIL_TETHER_MV,
+                    f"0x300 frame {index}: node3 app.c:181 publishes the measured tether in mV",
+                )
+                self.assertEqual(
+                    record.v5_voltage_mv,
+                    SIL_V5_MV,
+                    f"0x300 frame {index}: node3 app.c:105 publishes brick 0's output rail",
+                )
+                self.assertEqual(
+                    record.v5_current_ma,
+                    SIL_V5_MA,
+                    f"0x300 frame {index}: node3 app.c:106 publishes brick 0's load current",
+                )
+                self.assertEqual(
+                    tuple(record.v12_current_ma),
+                    SIL_V12_MA,
+                    f"0x300 frame {index}: node3 app.c:115 publishes one current per 12 V brick",
+                )
+                self.assertEqual(
+                    len(record.v12_current_ma), 4, "four 12 V bricks are reported (rov_parameters.h:25)"
+                )
+                self.assertGreaterEqual(
+                    record.tether_current_ma, SIL_TETHER_MA_MIN, f"0x300 frame {index} tether current"
+                )
+                self.assertLessEqual(
+                    record.tether_current_ma,
+                    SIL_TETHER_MA_MAX,
+                    f"0x300 frame {index}: node3 app.c:160-161 divides the summed brick power by "
+                    f"the 48.0 V tether, which is about {SIL_TETHER_MA_MIN / 10:.0f}-"
+                    f"{SIL_TETHER_MA_MAX / 10:.1f} A here",
+                )
+                self.assertLessEqual(
+                    record.tether_current_ma, 25000, "0x300 frame {index} above the 25 A tether limit"
+                )
+                self.assertEqual(
+                    record.pcb_temp_c_tenths,
+                    SIL_PCB_TENTHS_C,
+                    f"0x300 frame {index}: node3 app.c:183 publishes the hottest sensor in tenths "
+                    f"of a degree, so {record.pcb_temp_c_tenths / 10.0:.1f} C",
+                )
+                self.assertEqual(
+                    record.status_flags & 0x0001,
+                    0,
+                    f"0x300 frame {index} latched a fault (status_flags=0x{record.status_flags:04X}); "
+                    "node3 app.c:185-195 would have broadcast a 0x005 eFuse alert that trips this "
+                    "board's brake (node2 app.c:121-126)",
+                )
+        self.assertFalse(server.is_running, "the engine must not outlive the test")
+
+    # -- the property this suite exists for --------------------------------
+    def test_a_node_that_stops_acting_produces_failed_checks_not_passes(self):
+        """
+        The regression this whole class exists to catch.
+
+        A positive test can only catch a broken node if the check is capable of
+        failing. The cheapest honest way to show it is: take a real engine, make
+        it genuinely incapable of the thing a check requires, and assert the
+        check reports FAILURE. Here the vehicle is latched into the emergency
+        state, which is permanent for the life of the engine
+        (nodes/node2_control_board/Core/Src/app.c:116), and both the thruster and
+        the solenoid commands the tool sends afterwards are refused by the
+        firmware: app.c:127-129 refuses thrust while the ESC state is not ACTIVE,
+        and app.c:150 refuses a solenoid mask while the break is active.
+
+        Pinned: neither check may report a pass, neither may raise, and the engine
+        must never leave neutral. If a future change made either check pass
+        vacuously - or made it pass by swallowing a missing readback - this test
+        breaks, and with it the claim that the passing node tests above mean
+        anything. No firmware is mutated and no assertion is faked: the vehicle
+        really is stopped, and the really-produced check really does fail.
+        """
+        with _engine(self.server_exe) as (server, backend):
+            backend.send_frame(CAN_ID_EMERGENCY_BREAK, AUTHORIZED_BREAK_FRAME)
+            latched = backend.pump_until(lambda s: s.brake_active, 3.0)
+            self.assertIsNotNone(
+                latched,
+                "the authorized frame did not latch the brake, so this test would be proving "
+                "nothing about a stopped vehicle",
+            )
+            self.assertEqual(tuple(latched.pwms), NEUTRAL_PWMS, "the trip must force neutral")
+
+            tester = VehicleStimulusTester(backend)
+            with self.subTest("thruster command against a latched board"):
+                pwm = tester.test_node2_pwm(0, 1700, duration_s=0.2, timeout_s=1.0)
+                self.assertFalse(
+                    pwm.passed,
+                    "a board latched into ESC_STATE_DISARMED must not report a held 1700 us "
+                    f"command as a pass:\n{pwm.detail}",
+                )
+                self.assertIn("never reached 1700 us", pwm.detail)
+            with self.subTest("solenoid command against a latched board"):
+                solenoid = tester.test_node2_solenoid(can_stimulus.SMOKE_SOLENOID_MASK, timeout_s=0.8)
+                self.assertFalse(
+                    solenoid.passed,
+                    "the firmware refuses 0x110 while the break is active (node2 app.c:150), so "
+                    f"the readback can never change and this must fail:\n{solenoid.detail}",
+                )
+                self.assertIn("never reported it back", solenoid.detail)
+
+            moved = [s for s in backend.readbacks if any(pulse != NEUTRAL_US for pulse in s.pwms)]
+            self.assertFalse(
+                moved,
+                "a latched board must hold neutral, but sim_time_ms="
+                f"{moved[0].sim_time_ms} showed {list(moved[0].pwms)}"
+                if moved
+                else "",
+            )
+        self.assertFalse(server.is_running, "the engine must not outlive the test")
 
 
 if __name__ == "__main__":
