@@ -1949,6 +1949,119 @@ class TestStimulusSolenoidBehaviour(unittest.TestCase):
         self.assertEqual(can_stimulus.energised_coils(0x0000), [])
 
 
+class _PairedTelemetryStream:
+    """
+    One telemetry frame and one fresh 0x7FE per read window, stepping together.
+
+    The stock ``FakeBackend`` hands over every queued frame in a single window, so
+    a burst of telemetry always lands on one simulated timestamp. Anything that
+    measures a *rate* has to see the frames spread across the engine's clock the
+    way a real engine spreads them, one tick at a time, so this double does that.
+    """
+
+    provides_output_readback = True
+
+    def __init__(self, frames, step_ms=10, readback=True):
+        self.frames = list(frames)
+        self.step_ms = step_ms
+        self.readback = readback
+        if not readback:
+            # A transport that supplies no 0x7FE at all, e.g. a real CAN adapter.
+            self.provides_output_readback = False
+        self.sent = []
+        self.served = 0
+        self._latest = None
+        self._listener = None
+
+    def connect(self, timeout_s=None):
+        pass
+
+    def close(self):
+        pass
+
+    def set_frame_listener(self, listener):
+        previous, self._listener = self._listener, listener
+        return previous
+
+    def send_frame(self, can_id, payload):
+        self.sent.append((can_id, bytes(payload)))
+
+    def latest_outputs(self):
+        return self._latest
+
+    def describe_destination(self, can_id):
+        return f"CAN 0x{can_id:03X}"
+
+    def drain_frames(self, timeout_s=0.0):
+        if not self.frames:
+            return []
+        can_id, payload = self.frames.pop(0)
+        if self.readback:
+            self._latest = status(sim_time_ms=self.served * self.step_ms)
+            self.served += 1
+        if self.listener is not None:
+            self.listener(can_id, payload)
+        return [(can_id, payload)]
+
+    @property
+    def listener(self):
+        return self._listener
+
+
+class TestSimulatedRateClaims(unittest.TestCase):
+    """
+    Invariant: a pass message states a rate the tool MEASURED.
+
+    ``monitor_node2_depth`` used to divide the observed wall rate by
+    ``SIM_MS_PER_WALL_S`` (0.8) and print the quotient as a simulated rate. 0.8 is
+    a deliberately generous LOWER BOUND on the engine's tick rate, not a
+    measurement of it, so the number was an inference wearing a unit: on a host
+    running the engine at 1.0 it under-reports, and the ">= 100 Hz simulated,
+    against the 100 Hz design rate" line the operator files is a claim about a
+    quantity nobody looked at. The engine's own clock is on every 0x7FE snapshot,
+    so the host-independent rate is the one to report.
+    """
+
+    # 21 frames one 10 ms tick apart is a 200 ms span: 21 / 0.2 = 105 Hz, exactly,
+    # and comfortably above the 20 Hz floor. The old inference would have printed
+    # 42 / 0.8 = 52 Hz for the same stream, which is why this is a real assertion
+    # and not a search for a substring that happens to be there.
+    FRAMES = 21
+    STEP_MS = 10
+    EXPECTED_SIM_HZ = FRAMES / ((FRAMES - 1) * STEP_MS / 1000.0)
+
+    def _stream(self, frames=FRAMES, with_readback=True):
+        return _PairedTelemetryStream(
+            [(CAN_ID_NAV_TELEMETRY, nav_payload()) for _ in range(frames)],
+            readback=with_readback,
+        )
+
+    def test_the_pass_text_reports_the_simulated_rate_it_measured(self):
+        result = VehicleStimulusTester(self._stream()).monitor_node2_depth(duration_s=0.5)
+        self.assertTrue(result.passed, result.detail)
+        self.assertIn(
+            f"{self.EXPECTED_SIM_HZ:.0f} Hz simulated",
+            result.detail,
+            "the simulated rate must be the one the engine's clock shows, not the "
+            f"wall rate divided by a lower bound: {result.detail!r}",
+        )
+        self.assertIn("Hz wall", result.detail, "the wall figure must stay, labelled as wall")
+
+    def test_a_stream_with_no_sim_clock_says_so_instead_of_inventing_a_rate(self):
+        """
+        A transport with no 0x7FE cannot evidence a simulated rate at all.
+
+        It must still pass or fail on what it can see, and must say the simulated
+        rate was not measured rather than deriving one from a constant.
+        """
+        result = VehicleStimulusTester(self._stream(with_readback=False)).monitor_node2_depth(
+            duration_s=0.05
+        )
+        self.assertIn("Hz wall", result.detail)
+        self.assertNotIn("Hz simulated", result.detail)
+        self.assertIn("unmeasured", result.detail.lower())
+
+
 class TestStimulusVehicleCheckFailures(unittest.TestCase):
     """
     Failure-path coverage for the six vehicle checks.

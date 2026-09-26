@@ -179,7 +179,9 @@ MIN_ARMING_SAMPLES = 3
 # The C engine advances 10 ms of virtual time per 10 ms wall tick
 # (tests/sil_bridge_server.c:264,427). 0.8 is a deliberately generous lower bound
 # on that rate, so a slow host widens a wall-clock budget instead of tripping a
-# sim-clock deadline.
+# sim-clock deadline.  It is a BUDGET input only: it is not a measurement, so it
+# must never be turned into a number a report claims to have observed.  Rates are
+# measured against the engine's own clock (see MIN_TELEMETRY_HZ).
 SIM_MS_PER_WALL_S = 0.8
 SIM_WALL_SLACK_S = 6.0
 # shared/include/rov_parameters.h:53-54  ROV_NUM_SOLENOIDS (5) valves,
@@ -231,6 +233,11 @@ SOLENOID_OBSERVE_TIMEOUT_S = 1.5
 UNAUTHORIZED_FRAME_WINDOW_S = 0.40
 ESTOP_LATCH_WINDOW_S = 0.50
 EMERGENCY_TIMEOUT_S = 3.0
+# Liveness floor for a telemetry stream, in the stream's OWN clock. Node 2 is
+# specified for 100 Hz simulated (rov_parameters.h:66) and the SIL server forwards
+# it unthrottled, so a fifth of the design rate is already a broken stream. It is
+# deliberately a floor on evidence, not a claim that the design rate was met.
+MIN_TELEMETRY_HZ = 20.0
 
 # Defaults for the combined smoke run. The emergency break is last because it
 # latches for the life of the engine (rov_safety.c:37-40 has no clear path, and
@@ -1138,6 +1145,7 @@ class VehicleStimulusTester:
         can_id: int,
         duration_s: float,
         send: Optional[Callable[[], None]] = None,
+        on_output: Optional[Callable[[OutputStatus], None]] = None,
     ) -> List[bytes]:
         payloads: List[bytes] = []
 
@@ -1145,7 +1153,12 @@ class VehicleStimulusTester:
             if frame_id == can_id:
                 payloads.append(payload)
 
-        self._pump(time.monotonic() + max(0.0, duration_s), send=send, on_frame=on_frame)
+        self._pump(
+            time.monotonic() + max(0.0, duration_s),
+            send=send,
+            on_frame=on_frame,
+            on_output=on_output,
+        )
         return payloads
 
     def _no_readback_failure(self, name: str, timeout_s: float) -> CheckResult:
@@ -1704,14 +1717,22 @@ class VehicleStimulusTester:
         board's own acceptance range: ``app.c:228-234`` rejects anything below
         -0.5 m and clamps a small negative reading to 0.0 m.
 
-        The 100 Hz is a *simulated* time rate.  The C engine sleeps 10 ms of wall
-        time per 10 ms tick (``sil_bridge_server.c:427``) and Windows ``Sleep``
-        has roughly 15.6 ms granularity, so a host observes about 64 Hz of wall
-        clock.  The floor below is a liveness check set far under that, so it can
-        only fire on a stream that has actually broken.
+        The 100 Hz is a *simulated* time rate, and the floor below is expressed in
+        that clock too.  The C engine sleeps 10 ms of wall time per 10 ms tick
+        (``sil_bridge_server.c:427``) and Windows ``Sleep`` has roughly 15.6 ms
+        granularity, so a host observes about 64 Hz of wall clock for a 100 Hz
+        stream; a floor in wall time would be a statement about the host's timer
+        as much as about the board.  Every 0x7FE snapshot carries the engine's own
+        clock, so the rate is measured against that and the wall figure is reported
+        beside it, labelled as wall.
         """
         name = "node2_depth"
-        payloads = self._collect(CAN_ID_NAV_TELEMETRY, duration_s)
+        sim_ms: List[int] = []
+        payloads = self._collect(
+            CAN_ID_NAV_TELEMETRY,
+            duration_s,
+            on_output=lambda snapshot: sim_ms.append(snapshot.sim_time_ms),
+        )
         if not payloads:
             return CheckResult(
                 name,
@@ -1720,14 +1741,21 @@ class VehicleStimulusTester:
                 "100 Hz (node2 app.c:218-262) and the server forwards it unthrottled "
                 "(sil_bridge_server.c:372-375). Received nothing.",
             )
-        rate_hz = len(payloads) / max(1e-6, duration_s)
-        if rate_hz < 20.0:
+        wall_hz = len(payloads) / max(1e-6, duration_s)
+        # Simulated span across the snapshots that bracket the window. A span of
+        # zero means a clock that did not move, which is not a rate at all, so the
+        # wall figure stands in and the message says which clock it came from.
+        sim_span_ms = sim_ms[-1] - sim_ms[0] if len(sim_ms) >= 2 else 0
+        sim_hz = len(payloads) / (sim_span_ms / 1000.0) if sim_span_ms > 0 else None
+        measured_hz, clock = (sim_hz, "simulated") if sim_hz is not None else (wall_hz, "wall")
+        if measured_hz < MIN_TELEMETRY_HZ:
             return CheckResult(
                 name,
                 False,
-                f"0x200 arrived at only {rate_hz:.1f} Hz ({len(payloads)} frames in "
+                f"0x200 arrived at only {measured_hz:.1f} Hz {clock} ({len(payloads)} frames in "
                 f"{duration_s:.1f} s); the board is specified for 100 Hz (rov_parameters.h:66) and "
-                "the server forwards it unthrottled, so anything under 20 Hz is a broken stream",
+                f"the server forwards it unthrottled, so anything under {MIN_TELEMETRY_HZ:.0f} Hz "
+                "is a broken stream",
             )
         try:
             records = [NavTelemetry.unpack(payload) for payload in payloads]
@@ -1767,12 +1795,21 @@ class VehicleStimulusTester:
                     "planned dive",
                 )
         last = records[-1]
+        if sim_hz is None:
+            rate_text = (
+                f"{len(records)} frame(s) at {wall_hz:.0f} Hz wall in {duration_s:.1f} s; the "
+                "simulated rate is UNMEASURED because no 0x7FE output-status snapshot carried the "
+                "engine's clock, so the floor above was applied to wall time"
+            )
+        else:
+            rate_text = (
+                f"{len(records)} frame(s) at {sim_hz:.0f} Hz simulated ({wall_hz:.0f} Hz wall), "
+                f"measured over {sim_span_ms:.0f} ms of engine time, against the 100 Hz design rate"
+            )
         return CheckResult(
             name,
             True,
-            f"{len(records)} frame(s) at {rate_hz:.0f} Hz wall (>= {rate_hz / SIM_MS_PER_WALL_S:.0f} Hz "
-            f"simulated, against the 100 Hz design rate) decoded in {duration_s:.1f} s; "
-            f"depth={last.depth_meters:.3f} m imu_status=0x{last.imu_status:02X} "
+            f"{rate_text}; depth={last.depth_meters:.3f} m imu_status=0x{last.imu_status:02X} "
             f"gyro=({last.gyro_x_rad_s:+.4f},{last.gyro_y_rad_s:+.4f},{last.gyro_z_rad_s:+.4f})",
         )
 
