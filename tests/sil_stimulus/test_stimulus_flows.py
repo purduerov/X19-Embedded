@@ -21,6 +21,7 @@ Run from the repository root::
     python -m unittest tests.sil_stimulus.test_stimulus_flows -v
 """
 
+import ast
 import contextlib
 import inspect
 import io
@@ -1487,6 +1488,157 @@ def build_real_backend(args):
     tests can ever reach is whatever is already listening on the port.
     """
     return SilSocketBackend(args.host, args.port, auto_start=False)
+
+
+class TestCanSnifferAgreesWithSilProtocol(unittest.TestCase):
+    """
+    Invariant: the third copy of the CAN id table cannot drift silently.
+
+    ``tools/can_sniffer.py`` keeps its own ``CAN_ID_*`` constants and its own
+    ``struct.Struct`` formats. That duplication is where both broken prototypes
+    came from, and it is invisible precisely because the values agree today - so
+    the drift this test exists to catch would be silent, too.
+
+    It parses the source rather than importing it: ``can_sniffer`` does
+    ``import can`` and ``sys.exit(1)`` at module scope, so importing it would make
+    this test a python-can test. ``ast`` reads the literals that matter without
+    executing the module or needing the dependency.
+    """
+
+    SNIFFER = REPO_ROOT / "tools" / "can_sniffer.py"
+    # can_sniffer names this one _STRUCT_ENV; sil_protocol names it _STRUCT_3FB.
+    # The formats differ as text ("<fffB" vs "<3fB") and are the same 13-byte
+    # layout, which is exactly the kind of difference a text comparison would
+    # either reject or paper over.
+    STRUCT_NAMES = {
+        "_STRUCT_TIME_SYNC_MASTER": "_STRUCT_TIME_SYNC_MASTER",
+        "_STRUCT_TIME_SYNC_REQ": "_STRUCT_TIME_SYNC_REQ",
+        "_STRUCT_TIME_SYNC_RESP": "_STRUCT_TIME_SYNC_RESP",
+        "_STRUCT_8H": "_STRUCT_8H",
+        "_STRUCT_H": "_STRUCT_H",
+        "_STRUCT_NAV_TS": "_STRUCT_NAV_TS",
+        "_STRUCT_NAV_LEGACY": "_STRUCT_NAV_LEGACY",
+        "_STRUCT_ENV": "_STRUCT_3FB",
+        "_STRUCT_POWER": "_STRUCT_POWER",
+    }
+
+    @staticmethod
+    def _module_constants(path):
+        """Every module-level literal assignment in ``path``, as {name: value}."""
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        constants = {}
+        for node in tree.body:
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            try:
+                constants[target.id] = ast.literal_eval(node.value)
+            except ValueError:
+                # struct.Struct("...") and friends: handled separately.
+                continue
+        return constants
+
+    @classmethod
+    def _struct_formats(cls, path):
+        """{name: format string} for every module-level ``struct.Struct(...)``."""
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        formats = {}
+        for node in tree.body:
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            call = node.value
+            if not isinstance(target, ast.Name) or not isinstance(call, ast.Call):
+                continue
+            if not isinstance(call.func, ast.Attribute) or call.func.attr != "Struct":
+                continue
+            if len(call.args) == 1 and isinstance(call.args[0], ast.Constant):
+                formats[target.id] = call.args[0].value
+        return formats
+
+    @staticmethod
+    def _layout(format_string):
+        """
+        (size, one code per field), so '<3fB' and '<fffB' compare equal.
+
+        Comparing format TEXT would report a difference where there is none, and
+        comparing only the size would miss a signedness flip (h vs H) that packs
+        identically. This is the layout, exactly.
+        """
+        codes = []
+        index = 0
+        while index < len(format_string):
+            char = format_string[index]
+            if char.isdigit():
+                end = index
+                while format_string[end].isdigit():
+                    end += 1
+                codes.extend([format_string[end]] * int(format_string[index:end]))
+                index = end + 1
+            elif char in "<>=!@":
+                index += 1
+            else:
+                codes.append(char)
+                index += 1
+        return (struct.calcsize(format_string), tuple(codes))
+
+    def test_every_can_id_agrees_with_sil_protocol(self):
+        sniffer = self._module_constants(self.SNIFFER)
+        protocol = self._module_constants(REPO_ROOT / "tests" / "sil_companion_bridge" / "sil_protocol.py")
+        declared = {
+            name: value for name, value in sniffer.items() if name.startswith("CAN_ID_")
+        }
+        self.assertTrue(declared, "the sniffer declares no CAN ids, so this asserts nothing")
+        for name, value in sorted(declared.items()):
+            with self.subTest(constant=name):
+                self.assertIn(
+                    name, protocol, f"{self.SNIFFER.name} declares {name}, which sil_protocol does not"
+                )
+                self.assertEqual(
+                    value,
+                    protocol[name],
+                    f"{self.SNIFFER.name}:{name} disagrees with sil_protocol; one of them "
+                    "is decoding the wrong frames",
+                )
+
+    def test_every_struct_layout_agrees_with_sil_protocol(self):
+        sniffer = self._struct_formats(self.SNIFFER)
+        protocol = self._struct_formats(
+            REPO_ROOT / "tests" / "sil_companion_bridge" / "sil_protocol.py"
+        )
+        self.assertTrue(sniffer, "no struct formats were parsed, so this asserts nothing")
+        for name, canonical in sorted(self.STRUCT_NAMES.items()):
+            with self.subTest(struct=name):
+                self.assertIn(name, sniffer, f"{self.SNIFFER.name} no longer declares {name}")
+                self.assertIn(
+                    canonical,
+                    protocol,
+                    f"sil_protocol no longer declares {canonical}, which {name} mirrors",
+                )
+                self.assertEqual(
+                    self._layout(sniffer[name]),
+                    self._layout(protocol[canonical]),
+                    f"{name} ({sniffer[name]}) and sil_protocol's {canonical} "
+                    f"({protocol[canonical]}) are not the same layout",
+                )
+
+    def test_a_shared_struct_is_not_silently_renamed_out_of_the_mapping(self):
+        """
+        The mapping is the part that can rot, so every sniffer struct must be in it.
+
+        A new struct in the sniffer that nobody mapped would otherwise be compared
+        against nothing - the same silent-drift hole the two mappings close.
+        """
+        sniffer = self._struct_formats(self.SNIFFER)
+        unmapped = sorted(set(sniffer) - set(self.STRUCT_NAMES))
+        self.assertEqual(
+            unmapped,
+            [],
+            f"{self.SNIFFER.name} declares struct(s) this test does not compare with "
+            f"sil_protocol: {unmapped}. Map each one or delete the copy.",
+        )
 
 
 class TestStimulusNonSilTransport(unittest.TestCase):

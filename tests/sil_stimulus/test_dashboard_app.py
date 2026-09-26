@@ -1290,8 +1290,17 @@ class TestDashboardHandlerWiring(unittest.TestCase):
         self.assertTrue(_render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0))
         self.assertFalse(_render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0))
 
-    def test_the_latch_gate_does_not_depend_on_the_displayed_state(self):
+    def test_the_latch_property_states_the_caller_requirement_it_imposes(self):
+        """
+        The docstring is the contract for the next caller, and the requirement is
+        easy to miss: any successful ``connect()`` clears the latch, so a caller
+        that reconnects without asking first disarms a tripped emergency break.
+        """
+        doc = inspect.getdoc(SilDashboardClient.estop_latched.fget) or ""
+        self.assertIn("BEFORE RECONNECTING", doc)
+        self.assertIn("clears the latch", doc)
 
+    def test_the_latch_gate_does_not_depend_on_the_displayed_state(self):
         """
         Invariant: the interlock keys off the latch itself, not off
         ``control_state``.
