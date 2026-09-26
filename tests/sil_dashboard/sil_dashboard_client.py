@@ -81,8 +81,40 @@ HEARTBEAT_TIMEOUT_S = 0.100
 CONTROL_JOIN_TIMEOUT_S = 1.0
 
 # Node 2 only accepts a thruster command after this authorized signature check
-# (nodes/node2_control_board/Core/Src/app.c).  The exact bytes are load-bearing.
+# (nodes/node2_control_board/app.c).  The exact bytes are load-bearing.
 EMERGENCY_BREAK_SIGNATURE = b"\xAA\x55\x01"
+
+# --- Solenoid interlock -------------------------------------------------------
+# Five double-acting valves, two opposing coils each (shared/include/
+# rov_parameters.h:53-54), so the mask is ten bits and coil B of valve N is bit
+# 2N+1.
+SOLENOID_VALVES = 5
+SOLENOID_MASK_BITS = 10
+SOLENOID_MASK_MAX = (1 << SOLENOID_MASK_BITS) - 1
+
+
+def conflicting_solenoid_valve(mask: int) -> Optional[int]:
+    """
+    Return the first valve whose two opposing coils are both energised, else None.
+
+    This is a firmware rule, not a UI preference, and it is enforced here because
+    ``shared/src/rov_can_protocol.c:120-126`` walks the five valves and, for any
+    valve with both coils set, zeroes the WHOLE mask and returns
+    ``ROV_ERR_INVALID_ARG``; ``nodes/node2_control_board/Core/Src/app.c:150-153``
+    then skips ``bsp_solenoid_set`` entirely, so the outputs keep whatever mask
+    was already latched. A mask like 0x007 (valve 0 extend plus valve 1 retract)
+    therefore does not actuate valve 1 - it silently drops valve 0 as well, while
+    the sender records 0x007 as the command target.
+
+    It lives beside ``send_solenoids`` because that is the code that packs 0x110,
+    and ``tools/can_stimulus.py`` imports it from here so the stimulus tool and the
+    dashboard cannot hold two copies of the same decision.
+    """
+    for valve in range(SOLENOID_VALVES):
+        pair_mask = 0x3 << (2 * valve)
+        if (mask & pair_mask) == pair_mask:
+            return valve
+    return None
 
 
 class ControlState(str, Enum):
@@ -278,6 +310,9 @@ class SilDashboardClient:
         self.actual_pwms = [1500] * 8
         self.solenoid_mask = 0
         self.actual_solenoid_mask = 0
+        # Why the last send_solenoids() refused, for the UI to show. None means the
+        # last request was accepted (or never made).
+        self.last_solenoid_refusal: Optional[str] = None
         self.sim_time_ms = 0
         self.output_status_received_monotonic: Optional[float] = None
         self.last_rx_monotonic: Dict[int, float] = {}
@@ -779,8 +814,34 @@ class SilDashboardClient:
         return self.request_emergency_break()
 
     def send_solenoids(self, mask: int) -> bool:
+        """
+        Actuate a solenoid mask, refusing one the firmware rejects wholesale.
+
+        Returns False - and writes nothing - when the mask energises both coils of
+        any valve.  ``rov_can_protocol.c:120-126`` zeroes the entire mask for such
+        a mask and ``app.c:150-153`` then skips ``bsp_solenoid_set``, so sending it
+        would leave the previously latched mask in place while the UI recorded the
+        new one as the command target: the display would show valves the board
+        never moved, and a valve that WAS open would drop with no operator action.
+
+        ``self.solenoid_mask`` is the command target the UI shows, so it is left
+        alone on a refusal.  The same rule and the same reason live in
+        ``tools/can_stimulus.py``, which imports :func:`conflicting_solenoid_valve`
+        from this module rather than keeping a second copy.
+        """
+        requested = mask & SOLENOID_MASK_MAX
+        valve = conflicting_solenoid_valve(requested)
+        if valve is not None:
+            self.last_solenoid_refusal = (
+                f"refused 0x{requested:03X}: it energises both coils of valve {valve} "
+                f"(channels {2 * valve} and {2 * valve + 1}), and rov_can_protocol.c:120-126 "
+                "zeroes the WHOLE mask for that, so the board would apply nothing and every "
+                "other valve in the mask would drop silently. Clear one coil of that pair first."
+            )
+            return False
+        self.last_solenoid_refusal = None
         with self.lock:
-            self.solenoid_mask = mask & 0x03FF
+            self.solenoid_mask = requested
             solenoid_mask = self.solenoid_mask
         if not self.connected or self.sock is None:
             return False

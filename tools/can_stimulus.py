@@ -67,7 +67,8 @@ TOOLS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TOOLS_DIR.parent
 SIL_BRIDGE_DIR = REPO_ROOT / "tests" / "sil_companion_bridge"
 SIL_STIMULUS_DIR = REPO_ROOT / "tests" / "sil_stimulus"
-for _path in (SIL_STIMULUS_DIR, SIL_BRIDGE_DIR):
+SIL_DASHBOARD_DIR = REPO_ROOT / "tests" / "sil_dashboard"
+for _path in (SIL_STIMULUS_DIR, SIL_BRIDGE_DIR, SIL_DASHBOARD_DIR):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
@@ -104,6 +105,14 @@ from sil_test_support import (  # noqa: E402  (path setup must precede the impor
     require_server_executable,  # noqa: F401  (re-exported for callers of this tool)
     server_executable,
 )
+
+# The solenoid interlock is a firmware rule with exactly one definition. It lives
+# with sil_dashboard_client.send_solenoids, the other code path that packs 0x110,
+# so this tool and the dashboard cannot disagree about which masks the board
+# applies - which is exactly the drift that let the UI build a mask (0x007) this
+# tool refuses. tools/can_stimulus.py -> tests/sil_dashboard/ is a test-tree
+# import, reached by absolute path for the same reason the two above are.
+from sil_dashboard_client import conflicting_solenoid_valve  # noqa: E402,F401
 
 __all__ = [
     "CAN_ID_EFUSE_FAULT_ALERT",
@@ -355,25 +364,6 @@ class StimulusReport:
 def format_result(result: CheckResult) -> str:
     """One line per check. Used both by the live stream and by the final report."""
     return f"[{'PASS' if result.passed else 'FAIL'}] {result.name}: {result.detail}"
-
-
-def conflicting_solenoid_valve(mask: int) -> Optional[int]:
-    """
-    Return the first valve whose two opposing coils are both energised, else None.
-
-    ``shared/src/rov_can_protocol.c:120-126`` walks the five valves and, for any
-    valve with both coils set, zeroes the whole mask and returns
-    ``ROV_ERR_INVALID_ARG``. ``nodes/node2_control_board/Core/Src/app.c:150-153``
-    then skips ``bsp_solenoid_set`` entirely, so the readback keeps whatever mask
-    was already latched. A stimulus tool therefore must not send such a mask and
-    then interpret the resulting readback: it would be reporting the previous
-    state, not this frame.
-    """
-    for valve in range(SOLENOID_VALVES):
-        pair_mask = 0x3 << (2 * valve)
-        if (mask & pair_mask) == pair_mask:
-            return valve
-    return None
 
 
 def energised_coils(mask: int) -> List[str]:
