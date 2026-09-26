@@ -13,18 +13,27 @@ This file is a translation layer and nothing else: it renames flags, refuses the
 ones it cannot honour, and returns the canonical tool's exit status. No packet
 format, no backend, no check, no second argparse - the moment one appeared here
 there would be two places to keep in agreement about the vehicle. Nor is it a
-verdict: it prints no [PASS] and no [FAIL] of its own, and the status is
-``can_stimulus``'s unchanged (0 only when every selected check passed, 1 for a
-failed check or an unreachable engine, 2 for a usage error). The old prototype
-returned 0 no matter what, and swallowing a nonzero here would reproduce that
-defect one layer up.
+verdict: it prints no check verdict of its own on stdout - no [PASS], no [FAIL],
+no Summary - and the status is ``can_stimulus``'s unchanged, coerced by
+``_status`` so that only an explicit integer can become 0 (0 only when every
+selected check passed, 1 for a failed check or an unreachable engine, 2 for a
+usage error). The old prototype returned 0 no matter what, and swallowing a
+nonzero here would reproduce that defect one layer up. The one thing this file
+does print, on stderr, is a refusal to translate a command line at all, which is
+a usage error and not a statement about the vehicle.
 
-What each legacy flag does now is written once, in ``LEGACY_NOTES``; ``--help`` is
-generated from it, so the help an operator reads cannot drift from the table this
-file translates.
+Each flag's description lives once, in ``LEGACY_NOTES``, and ``--help`` is generated
+from it, so the help an operator reads cannot drift from the table this file
+translates. The summary below is prose, not a second source: it is pinned by
+test so it cannot silently drop a flag that actuates something.
 
-Behaviour changes an operator must know about:
+Behaviour changes an operator must know about. Every flag named in this section
+actuates part of the vehicle except where it says otherwise:
 
+* ``--test-thruster`` and ``--test-all`` now require the commanded pulse to HOLD
+  past the 100 ms watchdog with the other channels at 1500 us, then release to
+  neutral, rather than drive for a fixed time and print whatever it liked. Both
+  ACTUATE thrusters.
 * ``--test-emergency`` is no longer a monitor. The prototype spun thrusters at
   1650 us and then transmitted ``b"\\x00" * 8`` on CAN 0x001 - an UNAUTHORIZED
   payload, which ``node2_control_board/Core/Src/app.c:112`` ignores because it does
@@ -37,12 +46,14 @@ Behaviour changes an operator must know about:
   latches the brake for the life of the engine.
 * ``--test-arm`` legitimately FAILS against a warm engine: the 3000 ms arming
   window closes on the engine's virtual clock whether or not anyone watches, so the
-  gate is observable only on a fresh engine.
-* ``--test-solenoid`` takes a DECIMAL mask. The prototype parsed with ``int(x, 0)``,
-  so ``0x0001`` worked; the canonical parser uses ``type=int`` and rejects a hex
-  literal with exit 2. The wrapper does not re-parse values to hide this - a second
-  parser is the divergence this work exists to remove, and a loud exit 2 cannot be
-  mistaken for a pass.
+  gate is observable only on a fresh engine. It drives a 1700 us command, so it
+  actuates a thruster.
+* ``--test-solenoid`` energises a valve and ACTUATES it. It takes a DECIMAL mask:
+  the prototype parsed with ``int(x, 0)``, so ``0x0001`` worked; the canonical
+  parser uses ``type=int`` and rejects a hex literal with exit 2. The wrapper does
+  not re-parse values to hide this - a second parser is the divergence this work
+  exists to remove, and a loud exit 2 cannot be mistaken for a pass.
+* ``--test-depth`` actuates nothing; it only listens.
 * ``--bitrate``, ``--data-bitrate`` and ``--channel`` are refused, not dropped: the
   canonical tool never configures bus bitrates, and its single ``--interface`` cannot
   carry both an interface and a channel. A silently dropped flag leaves the operator
@@ -164,6 +175,23 @@ class UnsupportedLegacyFlag(ValueError):
     """A legacy flag the canonical tool cannot honour. Refused, never dropped."""
 
 
+def _status(value: object) -> int:
+    """
+    Coerce a status this wrapper did not author into an exit status.
+
+    Only an explicit integer is trusted, and ``bool`` is excluded even though it is
+    an ``int`` subclass, because ``False`` would otherwise become exit 0. Everything
+    else becomes 1: a failure, never a pass.
+
+    The case that matters is ``None``. The prototype this file replaces declared
+    ``def main():`` with no ``return`` statement anywhere, so it returned None on
+    every path - and ``sys.exit(None)`` exits 0. A canonical tool that ever
+    regressed to that shape would have every failed check reported as a pass, and
+    this function is the last thing standing between that and a green build.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) else 1
+
+
 def translate_legacy_args(argv: Sequence[str]) -> List[str]:
     """
     Rename the legacy flags in ``argv`` and return the canonical command line.
@@ -181,8 +209,13 @@ def translate_legacy_args(argv: Sequence[str]) -> List[str]:
     for arg in argv:
         flag, separator, inline = str(arg).partition("=")
         if flag in UNSUPPORTED_LEGACY_FLAGS:
+            # No [FAIL] tag and no Summary: a verdict is the canonical tool's to
+            # print, and this file originates none. This is a refusal to translate a
+            # command line at all, which is a usage error, not a statement about the
+            # vehicle - and main() sends it to stderr for the same reason it sends
+            # the migration notice there.
             raise UnsupportedLegacyFlag(
-                f"[FAIL] {flag} is not supported: {UNSUPPORTED_LEGACY_FLAGS[flag]}."
+                f"{flag} is not supported: {UNSUPPORTED_LEGACY_FLAGS[flag]}."
             )
         canonical = LEGACY_FLAGS.get(flag)
         if canonical is None:
@@ -202,8 +235,12 @@ def _warn_about_legacy_flags(argv: Sequence[str]) -> None:
     """
     for flag in dict.fromkeys(str(a).partition("=")[0] for a in argv):
         if flag in LEGACY_FLAGS:
+            # No pulse width here. The notice is printed for every actuating flag,
+            # and 1800 us is true of --test-emergency alone: --test-thruster drives
+            # to whatever the operator asked for. Over-warning is harmless, a specific
+            # wrong number is not, so it points at --help for the real figure.
             actuation = (
-                ", and may ACTUATE thrusters to 1800 us or energise a valve"
+                ", and may ACTUATE thrusters or energise a valve"
                 if flag in ACTUATING_LEGACY_FLAGS
                 else ", and actuates nothing"
             )
@@ -215,15 +252,21 @@ def _warn_about_legacy_flags(argv: Sequence[str]) -> None:
 
 
 def _build_legacy_epilog() -> str:
-    """Render the legacy table for --help out of LEGACY_FLAGS and LEGACY_NOTES."""
+    """
+    Render the legacy table for --help out of LEGACY_FLAGS and LEGACY_NOTES.
+
+    Iterating LEGACY_FLAGS rather than a separate list is the point: a hand-kept
+    list can fall behind the table, and an eighth mapping would then ship with a note
+    and no help entry.
+    """
     lines = [
         "",
         "legacy Node 2 flags accepted here, and what each one does now. Each is",
         "translated to the flag beside it and verified by tools/can_stimulus.py:",
         "",
     ]
-    for legacy in LEGACY_ACTION_FLAGS + ("--serial-port",):
-        lines.append(f"  {legacy} -> {LEGACY_FLAGS[legacy]}")
+    for legacy, canonical in LEGACY_FLAGS.items():
+        lines.append(f"  {legacy} -> {canonical}")
         lines.append(textwrap.fill(LEGACY_NOTES[legacy], width=_EPILOG_WIDTH,
                                    initial_indent="      ", subsequent_indent="      "))
         lines.append("")
@@ -235,7 +278,8 @@ def _build_legacy_epilog() -> str:
     lines.append(textwrap.fill(
         "Exit status is the canonical tool's, unchanged: 0 only when every selected check "
         "passed, 1 for a failed check or an unreachable engine, 2 for a usage error. This "
-        "wrapper prints no verdict of its own.", width=_EPILOG_WIDTH))
+        "wrapper prints no check verdict of its own; the only diagnostic it can add is a "
+        "refusal to translate a command line, on stderr.", width=_EPILOG_WIDTH))
     return "\n".join(lines)
 
 
@@ -246,13 +290,20 @@ def _parser_with_legacy_epilog(original: Callable[[], argparse.ArgumentParser]) 
     The parser comes from ``original``, never from the module global: that global is
     about to BE this function, so looking it up again would recurse until the stack ran
     out. Re-declaring the options here instead would be a second parser, so the real one
-    is reused and only its epilog is added. RawDescriptionHelpFormatter is required
-    because argparse's default collapses an epilog's line breaks into one wrapped
-    paragraph, which would destroy the table.
+    is reused and only its prog and epilog are changed. RawDescriptionHelpFormatter is
+    required because argparse's default collapses an epilog's line breaks into one
+    wrapped paragraph, which would destroy the table.
+
+    ``prog`` is set because argparse otherwise defaults to ``basename(sys.argv[0])``,
+    which for a direct run is this file but for ``from tools import node2_stimulus`` is
+    ``-c``. Pinning it also means the usage line and every argparse error name the
+    program the operator actually ran instead of ``can_stimulus.py``, and the canonical
+    tool still reports itself that way when it is run on its own.
     """
 
     def build() -> argparse.ArgumentParser:
         parser = original()
+        parser.prog = "node2_stimulus.py"
         parser.formatter_class = argparse.RawDescriptionHelpFormatter
         parser.epilog = _build_legacy_epilog()
         return parser
@@ -266,23 +317,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     The only status produced here is 2 for a refused legacy flag. Everything else is
     ``can_stimulus.main``'s, including the 2 argparse raises as a SystemExit for a bad
-    command line and the 0 it raises for --help.
+    command line and the 0 it raises for --help - and every status that arrives from
+    the canonical tool goes through :func:`_status` first, so a None or a non-integer
+    can never be laundered into a pass.
     """
     raw = list(sys.argv[1:] if argv is None else argv)
     try:
         translated = translate_legacy_args(raw)
     except UnsupportedLegacyFlag as exc:
-        print(str(exc))
+        print(str(exc), file=sys.stderr)
         return 2
     _warn_about_legacy_flags(raw)
 
     original_build_parser = can_stimulus.build_parser
     can_stimulus.build_parser = _parser_with_legacy_epilog(original_build_parser)
     try:
-        return can_stimulus.main(translated)
+        return _status(can_stimulus.main(translated))
     except SystemExit as exc:
-        # main() may only return an int, and a non-integer status cannot be a pass.
-        return 0 if exc.code is None else (exc.code if isinstance(exc.code, int) else 1)
+        # main() may only return an int, so argparse's exit becomes one. A bare
+        # exit() carries no status and Python's own convention for that is 0; that is
+        # the one place a missing value legitimately means success, and it is
+        # deliberately NOT the rule for a return value.
+        return 0 if exc.code is None else _status(exc.code)
     finally:
         can_stimulus.build_parser = original_build_parser
 
