@@ -1,0 +1,640 @@
+"""
+Tests for the Node 2 stimulus compatibility wrapper (``tools/node2_stimulus.py``).
+
+The wrapper exists because ``tools/node2_stimulus.py`` was a divergent prototype
+whose ``--auto`` run died on ``AttributeError: 'Namespace' object has no
+attribute 'port'`` while a sibling script claimed success.  The defect class this
+file pins is therefore not "does a check pass" but "can the wrapper lie":
+
+* it must translate the legacy flags and nothing else - no packet format, no
+  backend, no check, no second argparse;
+* it must hand the canonical tool its own exit code, unchanged.  A wrapper that
+  maps a failing run to 0 would recreate the original defect one layer up, and
+  that is the single most important test in this file;
+* it must not print a verdict of its own.  Every ``[PASS]``/``[FAIL]`` line an
+  operator sees has to come from ``tools/can_stimulus.py``, which is the thing
+  that earned it;
+* a legacy flag it cannot honour must be REFUSED, never silently dropped - a
+  dropped flag leaves the operator believing a check ran;
+* the translation table must still match the real parser.  ``test_table_matches_
+  the_canonical_parser`` reads ``build_parser()`` and fails if a canonical flag is
+  ever renamed out from under the table.
+
+No test here starts an engine or binds the default port 8765.  The subprocess
+cases only exercise ``--help`` and the usage-rejection paths, both of which return
+before a transport is built.
+
+Run from the repository root::
+
+    python -m unittest tests.sil_stimulus.test_stimulus_cli -v
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from typing import List, Optional
+from unittest import mock
+
+# tests/sil_stimulus/test_stimulus_cli.py -> tests/sil_stimulus -> tests -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WRAPPER_PATH = REPO_ROOT / "tools" / "node2_stimulus.py"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools import can_stimulus, node2_stimulus  # noqa: E402  (path setup must precede it)
+from tools.node2_stimulus import (  # noqa: E402
+    LEGACY_ACTION_FLAGS,
+    LEGACY_FLAGS,
+    LEGACY_NOTES,
+    UNSUPPORTED_LEGACY_FLAGS,
+    UnsupportedLegacyFlag,
+    main,
+    translate_legacy_args,
+)
+
+SUBPROCESS_TIMEOUT_S = 90
+
+
+# --------------------------------------------------------------------------
+# Fakes
+# --------------------------------------------------------------------------
+class FakeCanonicalMain:
+    """
+    Stand-in for ``can_stimulus.main``.
+
+    Records every argv it was handed so a test can assert the wrapper *delegated*
+    rather than reimplemented, and returns (or raises) whatever the test needs in
+    order to pin the exit code the wrapper must propagate.
+    """
+
+    def __init__(
+        self,
+        code: int = 0,
+        raises: Optional[BaseException] = None,
+        prints: str = "",
+    ) -> None:
+        self.code = code
+        self.raises = raises
+        self.prints = prints
+        self.calls: List[Optional[List[str]]] = []
+
+    def __call__(self, argv=None, backend_factory=None) -> int:
+        self.calls.append(None if argv is None else list(argv))
+        if self.raises is not None:
+            raise self.raises
+        if self.prints:
+            print(self.prints)
+        return self.code
+
+
+@contextlib.contextmanager
+def canonical_main_is(fake: FakeCanonicalMain):
+    """Point the wrapper at a fake canonical tool for the duration of the block."""
+    with mock.patch.object(node2_stimulus.can_stimulus, "main", fake):
+        yield fake
+
+
+@contextlib.contextmanager
+def captured_output() -> "io.StringIO":
+    """Capture stdout and stderr as two StringIOs yielded as a pair."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        yield out, err
+
+
+def canonical_action(option: str):
+    """The argparse action the canonical parser really declares for ``option``."""
+    for action in can_stimulus.build_parser()._actions:
+        if option in action.option_strings:
+            return action
+    raise AssertionError(f"the canonical parser has no {option}")
+
+
+def run_wrapper(*args: str, cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
+    """Run the wrapper the way an operator does, with sys.executable."""
+    try:
+        return subprocess.run(
+            [sys.executable, str(WRAPPER_PATH), *args],
+            cwd=str(cwd or REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_S,
+        )
+    except OSError as exc:  # pragma: no cover - interpreter cannot be launched
+        raise unittest.SkipTest(f"could not launch {sys.executable} as a subprocess: {exc}")
+
+
+# --------------------------------------------------------------------------
+# The translation table
+# --------------------------------------------------------------------------
+class TestLegacyFlagTranslation(unittest.TestCase):
+    """Every legacy flag must reach the canonical tool under its canonical name."""
+
+    def test_every_legacy_flag_translates(self):
+        for legacy, expected in (
+            (["--test-thruster", "0", "1600"], ["--node2-thruster", "0", "1600"]),
+            (["--test-all", "1650"], ["--node2-all", "1650"]),
+            (["--test-arm"], ["--node2-arm"]),
+            (["--test-depth", "2.5"], ["--node2-depth", "2.5"]),
+            (["--test-solenoid", "1"], ["--node2-solenoid", "1"]),
+            (["--test-emergency"], ["--emergency-break"]),
+        ):
+            with self.subTest(legacy=legacy):
+                self.assertEqual(translate_legacy_args(legacy), expected)
+
+    def test_multi_argument_flag_keeps_both_values_in_order(self):
+        # --node2-thruster is nargs=2: the channel and the pulse must not be
+        # reordered, dropped, or merged.
+        self.assertEqual(
+            translate_legacy_args(["--test-thruster", "7", "2000"]),
+            ["--node2-thruster", "7", "2000"],
+        )
+        self.assertEqual(
+            translate_legacy_args(["--test-thruster", "0", "1000"]),
+            ["--node2-thruster", "0", "1000"],
+        )
+
+    def test_values_are_preserved_verbatim(self):
+        """
+        Zero, negative, and fractional values survive untouched.
+
+        The wrapper must not validate values: deciding that 0 is nonsense, or
+        that -1 is out of range, is the canonical tool's job and its verdict is
+        the one that counts.  Filtering here would also mean a second parser.
+        """
+        for legacy in (
+            ["--test-all", "0"],
+            ["--test-depth", "0"],
+            ["--test-solenoid", "0"],
+            ["--test-solenoid", "-1"],
+            ["--test-thruster", "-1", "1500"],
+            ["--test-depth", "0.0"],
+            ["--test-thruster", "0", "1500"],
+        ):
+            with self.subTest(legacy=legacy):
+                self.assertEqual(
+                    translate_legacy_args(legacy), [LEGACY_FLAGS[legacy[0]], *legacy[1:]]
+                )
+
+    def test_inline_value_spellings_are_translated_too(self):
+        # argparse accepts --flag=value, so the wrapper must translate the flag
+        # part of that spelling as well or the operator gets a confusing
+        # "unrecognized arguments" for a flag that does exist.
+        self.assertEqual(
+            translate_legacy_args(["--test-all=1650"]), ["--node2-all=1650"]
+        )
+        self.assertEqual(
+            translate_legacy_args(["--test-emergency=1"]), ["--emergency-break=1"]
+        )
+
+    def test_canonical_and_unrelated_flags_pass_through_untouched(self):
+        for argv in (
+            ["--node2-thruster", "0", "1600"],
+            ["--node1-env"],
+            ["--node3-power"],
+            ["--node2-solenoid", "1"],
+            ["--emergency-break"],
+            ["--raw-send", "0x100:AABB"],
+            ["--sniff", "0"],
+            ["--help"],
+            ["-h"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(translate_legacy_args(argv), list(argv))
+
+    def test_transport_flags_pass_through_untouched(self):
+        for argv in (
+            ["--mode", "sil"],
+            ["--host", "10.0.0.5"],
+            ["--port", "9000"],
+            ["--port=9000"],
+            ["--interface", "socketcan"],
+            ["--baudrate", "9600"],
+            ["--uart-port", "COM3"],
+            ["--auto"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(translate_legacy_args(argv), list(argv))
+
+    def test_legacy_and_canonical_flags_mix_without_reordering(self):
+        self.assertEqual(
+            translate_legacy_args(
+                ["--mode", "sil", "--test-thruster", "3", "1400", "--sniff", "1"]
+            ),
+            ["--mode", "sil", "--node2-thruster", "3", "1400", "--sniff", "1"],
+        )
+
+    def test_serial_port_is_renamed_to_uart_port(self):
+        self.assertEqual(
+            translate_legacy_args(["--serial-port", "COM3"]), ["--uart-port", "COM3"]
+        )
+
+    def test_translation_is_pure(self):
+        # The caller's list must not be mutated and the function must be
+        # repeatable: main() translates once and hands the result to argparse.
+        argv = ["--test-emergency", "--port", "8765"]
+        first = translate_legacy_args(argv)
+        self.assertEqual(argv, ["--test-emergency", "--port", "8765"])
+        self.assertEqual(first, ["--emergency-break", "--port", "8765"])
+        self.assertEqual(translate_legacy_args(argv), first)
+
+    def test_empty_argv_translates_to_empty_argv(self):
+        self.assertEqual(translate_legacy_args([]), [])
+
+
+class TestUnsupportedLegacyFlags(unittest.TestCase):
+    """A flag the wrapper cannot honour must be refused loudly, never dropped."""
+
+    def test_unsupported_flags_raise(self):
+        for argv in (["--bitrate", "1000000"], ["--data-bitrate", "5000000"], ["--channel", "can0"]):
+            with self.subTest(argv=argv):
+                with self.assertRaises(UnsupportedLegacyFlag):
+                    translate_legacy_args(argv)
+
+    def test_inline_unsupported_flags_raise(self):
+        with self.assertRaises(UnsupportedLegacyFlag):
+            translate_legacy_args(["--channel=can0"])
+
+    def test_refusal_names_the_flag_and_explains_the_replacement(self):
+        with self.assertRaises(UnsupportedLegacyFlag) as caught:
+            translate_legacy_args(["--channel", "can0"])
+        message = str(caught.exception)
+        self.assertIn("--channel", message)
+        self.assertIn("--interface", message)
+
+    def test_unsupported_flag_message_says_why_there_is_no_equivalent(self):
+        for flag in ("--bitrate", "--data-bitrate"):
+            with self.subTest(flag=flag):
+                with self.assertRaises(UnsupportedLegacyFlag) as caught:
+                    translate_legacy_args([flag, "500000"])
+                self.assertIn(flag, str(caught.exception))
+
+    def test_unsupported_flag_exits_two_without_running_the_canonical_tool(self):
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output() as (out, _err):
+            self.assertEqual(main(["--channel", "can0", "--test-arm"]), 2)
+        self.assertEqual(fake.calls, [], "the canonical tool must not run a refused command line")
+        self.assertIn("--channel", out.getvalue())
+        self.assertIn("--interface", out.getvalue())
+
+    def test_unsupported_flag_is_refused_even_alongside_valid_legacy_flags(self):
+        # The operator asked for two things and one of them cannot be honoured.
+        # Refusing the whole command line is the only honest outcome: running
+        # the half we can would leave the dropped half looking like it ran.
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output():
+            self.assertEqual(main(["--test-arm", "--bitrate", "1000000"]), 2)
+        self.assertEqual(fake.calls, [])
+
+
+# --------------------------------------------------------------------------
+# The table against the real parser
+# --------------------------------------------------------------------------
+class TestTableMatchesCanonicalParser(unittest.TestCase):
+    """
+    The table is only correct while the canonical parser still has these flags.
+
+    A renamed or re-typed canonical flag would otherwise leave the wrapper
+    forwarding a name argparse no longer knows, and the operator would be the one
+    to find out.
+    """
+
+    def test_every_mapped_flag_is_a_real_canonical_option(self):
+        for legacy, canonical in sorted(LEGACY_FLAGS.items()):
+            with self.subTest(legacy=legacy):
+                self.assertIn(
+                    canonical,
+                    [
+                        option
+                        for action in can_stimulus.build_parser()._actions
+                        for option in action.option_strings
+                    ],
+                    f"{legacy} maps to {canonical}, which build_parser() does not declare",
+                )
+
+    def test_mapped_flags_consume_the_same_number_of_values_as_the_prototype_did(self):
+        # Arity taken from the deleted prototype's parser (tools/node2_stimulus.py
+        # in the pre-unification tree), cross-checked against the canonical one.
+        legacy_arity = {
+            "--test-thruster": 2,
+            "--test-all": 1,
+            "--test-arm": 0,
+            "--test-depth": 1,
+            "--test-solenoid": 1,
+            "--test-emergency": 0,
+            "--serial-port": 1,
+        }
+        self.assertEqual(set(legacy_arity), set(LEGACY_FLAGS))
+        for legacy, arity in sorted(legacy_arity.items()):
+            with self.subTest(legacy=legacy):
+                action = canonical_action(LEGACY_FLAGS[legacy])
+                self.assertEqual(
+                    {0: 0, 1: None, 2: 2}[arity],
+                    action.nargs,
+                    f"{legacy} took {arity} value(s) but {action.option_strings} takes {action.nargs}",
+                )
+
+    def test_numeric_legacy_flags_still_reach_a_numeric_canonical_option(self):
+        for legacy, expected_type in (
+            ("--test-thruster", int),
+            ("--test-all", int),
+            ("--test-depth", float),
+            ("--test-solenoid", int),
+        ):
+            with self.subTest(legacy=legacy):
+                self.assertIs(canonical_action(LEGACY_FLAGS[legacy]).type, expected_type)
+
+    def test_boolean_legacy_flags_map_to_boolean_canonical_options(self):
+        for legacy in ("--test-arm", "--test-emergency"):
+            with self.subTest(legacy=legacy):
+                self.assertEqual(canonical_action(LEGACY_FLAGS[legacy]).nargs, 0)
+
+    def test_no_unsupported_flag_is_actually_supported(self):
+        for flag in UNSUPPORTED_LEGACY_FLAGS:
+            with self.subTest(flag=flag):
+                self.assertNotIn(
+                    flag,
+                    [
+                        option
+                        for action in can_stimulus.build_parser()._actions
+                        for option in action.option_strings
+                    ],
+                    f"{flag} is refused but the canonical parser accepts it; drop the refusal",
+                )
+
+    def test_notes_cover_every_mapped_flag_exactly_once(self):
+        # LEGACY_NOTES is what --help is generated from, so a flag that translates
+        # without a note would be one an operator gets no explanation for.
+        self.assertEqual(sorted(LEGACY_NOTES), sorted(LEGACY_FLAGS))
+
+    def test_every_legacy_action_flag_is_in_the_table(self):
+        # The prototype's action flags, from its parser. --auto is deliberately
+        # absent: it is spelled the same in both tools, so translating it would
+        # be noise, and a wrapper that renamed it would break scripts.
+        self.assertEqual(
+            sorted(LEGACY_ACTION_FLAGS),
+            [
+                "--test-all",
+                "--test-arm",
+                "--test-depth",
+                "--test-emergency",
+                "--test-solenoid",
+                "--test-thruster",
+            ],
+        )
+        self.assertNotIn("--auto", LEGACY_FLAGS)
+
+    def test_emergency_flag_maps_to_the_break_check_not_a_monitor(self):
+        # The prototype's test_emergency_cutoff was effectively a monitor: it
+        # sent an UNAUTHORIZED payload that node 2 ignores, then printed [PASS]
+        # from a PWM value that was already neutral. The canonical check actually
+        # actuates and actually trips, so the mapping must reach it.
+        action = canonical_action(LEGACY_FLAGS["--test-emergency"])
+        self.assertIn("--emergency-break", action.option_strings)
+
+
+# --------------------------------------------------------------------------
+# Exit-code propagation: the load-bearing tests
+# --------------------------------------------------------------------------
+class TestExitCodePropagation(unittest.TestCase):
+    """
+    The wrapper must return the canonical tool's exit code, exactly.
+
+    This is the whole reason the wrapper exists.  The prototype exited 0 while
+    its own checks were raising; a wrapper that swallowed a nonzero would
+    reproduce that defect with better manners.
+    """
+
+    def test_failing_canonical_report_exits_nonzero(self):
+        fake = FakeCanonicalMain(code=1)
+        with canonical_main_is(fake), captured_output() as (out, _err):
+            self.assertEqual(main(["--test-thruster", "0", "1600"]), 1)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(out.getvalue(), "", "the wrapper must print no verdict of its own")
+
+    def test_passing_canonical_report_exits_zero(self):
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output():
+            self.assertEqual(main(["--test-emergency"]), 0)
+        self.assertEqual(fake.calls, [["--emergency-break"]])
+
+    def test_argparse_rejection_exit_code_is_preserved(self):
+        # argparse raises SystemExit(2) for a bad command line. The wrapper must
+        # surface that as a 2, never as a 0 and never as a traceback.
+        fake = FakeCanonicalMain(raises=SystemExit(2))
+        with canonical_main_is(fake), captured_output():
+            self.assertEqual(main(["--test-thruster", "0"]), 2)
+
+    def test_help_exit_code_is_preserved(self):
+        fake = FakeCanonicalMain(raises=SystemExit(0))
+        with canonical_main_is(fake), captured_output():
+            self.assertEqual(main(["--help"]), 0)
+
+    def test_a_bare_exit_is_reported_as_zero(self):
+        fake = FakeCanonicalMain(raises=SystemExit(None))
+        with canonical_main_is(fake), captured_output():
+            self.assertEqual(main(["--auto"]), 0)
+
+    def test_wrapper_hands_the_canonical_tool_the_translated_argv(self):
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output():
+            main(["--mode", "sil", "--test-arm", "--test-emergency", "--port", "9001"])
+        self.assertEqual(
+            fake.calls,
+            [["--mode", "sil", "--node2-arm", "--emergency-break", "--port", "9001"]],
+        )
+
+    def test_wrapper_does_not_build_a_transport_or_a_tester_itself(self):
+        # Everything that touches the bus belongs to the canonical tool. Both are
+        # patched on the module object the WRAPPER holds (not the one this test
+        # imported), because a wrapper that grew its own backend would reach these
+        # and the canonical tool - whose main() is faked here - would not.
+        held = node2_stimulus.can_stimulus
+        fake = FakeCanonicalMain(code=0)
+        with mock.patch.object(held, "build_backend", side_effect=AssertionError("built")), \
+                mock.patch.object(held, "VehicleStimulusTester", side_effect=AssertionError("built")), \
+                canonical_main_is(fake), captured_output():
+            self.assertEqual(main(["--test-emergency"]), 0)
+            self.assertEqual(main(["--channel", "can0"]), 2)
+        self.assertEqual(fake.calls, [["--emergency-break"]])
+
+    def test_main_uses_sys_argv_when_no_argv_is_given(self):
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output(), \
+                mock.patch.object(sys, "argv", ["node2_stimulus.py", "--test-depth", "3"]):
+            self.assertEqual(main(), 0)
+        self.assertEqual(fake.calls, [["--node2-depth", "3"]])
+
+
+class TestOperatorFacingOutput(unittest.TestCase):
+    """What the operator is told, and what they are not told."""
+
+    def test_legacy_invocation_names_the_canonical_replacement_on_stderr(self):
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output() as (out, err):
+            main(["--test-emergency"])
+        self.assertIn("--emergency-break", err.getvalue())
+        self.assertIn("--test-emergency", err.getvalue())
+
+    def test_canonical_invocation_prints_no_migration_notice(self):
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output() as (_out, err):
+            main(["--emergency-break"])
+        self.assertEqual(err.getvalue(), "")
+
+    def test_the_migration_notice_warns_that_thrusters_actuate(self):
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output() as (_out, err):
+            main(["--test-emergency"])
+        notice = err.getvalue().lower()
+        self.assertIn("thrust", notice)
+
+    def test_receive_only_legacy_flag_is_not_warned_about_actuation(self):
+        # --test-depth only listens. Claiming otherwise would be its own kind of
+        # lie, and an operator who distrusts the warning stops reading it.
+        fake = FakeCanonicalMain(code=0)
+        with canonical_main_is(fake), captured_output() as (_out, err):
+            main(["--test-depth", "2"])
+        notice = err.getvalue()
+        self.assertIn("--node2-depth", notice)
+        self.assertNotIn("ACTUAT", notice)
+
+    def test_wrapper_never_prints_a_pass_line(self):
+        for code in (0, 1, 2):
+            with self.subTest(code=code):
+                fake = FakeCanonicalMain(code=code)
+                with canonical_main_is(fake), captured_output() as (out, _err):
+                    main(["--test-all", "1650"])
+                self.assertNotIn("PASS", out.getvalue())
+                self.assertNotIn("pass", out.getvalue().lower())
+
+
+# --------------------------------------------------------------------------
+# Both entry paths, as a real process
+# --------------------------------------------------------------------------
+class TestSubprocessEntryPoints(unittest.TestCase):
+    """
+    The wrapper must behave the same as a script and as an import.
+
+    Every case here is chosen to return before a transport is built, so nothing
+    binds port 8765 and no engine is started.  Paths come from ``__file__`` and
+    the interpreter is ``sys.executable``; a host that cannot launch one skips.
+    """
+
+    def test_help_exits_zero(self):
+        completed = run_wrapper("--help")
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_help_lists_every_legacy_flag_and_its_canonical_name(self):
+        text = run_wrapper("--help").stdout
+        for legacy, canonical in sorted(LEGACY_FLAGS.items()):
+            with self.subTest(legacy=legacy):
+                self.assertIn(legacy, text)
+                self.assertIn(canonical, text)
+
+    def test_help_warns_that_the_legacy_flags_actuate_thrusters(self):
+        text = run_wrapper("--help").stdout
+        self.assertIn("--test-emergency", text)
+        # The prototype's emergency check was a monitor; the canonical one drives
+        # all eight thrusters. An operator must be told that here, not discover it.
+        self.assertIn("1800", text)
+        lowered = text.lower()
+        self.assertIn("thrust", lowered)
+        self.assertIn("actuat", lowered)
+
+    def test_help_documents_the_fresh_engine_requirement_of_the_arming_check(self):
+        text = run_wrapper("--help").stdout
+        self.assertIn("--test-arm", text)
+        self.assertIn("3000", text)
+
+    def test_help_documents_the_refused_legacy_flags(self):
+        text = run_wrapper("--help").stdout
+        for flag in sorted(UNSUPPORTED_LEGACY_FLAGS):
+            with self.subTest(flag=flag):
+                self.assertIn(flag, text)
+
+    def test_help_still_documents_the_canonical_flags(self):
+        text = run_wrapper("--help").stdout
+        for canonical in sorted(LEGACY_FLAGS.values()):
+            with self.subTest(canonical=canonical):
+                self.assertIn(canonical, text)
+
+    def test_no_action_exits_two_without_starting_an_engine(self):
+        completed = run_wrapper()
+        self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
+        self.assertIn("no action was selected", completed.stdout)
+        # The canonical header only prints once a backend has been built.
+        self.assertNotIn("X19 CAN stimulus", completed.stdout)
+
+    def test_unknown_flag_exits_two(self):
+        completed = run_wrapper("--test-nonexistent")
+        self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
+        self.assertNotIn("X19 CAN stimulus", completed.stdout)
+
+    def test_legacy_flag_missing_its_value_exits_two(self):
+        completed = run_wrapper("--test-thruster", "0")
+        self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
+
+    def test_unsupported_legacy_flag_exits_two_in_a_subprocess(self):
+        completed = run_wrapper("--bitrate", "1000000")
+        self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
+        self.assertIn("--bitrate", completed.stdout)
+
+    def test_hex_solenoid_mask_is_rejected_loudly(self):
+        # The prototype parsed masks with int(x, 0), so 0x0001 worked there. The
+        # canonical parser uses type=int, so a hex literal is now a usage error -
+        # loud and nonzero, never a silently different mask.
+        completed = run_wrapper("--test-solenoid", "0x0001")
+        self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
+        self.assertIn("0x0001", completed.stdout + completed.stderr)
+
+    def test_runs_from_an_unrelated_working_directory(self):
+        # The wrapper reaches the canonical tool by absolute path from __file__,
+        # so it must not depend on being run from the repository root.
+        with tempfile.TemporaryDirectory() as elsewhere:
+            completed = run_wrapper("--help", cwd=Path(elsewhere))
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("--test-emergency", completed.stdout)
+
+    def test_importable_as_a_package_module(self):
+        script = (
+            "from tools import node2_stimulus as w;"
+            "print(w.translate_legacy_args(['--test-emergency', '--port', '9']))"
+        )
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=str(REPO_ROOT),
+                capture_output=True,
+                text=True,
+                timeout=SUBPROCESS_TIMEOUT_S,
+            )
+        except OSError as exc:  # pragma: no cover - interpreter cannot be launched
+            raise unittest.SkipTest(f"could not launch {sys.executable} as a subprocess: {exc}")
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "['--emergency-break', '--port', '9']")
+
+    def test_help_output_is_identical_from_both_entry_paths(self):
+        as_script = run_wrapper("--help").stdout
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", "from tools import node2_stimulus as w; raise SystemExit(w.main(['--help']))"],
+                cwd=str(REPO_ROOT),
+                capture_output=True,
+                text=True,
+                timeout=SUBPROCESS_TIMEOUT_S,
+            )
+        except OSError as exc:  # pragma: no cover - interpreter cannot be launched
+            raise unittest.SkipTest(f"could not launch {sys.executable} as a subprocess: {exc}")
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertEqual(completed.stdout, as_script)
+
+
+if __name__ == "__main__":
+    unittest.main()
