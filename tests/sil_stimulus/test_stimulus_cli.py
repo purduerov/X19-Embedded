@@ -93,9 +93,12 @@ class FakeCanonicalMain:
         self.raises = raises
         self.prints = prints
         self.calls: List[Optional[List[str]]] = []
+        self.parser_factories: List[object] = []
 
-    def __call__(self, argv=None, backend_factory=None) -> int:
+    def __call__(self, argv=None, backend_factory=None, parser_factory=None) -> int:
         self.calls.append(None if argv is None else list(argv))
+        if parser_factory is not None:
+            self.parser_factories.append(parser_factory)
         if self.raises is not None:
             raise self.raises
         if self.prints:
@@ -566,7 +569,40 @@ class TestExitCodePropagation(unittest.TestCase):
                 with canonical_main_is(fake), captured_output():
                     self.assertEqual(1, main(["--test-emergency"]))
 
-    def test_wrapper_hands_the_canonical_tool_the_translated_argv(self):
+    def test_the_wrapper_configures_the_parser_through_the_public_seam(self):
+        """
+        Invariant: the wrapper never mutates the canonical tool's module state.
+
+        It used to swap ``can_stimulus.build_parser`` for the duration of the call
+        and restore it in a ``finally``. Nothing broke - a CLI is single-threaded
+        and the restore always ran - but it was the one place this translation
+        layer reached into the canonical tool, so a concurrent canonical
+        invocation in the same process would have inherited the wrong ``prog`` and
+        epilog. It now hands ``main`` a ``parser_factory``, the same injection seam
+        the transport already uses, and the canonical module is byte-identical
+        afterwards.
+        """
+        held = node2_stimulus.can_stimulus
+        before = held.build_parser
+        mutations = []
+
+        def spy(argv=None, backend_factory=None, parser_factory=None):
+            parser_factory()  # the wrapper's parser must be constructible
+            mutations.append(held.build_parser)
+            return 0  # the delegation itself is covered by the tests above
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(held, "main", spy))
+            stack.enter_context(captured_output())
+            self.assertEqual(main(["--test-emergency"]), 0)
+        self.assertEqual(
+            mutations,
+            [before],
+            "the canonical build_parser must be untouched while the wrapper runs",
+        )
+        self.assertIs(held.build_parser, before)
+
+    def test_the_wrapper_hands_the_canonical_tool_the_translated_argv(self):
         fake = FakeCanonicalMain(code=0)
         with canonical_main_is(fake), captured_output():
             main(["--mode", "sil", "--test-arm", "--test-emergency", "--port", "9001"])

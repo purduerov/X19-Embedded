@@ -490,9 +490,11 @@ class TestDashboardAppModule(unittest.TestCase):
         """
         lines = inspect.getsource(dashboard_app.main).splitlines()
         senders = ("send_pwms", "send_surface_pilot_command", "send_solenoids")
+        matched = 0
         for index, line in enumerate(lines):
             if not any(sender in line for sender in senders):
                 continue
+            matched += 1
             condition = _enclosing_condition(lines, index)
             with self.subTest(line=line.strip()):
                 self.assertTrue(
@@ -501,6 +503,16 @@ class TestDashboardAppModule(unittest.TestCase):
                     f"{condition.strip()!r}. A transmission is only allowed under "
                     f"a button press or a slider diff.",
                 )
+        # Without this the loop body can run zero times and the test passes
+        # asserting nothing - which is exactly what happens if all three senders
+        # are renamed or removed.  A test about transmissions must fail when it
+        # can no longer see one.
+        self.assertGreater(
+            matched,
+            0,
+            "main() no longer names any of the three senders, so this test was "
+            "asserting nothing; it is a vacuous pass, not a green one",
+        )
 
     def test_both_all_stop_buttons_call_the_same_handler(self):
         """
