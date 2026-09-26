@@ -2120,9 +2120,12 @@ class VehicleStimulusTester:
         (``node2 app.c:112`` and ``:121``).  Writing one and reporting success
         would be the same defect as a check that reports a pass it did not earn.
         """
-        name = f"raw_send_0x{can_id:03X}" if isinstance(can_id, int) and can_id >= 0 else f"raw_send_{can_id}"
+        # Validated FIRST, so the name is never built from a value the function is
+        # about to reject: a negative id used to report itself as raw_send_-1 and
+        # then raise.
         payload = validate_payload(payload)
         can_id = validate_can_id(can_id)
+        name = f"raw_send_0x{can_id:03X}"
         shown = payload.hex(" ").upper() or "<empty>"
         required = SAFETY_SIGNATURES.get(can_id)
         if required is not None and not payload.startswith(required):
@@ -2266,13 +2269,31 @@ def _raw_frame(text: str) -> Tuple[int, bytes]:
     return can_id, payload
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(
+    prog: str = "can_stimulus.py", epilog: Optional[str] = None
+) -> argparse.ArgumentParser:
+    """
+    Build the canonical parser, with the two fields a wrapper legitimately owns.
+
+    ``prog`` defaults to this file's own name and is not derived from
+    ``sys.argv[0]``: the tool is run as a script *and* imported by the tests and
+    by ``tools/node2_stimulus.py``, so an argv-derived name would read ``-c`` or
+    the wrapper's path. Pinning it is what makes the usage line name the program
+    the operator ran.
+
+    ``epilog`` and the formatter are the other half of that: a wrapper needs to
+    print its own legacy table under the canonical flags, and it gets there by
+    passing them here rather than by mutating a parser it does not own. That is
+    why there is no second parser and no monkey-patch anywhere in this file.
+    """
     parser = argparse.ArgumentParser(
-        prog="can_stimulus.py",
+        prog=prog,
         description=(
             "Inject stimulus at the X19 CAN boundary and verify the result. "
             "Exits nonzero unless every requested check passed."
         ),
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter if epilog else argparse.HelpFormatter,
     )
     parser.add_argument(
         "--mode",
@@ -2282,8 +2303,9 @@ def build_parser() -> argparse.ArgumentParser:
             "sil drives the native SIL engine over TCP and is the only mode that can verify an "
             "actuation, because the CAN 0x7FE output-status readback exists only there. can and "
             "uart are RECEIVE-ONLY: they observe a real link, and every check that would need to "
-            "actuate a thruster or a valve refuses before sending a frame. Both need optional "
-            "hardware packages (python-can, pyserial)."
+            "actuate a thruster or a valve refuses before sending a frame - with one deliberate "
+            "exception, --raw-send, which is a pipe for a frame you name and therefore writes "
+            "whatever you hand it. Both need optional hardware packages (python-can, pyserial)."
         ),
     )
     parser.add_argument("--host", default=DEFAULT_SIL_HOST, help="SIL engine host")
@@ -2437,7 +2459,11 @@ def selected_action_flags(args: argparse.Namespace) -> List[str]:
     return selected
 
 
-def main(argv: Optional[Sequence[str]] = None, backend_factory=None) -> int:
+def main(
+    argv: Optional[Sequence[str]] = None,
+    backend_factory=None,
+    parser_factory=None,
+) -> int:
     """
     Canonical CLI entry point. Returns 0 only when every requested check passed.
 
@@ -2451,9 +2477,13 @@ def main(argv: Optional[Sequence[str]] = None, backend_factory=None) -> int:
 
     ``backend_factory`` is resolved from the module global on every call rather
     than captured as a default argument, so a test can substitute a transport.
+    ``parser_factory`` is the same seam for the parser, and it is how
+    ``tools/node2_stimulus.py`` puts its own ``prog`` and legacy epilogue on the
+    canonical options without mutating anything this module owns.
     """
     backend_factory = backend_factory or build_backend
-    args = build_parser().parse_args(argv)
+    parser_factory = parser_factory or build_parser
+    args = parser_factory().parse_args(argv)
     selected = selected_action_flags(args)
     if args.auto and selected:
         # --auto runs the whole sequence; a flag alongside it would be dropped in

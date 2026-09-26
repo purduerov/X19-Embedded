@@ -932,7 +932,12 @@ class TestStimulusCliStatus(unittest.TestCase):
                 self.assertIn(expected, printed)
 
     def test_auto_with_other_flags_says_they_are_ignored(self):
-        status_code, printed = run_cli(["--mode", "sil", "--auto", "--node2-solenoid", "3"])
+        # InstantTester, because this is about the warning and not about any
+        # check: the real run_full_smoke over an empty FakeBackend waits out its
+        # timeouts and cost about 27 s of the suite for a one-line message.
+        status_code, printed = run_cli(
+            ["--mode", "sil", "--auto", "--node2-solenoid", "3"], tester_class=InstantTester
+        )
         self.assertIn("[WARN]", printed)
         self.assertIn("--node2-solenoid", printed)
         self.assertIn("ignored", printed)
@@ -1608,10 +1613,12 @@ class TestStimulusNonSilTransport(unittest.TestCase):
 
     def test_raw_send_rejects_an_impossible_can_id(self):
         """
-        Invariant: the id is validated like the payload.
+        Invariant: the id is validated before the check names itself.
 
-        Without this, ``--raw-send -1:FF`` produced the check name
-        ``raw_send_0x-1`` and a frame address nothing.
+        The name is built from a validated id, so ``--raw-send -1:FF`` can never
+        report itself as ``raw_send_0x-1`` on the way to raising. The old code
+        formatted the name first, which put a nonsense report name in the text and
+        still raised - cosmetic, but it is the tool's own report.
         """
         backend = FakeBackend()
         tester = VehicleStimulusTester(backend)
@@ -1620,6 +1627,11 @@ class TestStimulusNonSilTransport(unittest.TestCase):
                 with self.assertRaises((ValueError, TypeError)):
                     tester.raw_send(bad, b"\x01")
         self.assertEqual(backend.sent, [])
+        self.assertNotIn(
+            "raw_send_0x-1",
+            inspect.getsource(tester.raw_send),
+            "the name must be derived after validation, not before it",
+        )
 
     def test_a_transport_that_forgets_to_declare_the_capability_fails_safe(self):
         class UndeclaredTransport(NonSilBackend):

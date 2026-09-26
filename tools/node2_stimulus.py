@@ -66,7 +66,7 @@ import argparse
 import sys
 import textwrap
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 # can_stimulus is a sibling script, not an installed package. Reaching it by
 # absolute path from __file__ rather than the working directory is what makes this
@@ -283,32 +283,30 @@ def _build_legacy_epilog() -> str:
     return "\n".join(lines)
 
 
-def _parser_with_legacy_epilog(original: Callable[[], argparse.ArgumentParser]) -> Callable:
+def _parser_with_legacy_epilog() -> argparse.ArgumentParser:
     """
-    Build a replacement for ``can_stimulus.build_parser`` carrying the legacy table.
+    The canonical parser, carrying this program's name and the legacy table.
 
-    The parser comes from ``original``, never from the module global: that global is
-    about to BE this function, so looking it up again would recurse until the stack ran
-    out. Re-declaring the options here instead would be a second parser, so the real one
-    is reused and only its prog and epilog are changed. RawDescriptionHelpFormatter is
-    required because argparse's default collapses an epilog's line breaks into one
-    wrapped paragraph, which would destroy the table.
+    The options come from ``can_stimulus.build_parser`` and are never re-declared
+    here: a second parser is the exact divergence this file exists to remove, and
+    it would drift the moment the canonical tool gained a flag.  What the wrapper
+    owns is the presentation - its own ``prog``, and the legacy-to-canonical table
+    under the canonical flags - and ``build_parser`` takes both as keyword
+    arguments precisely so it can own them.
 
-    ``prog`` is set because argparse otherwise defaults to ``basename(sys.argv[0])``,
-    which for a direct run is this file but for ``from tools import node2_stimulus`` is
-    ``-c``. Pinning it also means the usage line and every argparse error name the
-    program the operator actually ran instead of ``can_stimulus.py``, and the canonical
-    tool still reports itself that way when it is run on its own.
+    RawDescriptionHelpFormatter comes from that same call, because argparse's
+    default collapses an epilog's line breaks into one wrapped paragraph, which
+    would destroy the table.  It is requested only when there is an epilog, so the
+    canonical tool's own ``--help`` keeps the default formatter.
+
+    ``prog`` is the program the operator actually ran, not this file's import path:
+    ``can_stimulus.build_parser`` hard-codes its own name rather than deriving one
+    from ``sys.argv[0]``, which for a direct run would be this file and for
+    ``from tools import node2_stimulus`` would be ``-c``.  Pinning it here means
+    the usage line and every argparse error name the program that was invoked
+    instead of ``can_stimulus.py``.
     """
-
-    def build() -> argparse.ArgumentParser:
-        parser = original()
-        parser.prog = "node2_stimulus.py"
-        parser.formatter_class = argparse.RawDescriptionHelpFormatter
-        parser.epilog = _build_legacy_epilog()
-        return parser
-
-    return build
+    return can_stimulus.build_parser(prog="node2_stimulus.py", epilog=_build_legacy_epilog())
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -320,6 +318,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     command line and the 0 it raises for --help - and every status that arrives from
     the canonical tool goes through :func:`_status` first, so a None or a non-integer
     can never be laundered into a pass.
+
+    The parser is configured by handing ``can_stimulus.main`` a ``parser_factory``,
+    which is the same injection seam it already exposes for the transport.  Nothing
+    in this module is monkey-patched.  An earlier version swapped
+    ``can_stimulus.build_parser`` for the duration of the call and restored it in a
+    ``finally``.  Nothing was broken - a CLI is single-threaded and the restore always
+    ran - but it was the one place this translation layer reached into the canonical
+    tool's state, so a concurrent canonical invocation in the same process would have
+    inherited the wrong ``prog`` and epilog.  The kwargs are three lines; the
+    patch-and-restore was a coupling nobody had to have.
     """
     raw = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -329,18 +337,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     _warn_about_legacy_flags(raw)
 
-    original_build_parser = can_stimulus.build_parser
-    can_stimulus.build_parser = _parser_with_legacy_epilog(original_build_parser)
     try:
-        return _status(can_stimulus.main(translated))
+        return _status(can_stimulus.main(translated, parser_factory=_parser_with_legacy_epilog))
     except SystemExit as exc:
         # main() may only return an int, so argparse's exit becomes one. A bare
         # exit() carries no status and Python's own convention for that is 0; that is
         # the one place a missing value legitimately means success, and it is
         # deliberately NOT the rule for a return value.
         return 0 if exc.code is None else _status(exc.code)
-    finally:
-        can_stimulus.build_parser = original_build_parser
 
 
 if __name__ == "__main__":
