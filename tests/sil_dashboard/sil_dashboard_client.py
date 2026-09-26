@@ -10,6 +10,7 @@ import threading
 import subprocess
 from collections import deque
 from dataclasses import dataclass
+from enum import Enum
 from typing import List, Optional, Dict, Any
 
 # Path configuration strictly within X19-Embedded
@@ -63,6 +64,148 @@ SERVER_EXE_PATH = os.environ.get("X19_SIL_SERVER") or next(
     ),
     os.path.join(REPO_ROOT, "build-native", "tests", "sil_bridge_server.exe"),
 )
+
+# --- Deadman control constants -------------------------------------------------
+# These mirror the firmware in shared/include/rov_parameters.h.  They are the
+# only place the host is allowed to encode the PWM envelope or the watchdog
+# window; nothing here may widen them.
+PWM_MIN_US = 1000          # ROV_PWM_MIN_US
+PWM_MAX_US = 2000          # ROV_PWM_MAX_US
+NEUTRAL_PWM_US = 1500      # ROV_PWM_STOP_US
+NEUTRAL_PWMS = [NEUTRAL_PWM_US] * 8
+
+# The control worker resends the last accepted command every 50 ms so Node 2's
+# 100 ms heartbeat watchdog never expires while the operator holds a command.
+CONTROL_PERIOD_S = 0.050
+HEARTBEAT_TIMEOUT_S = 0.100
+CONTROL_JOIN_TIMEOUT_S = 1.0
+# The 20 Hz worker's thread name. Exposed as a constant because it is the only
+# handle on a worker whose ``_control_thread`` reference has been dropped: a
+# caller that needs to know whether ANY worker is alive has to find them by name,
+# and a duplicated string literal would let the two drift.
+CONTROL_THREAD_NAME = "sil-dashboard-control"
+
+# Node 2 only accepts a thruster command after this authorized signature check
+# (nodes/node2_control_board/app.c).  The exact bytes are load-bearing.
+EMERGENCY_BREAK_SIGNATURE = b"\xAA\x55\x01"
+
+# --- Solenoid interlock -------------------------------------------------------
+# Five double-acting valves, two opposing coils each (shared/include/
+# rov_parameters.h:53-54), so the mask is ten bits and coil B of valve N is bit
+# 2N+1.
+SOLENOID_VALVES = 5
+SOLENOID_MASK_BITS = 10
+SOLENOID_MASK_MAX = (1 << SOLENOID_MASK_BITS) - 1
+
+
+def conflicting_solenoid_valve(mask: int) -> Optional[int]:
+    """
+    Return the first valve whose two opposing coils are both energised, else None.
+
+    This is a firmware rule, not a UI preference, and it is enforced here because
+    ``shared/src/rov_can_protocol.c:120-126`` walks the five valves and, for any
+    valve with both coils set, zeroes the WHOLE mask and returns
+    ``ROV_ERR_INVALID_ARG``; ``nodes/node2_control_board/Core/Src/app.c:150-153``
+    then skips ``bsp_solenoid_set`` entirely, so the outputs keep whatever mask
+    was already latched. A mask like 0x007 (valve 0 extend plus valve 1 retract)
+    therefore does not actuate valve 1 - it silently drops valve 0 as well, while
+    the sender records 0x007 as the command target.
+
+    It lives beside ``send_solenoids`` because that is the code that packs 0x110,
+    and ``tools/can_stimulus.py`` imports it from here so the stimulus tool and the
+    dashboard cannot hold two copies of the same decision.
+    """
+    for valve in range(SOLENOID_VALVES):
+        pair_mask = 0x3 << (2 * valve)
+        if (mask & pair_mask) == pair_mask:
+            return valve
+    return None
+
+
+class ControlState(str, Enum):
+    """
+    Explicit dashboard deadman state.
+
+        DISCONNECTED --connect()--> ARMED --non-neutral cmd--> RUNNING
+              ^                       ^                        |
+              |                       +-- neutral cmd / stop --+
+              |                       +-- explicit request_stop-+
+              |                                                |
+              +-- disconnect / transport loss -------------------+
+              |                                                |
+              +-- emergency break, from any state --------------> ESTOP
+
+    * ``DISCONNECTED``: no SIL transport. No frame is ever sent. Written by
+      ``connect()`` on failure, ``disconnect()``, and the worker when it finds
+      the transport gone.
+    * ``STOPPED``: an explicit ``request_stop()``, or a worker fault, cancelled
+      the held command. ``_last_command`` is neutral and no worker is running.
+    * ``ARMED``: transport up, no non-neutral command held, and deliberately
+      **no 20 Hz worker**. Written by ``connect()`` and by an all-neutral
+      ``send_pwms()``. The absence of the worker is the safety property: the
+      firmware heartbeat watchdog only latches when no thruster command refreshes
+      it, and that latch is what forces PWM neutral *and* releases the solenoids
+      via ``node2_force_neutral()``
+      (nodes/node2_control_board/Core/Src/app.c).
+    * ``RUNNING``: a non-neutral command is held and resent every 50 ms (20 Hz).
+      The refreshed heartbeat is what keeps the board out of its failsafe while
+      the operator is commanding thrust.
+    * ``ESTOP``: the authorized emergency frame was sent and the outputs are
+      forced neutral. This state LATCHES: it is never downgraded by a later
+      stop, worker fault, or transport error, and only ``connect()`` (a new
+      transport) or ``start_server_process()`` (a new engine) clears it.
+    """
+
+    DISCONNECTED = "disconnected"
+    STOPPED = "stopped"
+    ARMED = "armed"
+    RUNNING = "running"
+    ESTOP = "estop"
+
+
+def _validate_pwms(pwms: Any) -> List[int]:
+    """
+    Reject anything that is not exactly eight PWM values inside 1000-2000 us.
+
+    The firmware clamps out-of-range values, but silently clamping a host bug
+    would hide it, so the host refuses instead.  Integral floats are accepted
+    because Streamlit slider values are not guaranteed to be ``int``.
+
+    The failure modes follow the usual Python split, so a caller can tell a
+    caller bug from a bad value:
+
+    * ``TypeError`` -- ``pwms`` is not a sequence of real numbers at all
+      (``None``, a string, a bare ``int``, or a non-numeric element).
+    * ``ValueError`` -- the type is fine but the content is not: the wrong
+      number of channels, a non-finite or fractional microsecond value, or a
+      value outside 1000-2000.
+    """
+    if pwms is None or isinstance(pwms, (str, bytes)):
+        raise TypeError(f"PWM command must be a sequence of 8 values, got {type(pwms).__name__}")
+    try:
+        values = list(pwms)
+    except TypeError:
+        raise TypeError(
+            f"PWM command must be a sequence of 8 values, got {type(pwms).__name__}"
+        ) from None
+    if len(values) != 8:
+        raise ValueError(f"PWM command requires exactly 8 values, got {len(values)}")
+    validated: List[int] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"PWM values must be numbers, got {value!r}")
+        numeric = float(value)
+        # is_integer() is False for NaN and both infinities.
+        if not numeric.is_integer():
+            raise ValueError(f"PWM values must be finite whole microseconds, got {value!r}")
+        clamped = int(numeric)
+        if clamped < PWM_MIN_US or clamped > PWM_MAX_US:
+            raise ValueError(
+                f"PWM values must stay within {PWM_MIN_US}-{PWM_MAX_US} us, got {clamped}"
+            )
+        validated.append(clamped)
+    return validated
+
 
 CAN_ID_MAP = {
     CAN_ID_EMERGENCY_BREAK: ("EMERGENCY_BREAK", "Priority 0: Hardware Cutoff"),
@@ -147,6 +290,19 @@ class SilDashboardClient:
         self.connected = False
         self.running = False
         self.lock = threading.Lock()
+        # Serializes socket writes only. It is deliberately NOT the state lock:
+        # holding self.lock across a blocking sendall would stall _rx_loop and
+        # blind the dashboard to telemetry exactly when something has gone wrong.
+        # Re-entrant because the worker can fault while already inside a write.
+        self._send_lock = threading.RLock()
+
+        # 20 Hz deadman control worker
+        self.control_state = ControlState.DISCONNECTED
+        self._last_command: List[int] = list(NEUTRAL_PWMS)
+        self._control_stop = threading.Event()
+        self._control_thread: Optional[threading.Thread] = None
+        self._estop_latched = False
+        self.worker_thread: Optional[threading.Thread] = None
 
         # Packet history & C console stream
         self.packet_log = deque(maxlen=250)
@@ -159,6 +315,9 @@ class SilDashboardClient:
         self.actual_pwms = [1500] * 8
         self.solenoid_mask = 0
         self.actual_solenoid_mask = 0
+        # Why the last send_solenoids() refused, for the UI to show. None means the
+        # last request was accepted (or never made).
+        self.last_solenoid_refusal: Optional[str] = None
         self.sim_time_ms = 0
         self.output_status_received_monotonic: Optional[float] = None
         self.last_rx_monotonic: Dict[int, float] = {}
@@ -206,6 +365,9 @@ class SilDashboardClient:
             )
             stdout_reader = threading.Thread(target=self._read_c_stdout, daemon=True)
             stdout_reader.start()
+            # Restarting the engine is one of the two explicit, operator-driven
+            # ways out of a latched ESTOP (the other is a fresh connect()).
+            self._estop_latched = False
             time.sleep(0.4)
             return True
         return True
@@ -235,6 +397,33 @@ class SilDashboardClient:
         with self.lock:
             if self.connected:
                 return True
+        # A reconnect can arrive while a worker from the PREVIOUS transport is
+        # still running.  The rx thread can end on its own for any reason --
+        # ``_rx_loop`` sets ``connected = False`` on every exit path, including a
+        # socket error -- and the 20 Hz worker is not watching that, so it keeps
+        # running and keeps transmitting.
+        #
+        # The body below installs a FRESH ``_control_stop`` and clears
+        # ``_control_thread``.  Doing that while a worker is alive orphans it: its
+        # thread object is no longer referenced, and the event it is waiting on is
+        # no longer reachable either, so ``stop_control_loop`` can neither signal
+        # it nor join it.  It then keeps pushing the command it was holding onto
+        # the NEW transport while this object reports ``ARMED`` and a neutral
+        # ``_last_command`` -- a stale reference presented as a clean state, and a
+        # non-neutral command on the wire behind a dashboard that says it is
+        # parked.  So the old worker is stopped and joined first.
+        #
+        # Deliberately BEFORE taking ``self.lock``, never inside the block below:
+        # ``stop_control_loop`` reaches ``_transition_stopped``, which takes
+        # ``self.lock`` itself, and ``self.lock`` is a plain non-reentrant
+        # ``Lock``, so a join under it would deadlock.
+        if self._control_thread is not None:
+            self.stop_control_loop(send_neutral=False)
+        with self.lock:
+            if self.connected:
+                return True
+            s = None
+            stale = self.sock
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect((self.host, self.port))
@@ -242,15 +431,57 @@ class SilDashboardClient:
                 self.sock = s
                 self.connected = True
                 self.running = True
+                # A genuinely new transport is the operator explicitly
+                # reconnecting, so it clears a latched ESTOP and hands the
+                # control path back in a neutral, non-RUNNING state.
+                self._estop_latched = False
+                self._last_command = list(NEUTRAL_PWMS)
+                self._control_stop = threading.Event()
+                self._control_thread = None
+                self.control_state = ControlState.ARMED
                 self.worker_thread = threading.Thread(target=self._rx_loop, daemon=True)
                 self.worker_thread.start()
+                # The socket this one replaces is closed, not overwritten. Its
+                # reader is already gone -- ``connected`` was False, which only
+                # ``_rx_loop``'s own exit or ``disconnect()`` sets, and
+                # ``disconnect()`` closes it itself -- so nothing is reading it,
+                # and dropping the last reference leaked a descriptor on every
+                # reconnect. Same ordering as ``disconnect()``, which also closes
+                # a socket its reader may still be waking from.
+                if stale is not None:
+                    try:
+                        stale.close()
+                    except OSError:
+                        pass
                 return True
             except (ConnectionRefusedError, OSError):
+                if s is not None:
+                    try:
+                        s.close()
+                    except OSError:
+                        pass
+                # The socket this attempt replaces is closed here too, not only on
+                # the success path: ``self.sock = None`` below would otherwise drop
+                # the last reference to it and leak a descriptor on every failed
+                # reconnect, which is the case an operator hits repeatedly when
+                # they are trying to reach an engine that is not there.
+                if stale is not None:
+                    try:
+                        stale.close()
+                    except OSError:
+                        pass
+                self.sock = None
                 self.connected = False
+                self.control_state = ControlState.DISCONNECTED
                 return False
 
     def disconnect(self):
+        # Stop transmitting BEFORE the socket goes away, so no frame can be
+        # written to a closing transport. The neutral frame is deliberately not
+        # sent here: the firmware heartbeat watchdog is what guarantees neutral
+        # once the transport is gone, and writing to a dead socket cannot.
         self.running = False
+        self.stop_control_loop(send_neutral=False)
         with self.lock:
             if self.sock:
                 try:
@@ -259,13 +490,18 @@ class SilDashboardClient:
                     pass
                 self.sock = None
             self.connected = False
+            self.control_state = ControlState.DISCONNECTED
 
-    def send_surface_pilot_command(self, surge: float, sway: float, heave: float, yaw: float, pitch: float = 0.0, roll: float = 0.0):
+    def send_surface_pilot_command(self, surge: float, sway: float, heave: float, yaw: float, pitch: float = 0.0, roll: float = 0.0) -> bool:
         """
         Executes the full Topside Surface -> Core -> STM32 pipeline:
         1. Packs Surface Protobuf JoystickCommand.
         2. Computes Core 8-Thruster Allocation Matrix.
-        3. Encodes CAN ID 0x100 and sends to STM32 over SIL bus.
+        3. Hands CAN ID 0x100 to the 20 Hz control worker.
+
+        This is a deadman input, not a one-shot: while the operator holds the
+        axis the worker resends the allocation at 20 Hz, and any STOP / ESTOP /
+        disconnect forces neutral.
         """
         timestamp_us = int(time.time() * 1e6)
         raw_pb_bytes = b""
@@ -304,54 +540,384 @@ class SilDashboardClient:
             }
             self.pipeline_core_pwms = list(pwms)
             self.pipeline_core_can_hex = can_hex
-            self.pwms = list(pwms)
 
-        self.send_pwms(pwms)
+        return self.send_pwms(pwms)
 
-    def send_pwms(self, pwms: List[int]):
+    # ------------------------------------------------------------------
+    # Transport primitives
+    # ------------------------------------------------------------------
+
+    def _send_frame(self, direction: str, can_id: int, payload: bytes, summary: str) -> None:
+        """
+        Push one complete SIL frame down the wire.
+
+        The state lock is never held here: a blocking or contended send must not
+        be able to stall _rx_loop. Only _send_lock is taken, so a 73-byte write
+        from the UI thread cannot interleave with a worker write and corrupt the
+        framing. Raises OSError if the transport is gone.
+        """
+        sock = self.sock
+        if sock is None or not self.connected:
+            raise OSError("SIL transport is not connected")
+        frame = pack_sil_can_frame(can_id, payload)
+        with self._send_lock:
+            sock.sendall(frame)
+        self._record_packet(direction, can_id, payload, summary)
+
+    def _send_thruster_frame(self, pwms: List[int]) -> None:
+        """Transmit one CAN ID 0x100 frame. Raises OSError on transport failure."""
+        channels = list(pwms)
+        payload = ThrusterCommand(pwm_us=channels).pack()
+        self._send_frame("Core -> STM32", CAN_ID_THRUSTER_CMD, payload, f"PWMs: {channels}")
+
+    # ------------------------------------------------------------------
+    # Deadman control state machine
+    # ------------------------------------------------------------------
+
+    def _transition_stopped(self, send_neutral: bool = True) -> None:
+        """
+        Single fail-safe transition shared by worker faults, explicit stop, and
+        emergency break, so every exit path behaves identically.
+
+        Never downgrades a latched ESTOP: a socket error arriving after an
+        emergency break must not make the UI look safe.
+        """
+        self._control_stop.set()
+        if send_neutral and self.connected and self.sock is not None:
+            try:
+                self._send_thruster_frame(list(NEUTRAL_PWMS))
+            except OSError:
+                # The firmware watchdog is the backstop once the transport is
+                # gone; there is nothing further this process can transmit.
+                self.connected = False
         with self.lock:
-            self.pwms = list(pwms)
-            cmd = ThrusterCommand(pwm_us=self.pwms)
-            payload = cmd.pack()
+            self._last_command = list(NEUTRAL_PWMS)
+            if self._estop_latched:
+                # A latched ESTOP outranks every other transition: a socket
+                # error arriving after an emergency break must not make the
+                # dashboard look safe again.
+                return
+            if self.connected and self.sock is not None:
+                self.control_state = ControlState.STOPPED
+            else:
+                self.control_state = ControlState.DISCONNECTED
+
+    def start_control_loop(self) -> bool:
+        """
+        Start the 20 Hz resend worker, at most once per transport.
+
+        Returns True when a worker is running (including one this call started
+        earlier) and False when the transport is down or ESTOP is latched.
+        """
+        with self.lock:
+            if self._estop_latched:
+                return False
+            if not self.connected or self.sock is None:
+                return False
+            existing = self._control_thread
+            if existing is not None and existing.is_alive():
+                return True
+            # A fresh event per generation: if a previous worker ever failed to
+            # join, clearing the shared event would resurrect its stop signal.
+            stop_event = threading.Event()
+            self._control_stop = stop_event
+            self.control_state = ControlState.RUNNING
+            thread = threading.Thread(
+                target=self._control_loop,
+                args=(stop_event,),
+                name=CONTROL_THREAD_NAME,
+                daemon=True,
+            )
+            self._control_thread = thread
+        thread.start()
+        return True
+
+    def stop_control_loop(self, send_neutral: bool = True) -> bool:
+        """
+        Signal the worker, join it with a bounded timeout, and force neutral.
+
+        Idempotent, and never writes a frame once the transport is down.
+        Returns False only if a worker refused to stop within the join timeout,
+        which is a test failure, not a normal outcome.
+        """
+        thread = self._control_thread
+        self._control_stop.set()
+        joined = True
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=CONTROL_JOIN_TIMEOUT_S)
+            joined = not thread.is_alive()
+        if joined:
+            self._control_thread = None
+        # _transition_stopped also sets _control_stop and clears the command; it
+        # deliberately does not join, so the worker may call it on its own way out.
+        self._transition_stopped(send_neutral=send_neutral)
+        return joined
+
+    def request_stop(self) -> bool:
+        """
+        Operator STOP: cancel the held command and drive the outputs neutral.
+
+        DELIBERATELY leaves ``self.pwms`` and ``self.pipeline_surface_cmd``
+        alone, and only neutralises the worker's held command.
+
+        The dashboard reads both of those fields as the value it *seeds* its
+        slider widgets from, and it diffs those widgets against a UI-owned
+        per-tab baseline rather than against these fields.  That means publishing a
+        new value here would not re-arm anything by itself -- the diffs would see
+        the seeded sliders already matching it and stay quiet -- but it would still
+        be a lie: the operator would see a "commanded target" the board was never
+        told.  Consumers depend on these two fields meaning "the operator's
+        commanded value, unchanged since they dialled it in", so keep them that way
+        and do not reset them here.
+
+        A visible consequence is that after a stop the dashboard still shows the
+        pre-stop commanded target while the board reads back neutral.  The real fix
+        is to separate the display target from the diff baseline, not to reset
+        either field from here.
+        """
+        return self.stop_control_loop(send_neutral=True)
+
+    @property
+    def estop_latched(self) -> bool:
+        """
+        True while the emergency-break latch is holding.
+
+        Read-only on purpose: the latch is set by
+        :meth:`request_emergency_break` and cleared only by
+        :meth:`start_server_process` (a new engine) or :meth:`connect` (a new
+        transport).  A UI has to be able to *ask* whether the latch is holding --
+        to refuse an automatic reconnect that would silently disarm it -- without
+        being able to set it.
+
+        CALLERS MUST GATE ON THIS BEFORE RECONNECTING.  Any successful
+        :meth:`connect` clears the latch, so a client that reconnects
+        automatically will disarm a tripped emergency break with no operator
+        action; the dashboard is the one caller in this repository and it gates on
+        this property in ``dashboard_app.ensure_transport`` before it ever reaches
+        ``start_server_process`` or ``connect``.  A new caller that reconnects on a
+        timer, or on a transport error, has to do the same or the latch is not an
+        interlock.  This is the contract the plan specified, so the behaviour is
+        unchanged and only the requirement on callers is stated.
+
+        ``control_state`` cannot answer this question: :meth:`disconnect`
+        overwrites it with ``DISCONNECTED`` while leaving the latch set, so a
+        latched client can report a non-ESTOP state.
+        """
+        return self._estop_latched
+
+    def _control_loop(self, stop_event: threading.Event) -> None:
+        """
+        Resend the last accepted command every CONTROL_PERIOD_S until stopped.
+
+        Pacing is a monotonic deadline, not ``Event.wait(0.05)``. A bare wait
+        pays the send duration twice on some ticks and not at all on others, so
+        the cadence becomes bursty: a run of over-long gaps followed by a
+        catch-up tick with a near-zero gap. Measured with a 12 ms send cost, a
+        bare wait spans 12-78 ms per gap while this loop holds 46-64 ms. The
+        stop event is only ever used to end the wait early.
+        """
+        next_tick = time.monotonic()
+        while not stop_event.is_set():
+            with self.lock:
+                if self.control_state is not ControlState.RUNNING:
+                    return
+                pwms = list(self._last_command)
+
+            if not self.connected or self.sock is None:
+                # The transport died under us: stop transmitting immediately and
+                # let the firmware watchdog force neutral.
+                with self.lock:
+                    if not self._estop_latched:
+                        self.control_state = ControlState.DISCONNECTED
+                return
+
+            try:
+                self._send_thruster_frame(pwms)
+            except OSError:
+                # The socket is already broken, so a neutral frame cannot be
+                # delivered; retrying would only spin against a dead transport.
+                self.connected = False
+                self._transition_stopped(send_neutral=False)
+                return
+            except Exception:
+                # A non-transport fault (a bug, not a dead socket) leaves the
+                # transport usable, so the neutral frame must really go out.
+                self._transition_stopped(send_neutral=True)
+                return
+
+            next_tick += CONTROL_PERIOD_S
+            remaining = next_tick - time.monotonic()
+            if remaining > 0.0:
+                if stop_event.wait(remaining):
+                    return
+            else:
+                # A send overran its own period. Resync instead of firing a
+                # catch-up burst; the next deadline is a full period out, so the
+                # watchdog is fed as fast as the transport allows without
+                # emitting a pair of back-to-back command frames.
+                next_tick = time.monotonic()
+
+    def send_pwms(self, pwms: List[int]) -> bool:
+        """
+        Accept a thruster command, transmit it now, and hold it at 20 Hz.
+
+        Compatibility entry point: the Streamlit UI still calls this.  A
+        non-neutral value becomes the worker's held command until
+        request_stop(), an emergency break, a transport error, or disconnect.
+
+        An all-neutral value is the operator's All Stop and deliberately does
+        NOT keep the worker alive.  A 20 Hz resend refreshes the firmware
+        heartbeat, and the heartbeat is the only thing that makes Node 2 release
+        the solenoids: ``node2_force_neutral()`` calls ``bsp_solenoid_set(0)`` and
+        is called on ``heartbeat_lost``
+        (nodes/node2_control_board/Core/Src/app.c).  Resending neutral would
+        therefore hold the solenoids energized forever behind a dashboard that
+        claims to be running.  So a neutral command goes to ARMED with no
+        worker, and the watchdog lapses.
+
+        Returns False when the command was refused (ESTOP latched, or no
+        transport).  Raises ``TypeError`` for a non-numeric argument and
+        ``ValueError`` for the wrong channel count or an out-of-range,
+        non-finite, or fractional value; see :func:`_validate_pwms`.
+        """
+        validated = _validate_pwms(pwms)
+        with self.lock:
+            latched = self._estop_latched
+            transport_up = self.connected and self.sock is not None
+
+        if latched:
+            # A refused command must not be able to overwrite the held command
+            # or the dashboard readback: ESTOP has to look and behave neutral.
+            return False
+
+        if not transport_up:
+            # No transport, so nothing can be transmitted. Mirror the value for
+            # the UI only, and leave the worker's command neutral so a later
+            # connect() can never resurrect a stale non-neutral command.
+            with self.lock:
+                self.pwms = list(validated)
+                payload = ThrusterCommand(pwm_us=self.pwms).pack()
+                self.pipeline_core_can_hex = " ".join(f"{b:02X}" for b in payload)
+                self.control_state = ControlState.DISCONNECTED
+            return False
+
+        neutral = all(value == NEUTRAL_PWM_US for value in validated)
+        with self.lock:
+            self.pwms = list(validated)
+            self._last_command = list(validated)
+            payload = ThrusterCommand(pwm_us=self.pwms).pack()
             self.pipeline_core_can_hex = " ".join(f"{b:02X}" for b in payload)
 
-            if not self.connected or not self.sock:
-                return
+        if neutral:
+            # stop_control_loop sends the one confirming neutral frame and joins
+            # the worker. ARMED must be written *after* it, because
+            # _transition_stopped would otherwise overwrite it with STOPPED.
+            self.stop_control_loop(send_neutral=True)
+            self.control_state = ControlState.ARMED
+            return True
 
-            frame = pack_sil_can_frame(CAN_ID_THRUSTER_CMD, payload)
-            try:
-                self.sock.sendall(frame)
-                self._record_packet("Core -> STM32", CAN_ID_THRUSTER_CMD, payload, f"PWMs: {self.pwms}")
-            except OSError:
-                self.connected = False
+        self.control_state = ControlState.RUNNING
+        if not self.start_control_loop():
+            return False
+        try:
+            # Send the operator's command straight away so UI response is not
+            # quantized to the next 50 ms tick; the worker sustains it after this.
+            self._send_thruster_frame(list(validated))
+        except OSError:
+            self.connected = False
+            self._transition_stopped(send_neutral=False)
+            return False
+        return True
 
-    def send_solenoids(self, mask: int):
+    def request_emergency_break(self) -> bool:
+        """
+        Trip the authorized emergency break and latch ESTOP.
+
+        Node 2 only accepts 0xAA 0x55 (PR #46), so those bytes are sent exactly
+        as the firmware requires. The state latches until connect() or
+        start_server_process(): a latched ESTOP refuses every later command.
+        """
+        self._estop_latched = True
+        # Stop the worker without a neutral frame first: the emergency frame is
+        # the higher-priority message and must be the next thing on the wire.
+        self.stop_control_loop(send_neutral=False)
         with self.lock:
-            self.solenoid_mask = mask & 0x03FF
-            if not self.connected or not self.sock:
-                return
-            cmd = SolenoidCommand(solenoid_mask=self.solenoid_mask)
-            payload = cmd.pack()
-            frame = pack_sil_can_frame(CAN_ID_SOLENOID_CMD, payload)
-            try:
-                self.sock.sendall(frame)
-                self._record_packet("Core -> STM32", CAN_ID_SOLENOID_CMD, payload, f"Bitmask: 0x{self.solenoid_mask:04X}")
-            except OSError:
-                self.connected = False
+            self.control_state = ControlState.ESTOP
+            self._last_command = list(NEUTRAL_PWMS)
+        if not self.connected or self.sock is None:
+            return False
+        try:
+            self._send_frame(
+                "Core -> STM32",
+                CAN_ID_EMERGENCY_BREAK,
+                EMERGENCY_BREAK_SIGNATURE,
+                "EMERGENCY CUTOFF TRIGGERED (Authorized)",
+            )
+            self.emergency_break_requested = True
+        except OSError:
+            self.connected = False
+            return False
+        # The board forces neutral the instant it latches; sending the neutral
+        # thruster frame as well keeps the dashboard readback and the packet log
+        # consistent with what the firmware is doing.
+        try:
+            self._send_thruster_frame(list(NEUTRAL_PWMS))
+        except OSError:
+            self.connected = False
+            return False
+        return True
 
-    def trigger_emergency_break(self):
+    def trigger_emergency_break(self) -> bool:
+        """
+        Backwards-compatible alias for request_emergency_break().
+
+        Kept because the Streamlit UI and existing operator runbooks call this
+        name; the authorized 0xAA 0x55 0x01 signature is unchanged.
+        """
+        return self.request_emergency_break()
+
+    def send_solenoids(self, mask: int) -> bool:
+        """
+        Actuate a solenoid mask, refusing one the firmware rejects wholesale.
+
+        Returns False - and writes nothing - when the mask energises both coils of
+        any valve.  ``rov_can_protocol.c:120-126`` zeroes the entire mask for such
+        a mask and ``app.c:150-153`` then skips ``bsp_solenoid_set``, so sending it
+        would leave the previously latched mask in place while the UI recorded the
+        new one as the command target: the display would show valves the board
+        never moved, and a valve that WAS open would drop with no operator action.
+
+        ``self.solenoid_mask`` is the command target the UI shows, so it is left
+        alone on a refusal.  The same rule and the same reason live in
+        ``tools/can_stimulus.py``, which imports :func:`conflicting_solenoid_valve`
+        from this module rather than keeping a second copy.
+        """
+        requested = mask & SOLENOID_MASK_MAX
+        valve = conflicting_solenoid_valve(requested)
+        if valve is not None:
+            self.last_solenoid_refusal = (
+                f"refused 0x{requested:03X}: it energises both coils of valve {valve} "
+                f"(channels {2 * valve} and {2 * valve + 1}), and rov_can_protocol.c:120-126 "
+                "zeroes the WHOLE mask for that, so the board would apply nothing and every "
+                "other valve in the mask would drop silently. Clear one coil of that pair first."
+            )
+            return False
+        self.last_solenoid_refusal = None
         with self.lock:
-            # Magic signature (0xAA, 0x55) required by Node 2 authorization check (PR #46)
-            payload = b"\xAA\x55\x01"
-            if not self.connected or not self.sock:
-                return
-            frame = pack_sil_can_frame(CAN_ID_EMERGENCY_BREAK, payload)
-            try:
-                self.sock.sendall(frame)
-                self.emergency_break_requested = True
-                self._record_packet("Core -> STM32", CAN_ID_EMERGENCY_BREAK, payload, "EMERGENCY CUTOFF TRIGGERED (Authorized)")
-            except OSError:
-                self.connected = False
+            self.solenoid_mask = requested
+            solenoid_mask = self.solenoid_mask
+        if not self.connected or self.sock is None:
+            return False
+        cmd = SolenoidCommand(solenoid_mask=solenoid_mask)
+        payload = cmd.pack()
+        try:
+            self._send_frame(
+                "Core -> STM32", CAN_ID_SOLENOID_CMD, payload, f"Bitmask: 0x{solenoid_mask:04X}"
+            )
+        except OSError:
+            self.connected = False
+            return False
+        return True
 
     def _record_packet(self, direction: str, can_id: int, payload: bytes, summary: str):
         now = time.monotonic()
