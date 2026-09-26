@@ -626,45 +626,97 @@ class SilSocketBackend(_BaseBackend):
         watching outputs and a caller watching telemetry do not have to filter.
         A 0x7FE does not reset the budget, so the call stays bounded by
         ``timeout_s`` however many snapshots it swallows.
+
+        :meth:`drain_frames` obeys the same rule by default, so the two entry
+        points cannot drift apart; pass ``include_output_status=True`` there to
+        receive the raw stream.
         """
         if self._sock is None:
             raise ConnectionError("the SIL transport is not connected; call connect() first")
         deadline = time.monotonic() + max(0.0, timeout_s)
         while True:
-            if not self._pending:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0.0:
+            frame = self._take_pending()
+            if frame is None:
+                if not self._fill_pending(deadline):
                     return None
-                # recv_frames keeps leftover bytes in a per-socket buffer, so a
-                # packet split across TCP segments is reassembled across calls.
-                drained = recv_frames(self._sock, remaining)
-                if not drained:
-                    return None
-                self._pending.extend(drained)
-            can_id, payload = self._pending.pop(0)
-            self._record(can_id, payload)
-            if can_id != CAN_ID_SIL_OUTPUT_STATUS:
-                return can_id, payload
+                continue
+            if self._wanted(frame[0], False):
+                return frame
 
-    def drain_frames(self, timeout_s: float = DEFAULT_RECV_TIMEOUT_S) -> List[Tuple[int, bytes]]:
+    def drain_frames(
+        self, timeout_s: float = DEFAULT_RECV_TIMEOUT_S, include_output_status: bool = False
+    ) -> List[Tuple[int, bytes]]:
         """
         Decode every frame available inside one bounded read window.
 
         Used by the polling loops so a telemetry monitor counts the frames that
         really arrived instead of the ones a one-frame-at-a-time read happened to
         reach.  The pending queue is emptied first so a backlog is never dropped.
+
+        ``include_output_status`` defaults to False, so this returns exactly what
+        :meth:`recv_frame` returns: 0x7FE snapshots are recorded into
+        ``latest_outputs()`` and withheld.  That is not pedantry - the channel is
+        a SIL-only mock-BSP readout and not a vehicle CAN message
+        (``sil_protocol.py:22``), and the engine publishes it every 10 ms tick
+        (``sil_bridge_server.c:339-359``), roughly ten times more often than any
+        telemetry frame, so a caller counting this list would report its counts
+        dominated by a mock channel.  Pass ``True`` to receive the raw stream
+        including 0x7FE; the decoded readback is available from
+        ``latest_outputs()`` either way.
         """
-        collected: List[Tuple[int, bytes]] = []
-        while self._pending:
-            can_id, payload = self._pending.pop(0)
-            self._record(can_id, payload)
-            collected.append((can_id, payload))
         if self._sock is None:
             raise ConnectionError("the SIL transport is not connected; call connect() first")
+        collected: List[Tuple[int, bytes]] = []
+        while True:
+            frame = self._take_pending()
+            if frame is None:
+                break
+            if self._wanted(frame[0], include_output_status):
+                collected.append(frame)
         for can_id, payload in recv_frames(self._sock, max(0.0, timeout_s)):
             self._record(can_id, payload)
-            collected.append((can_id, payload))
+            if self._wanted(can_id, include_output_status):
+                collected.append((can_id, payload))
         return collected
+
+    # -- drain plumbing, shared so the output-status rule has one home -------
+    def _wanted(self, can_id: int, include_output_status: bool) -> bool:
+        """
+        The one rule for whether a decoded frame is handed back to a caller.
+
+        0x7FE is withheld unless explicitly requested.  ``_record`` has already
+        consumed it into ``latest_outputs()`` by this point either way, so
+        withholding it costs a caller nothing: both read paths share this
+        predicate, which is what stops :meth:`recv_frame` and :meth:`drain_frames`
+        from disagreeing about the same channel.
+        """
+        return include_output_status or can_id != CAN_ID_SIL_OUTPUT_STATUS
+
+    def _take_pending(self) -> Optional[Tuple[int, bytes]]:
+        """Pop and record the next already-decoded frame, or None if the queue is empty."""
+        if not self._pending:
+            return None
+        can_id, payload = self._pending.pop(0)
+        self._record(can_id, payload)
+        return can_id, payload
+
+    def _fill_pending(self, deadline: float) -> bool:
+        """
+        Move whatever arrived inside the remaining budget into ``_pending``.
+
+        Returns False when the window is over or produced nothing, so the caller
+        ends rather than spins.  ``recv_frames`` keeps leftover bytes in a
+        per-socket buffer, so a packet split across TCP segments is reassembled
+        across calls.
+        """
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return False
+        drained = recv_frames(self._sock, remaining)
+        if not drained:
+            return False
+        self._pending.extend(drained)
+        return True
 
     def _record(self, can_id: int, payload: bytes) -> None:
         if can_id == CAN_ID_SIL_OUTPUT_STATUS:
@@ -1321,14 +1373,36 @@ class VehicleStimulusTester:
         if reached is None:
             last = self.backend.latest_outputs()
             seen = "no readback" if last is None else last.describe()
-            return CheckResult(
-                name,
-                False,
+            # The generic message, and the facts behind it. Built first so both
+            # branches below carry the same evidence; the gate-closed branch then
+            # leads with the conclusion, because "the command was never accepted"
+            # and "the board cannot accept commands yet" call for different
+            # operator actions and must not read the same.
+            detail = (
                 f"channel {channel} never reached {pulse_us} us within {timeout_s:.1f} s "
                 f"({seen}). The 2 us/ms slew ramp (rov_parameters.h:45) needs "
                 f"{abs(pulse_us - NEUTRAL_US) // PWM_SLEW_RATE_US_PER_MS} ms of sim time, and the "
-                "command is only accepted once the ESC gate is open (app.c:127-129).",
+                "command is only accepted once the ESC gate is open (app.c:127-129)."
             )
+            if last is not None and last.sim_time_ms < ESC_ARMING_SIM_MS:
+                # The budget expired while the mandatory arming window was still
+                # running, so this check has not examined the PWM path at all.
+                # RAMP_TIMEOUT_S is a fixed SIM_WALL_SLACK_S cushion on top of the
+                # ramp, and the arming window is 3000 ms of *simulated* time, so a
+                # host whose ticks are slower than the default assumption spends
+                # its whole budget arming. Saying only "never reached" would send
+                # the operator after a broken PWM path that was never exercised.
+                return CheckResult(
+                    name,
+                    False,
+                    f"the ESC gate was still closed at sim_time_ms={last.sim_time_ms}, below the "
+                    f"mandatory {ESC_ARMING_SIM_MS} ms arming window (app.c:24), so this check has "
+                    f"NOT examined the PWM path: the {timeout_s:.1f} s budget ran out before the "
+                    "board was ever able to accept a thruster command. This is a too-short "
+                    "timeout_s or a slow host, not a broken PWM path - raise timeout_s, or run "
+                    f"--node2-arm first and re-run this check. For the record: {detail}",
+                )
+            return CheckResult(name, False, detail)
         samples = self._pump(time.monotonic() + max(0.0, duration_s), send=send_command)
         if not samples:
             return CheckResult(
