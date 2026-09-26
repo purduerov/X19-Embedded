@@ -2352,6 +2352,13 @@ def run_selected_action(tester: VehicleStimulusTester, args: argparse.Namespace)
 
 
 def print_report(report: StimulusReport, include_checks: bool = True) -> None:
+    """
+    The one way the operator-facing report text is produced.
+
+    ``include_checks=False`` is for a caller that has already streamed the
+    per-check lines as they completed, which is what ``main`` does; it still
+    prints the ``Summary:`` line and the whole failure block.
+    """
     print(report.format(include_checks=include_checks))
 
 
@@ -2473,13 +2480,11 @@ def main(argv: Optional[Sequence[str]] = None, backend_factory=None) -> int:
         with contextlib.suppress(Exception):
             backend.close()
 
-    print(f"Summary: {len(report.results)} check(s), {len(report.passed)} passed, "
-          f"{len(report.failures)} failed")
-    if report.failures:
-        names = ", ".join(failure.name for failure in report.failures)
-        print(f"[FAIL] {len(report.failures)} check(s) failed: {names}")
-        for failure in report.failures:
-            print(f"[FAIL] {failure.name} failed: {failure.detail}")
+    # One implementation of the operator-facing text, not a second copy of it:
+    # every per-check line was already streamed above, so this is exactly
+    # format(include_checks=False). Spelling the summary out again here is how
+    # the copy the operator reads and the one the tests exercise drift apart.
+    print_report(report, include_checks=False)
     return 0 if report.ok else 1
 
 
