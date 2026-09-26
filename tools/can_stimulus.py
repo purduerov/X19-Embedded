@@ -148,6 +148,7 @@ __all__ = [
     "describe_can_id",
     "energised_coils",
     "format_result",
+    "int_literal",
     "main",
     "pack_sil_can_frame",
     "print_report",
@@ -2218,6 +2219,34 @@ ACTION_FLAGS = (
 )
 
 
+def int_literal(text: str) -> int:
+    """
+    Parse an operator-supplied integer written in any of the usual literal forms.
+
+    One parser for every value the operator can spell, because the file used to
+    carry both wrong forms of the same idea: ``--node2-solenoid`` took ``type=int``
+    (so ``0x0001`` was a usage error and ``010`` silently meant ten), while
+    ``--raw-send``'s id took ``int(id_text, 0)`` (so ``0x001`` worked and ``010``
+    raised, because Python rejects a leading zero at base 0).  The obvious
+    unification, ``int(x, 0)``, would have fixed the hex case and newly broken the
+    zero-padded decimal - trading one break for another.
+
+    The rule here is explicit and small: an explicit ``0x``/``0o``/``0b`` prefix
+    is honoured, and everything else is plain base-10 decimal.  ``010`` is ten,
+    which is what an operator writing a four-digit mask in a script means.
+    """
+    stripped = text.strip()
+    bases = {"0x": 16, "0o": 8, "0b": 2}
+    base = bases.get(stripped[:2].lower(), 10)
+    try:
+        return int(stripped, base)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{text!r} is not an integer; write plain decimal (10, 010, 1023) or a "
+            "prefixed literal (0x3FF, 0o777, 0b1010)"
+        ) from None
+
+
 def _raw_frame(text: str) -> Tuple[int, bytes]:
     """Parse ``0x100:AABB`` into ``(can_id, payload)``."""
     if ":" not in text:
@@ -2225,10 +2254,7 @@ def _raw_frame(text: str) -> Tuple[int, bytes]:
             f"--raw-send expects CAN_ID:HEXBYTES (for example 0x001:AA5501), got {text!r}"
         )
     id_text, _, hex_text = text.partition(":")
-    try:
-        can_id = int(id_text, 0)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"invalid CAN id {id_text!r}: {exc}") from exc
+    can_id = int_literal(id_text)
     try:
         payload = bytes.fromhex(hex_text.replace(" ", ""))
     except ValueError as exc:
@@ -2293,7 +2319,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--node2-depth", type=float, metavar="SECONDS", help="monitor 0x200 depth telemetry"
     )
     parser.add_argument(
-        "--node2-solenoid", type=int, metavar="MASK", help="actuate a solenoid mask (one coil per valve)"
+        "--node2-solenoid",
+        type=int_literal,
+        metavar="MASK",
+        help="actuate a solenoid mask (one coil per valve; decimal or 0x/0o/0b)",
     )
     parser.add_argument("--node3-power", action="store_true", help="monitor 0x300 power telemetry")
     parser.add_argument("--emergency-break", action="store_true", help="trip and verify the emergency brake")

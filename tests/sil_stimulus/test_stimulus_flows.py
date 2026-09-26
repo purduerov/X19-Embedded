@@ -1863,6 +1863,90 @@ class TestStimulusEmergencyPrecondition(unittest.TestCase):
         self.assertIn("Restart the engine", result.detail)
 
 
+class TestOperatorIntegerLiterals(unittest.TestCase):
+    """
+    Invariant: a mask or a CAN id is spelled the way the operator already spells it.
+
+    The file used to carry both wrong forms of the same idea. ``--node2-solenoid``
+    used ``type=int``, so ``0x0001`` was a usage error and ``010`` silently meant
+    ten. ``--raw-send``'s id used ``int(id_text, 0)``, so ``0x001`` worked and
+    ``010`` raised - Python rejects a leading zero at base 0. The obvious
+    unification, ``type=lambda x: int(x, 0)``, would have fixed the hex case and
+    newly broken the zero-padded decimal, trading one break for another.
+
+    So the rule is explicit and small: an explicit ``0x``/``0o``/``0b`` prefix is
+    honoured, and everything else is plain base-10 decimal.
+    """
+
+    # 010 must be ten: that is what the deleted Node 2 prototype's int(x, 0)
+    # caller believed it was doing for plain decimal input, and what an operator
+    # writing a four-digit mask in a script means.
+    SPELLINGS = (
+        ("0x0001", 1),
+        ("0X001", 1),
+        ("0o10", 8),
+        ("0b1", 1),
+        ("010", 10),
+        ("1", 1),
+        ("1023", 1023),
+        ("0x3FF", 1023),
+    )
+
+    def test_the_solenoid_mask_flag_accepts_every_common_spelling(self):
+        parser = can_stimulus.build_parser()
+        for text, expected in self.SPELLINGS:
+            with self.subTest(text=text):
+                self.assertEqual(parser.parse_args(["--node2-solenoid", text]).node2_solenoid, expected)
+
+    def test_a_raw_send_can_id_accepts_every_common_spelling(self):
+        parser = can_stimulus.build_parser()
+        for text, expected in self.SPELLINGS:
+            with self.subTest(text=text):
+                args = parser.parse_args(["--raw-send", f"{text}:AA5501"])
+                self.assertEqual(args.raw_send, [(expected, b"\xaa\x55\x01")])
+
+    def test_a_zero_padded_decimal_can_id_reaches_the_wire_as_ten(self):
+        """
+        End to end, because the point is what the operator gets: no usage error.
+
+        0x001 is the emergency break, and ``AA 55 01`` is its authorized
+        signature, so the write is accepted and the check passes - the frame
+        itself is the evidence that the literal was parsed as 10, not refused.
+        """
+        backend = FakeBackend()
+        status_code, printed = run_cli(
+            ["--mode", "sil", "--raw-send", "010:AA5501"], backend_factory=lambda args: backend
+        )
+        self.assertEqual(status_code, 0, printed)
+        self.assertEqual([can_id for can_id, _ in backend.sent], [10])
+
+    def test_an_unparseable_value_is_still_a_usage_error(self):
+        parser = can_stimulus.build_parser()
+        for text in ("0x", "twelve", "", "1.5", "0xZZ"):
+            with self.subTest(text=text), self.assertRaises(SystemExit) as caught:
+                parser.parse_args(["--node2-solenoid", text])
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_the_two_flags_share_one_parser_rather_than_two_forms(self):
+        """
+        A second spelling is a second set of rules, which is how the file ended up
+        with both wrong forms in it.
+        """
+        parser = can_stimulus.build_parser()
+        solenoid = next(
+            action
+            for action in parser._actions
+            if "--node2-solenoid" in action.option_strings
+        )
+        self.assertIs(
+            solenoid.type,
+            can_stimulus.int_literal,
+            "--node2-solenoid must use the shared prefix-aware parser",
+        )
+        self.assertNotEqual(solenoid.type, int)
+        self.assertNotEqual(solenoid.type, lambda text: int(text, 0))
+
+
 class TestStimulusSolenoidBehaviour(unittest.TestCase):
     """A mask that cannot be evidenced must not be reported as actuated."""
 
