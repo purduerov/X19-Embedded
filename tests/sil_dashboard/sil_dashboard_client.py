@@ -40,6 +40,8 @@ from sil_protocol import (
     CAN_ID_POWER_TELEMETRY,
     CAN_ID_SIL_OUTPUT_STATUS,
     SIL_PACKET_SIZE,
+    SIL_MAGIC_HEADER,
+    SIL_MAGIC_HEADER_LEGACY,
     ThrusterCommand,
     SolenoidCommand,
     NavTelemetry,
@@ -389,16 +391,27 @@ class SilDashboardClient:
                 buf.extend(chunk)
 
                 while len(buf) >= SIL_PACKET_SIZE:
+                    magic = int.from_bytes(buf[:4], byteorder="little")
+                    if magic not in (SIL_MAGIC_HEADER, SIL_MAGIC_HEADER_LEGACY):
+                        del buf[:1]
+                        continue
+
                     packet_chunk = bytes(buf[:SIL_PACKET_SIZE])
                     del buf[:SIL_PACKET_SIZE]
-                    can_id, payload = unpack_sil_can_frame(packet_chunk)
+                    try:
+                        can_id, payload = unpack_sil_can_frame(packet_chunk)
+                    except ValueError:
+                        continue
 
                     self.frame_count += 1
                     self.last_rx_monotonic[can_id] = time.monotonic()
                     summary = ""
 
                     if can_id == CAN_ID_SIL_OUTPUT_STATUS:
-                        actual_pwms, brake_active, actual_solenoids, sim_time_ms = unpack_sil_output_status(payload)
+                        try:
+                            actual_pwms, brake_active, actual_solenoids, sim_time_ms = unpack_sil_output_status(payload)
+                        except ValueError:
+                            continue
                         self.actual_pwms = actual_pwms
                         self.emergency_break_tripped = brake_active
                         self.emergency_break_requested = self.emergency_break_requested and not brake_active
@@ -411,7 +424,10 @@ class SilDashboardClient:
                         )
 
                     elif can_id == CAN_ID_NAV_TELEMETRY:
-                        nav = NavTelemetry.unpack(payload)
+                        try:
+                            nav = NavTelemetry.unpack(payload)
+                        except ValueError:
+                            continue
                         self.nav_data = nav
                         summary = f"Depth: {nav.depth_meters:.2f}m, YawRate: {nav.gyro_z_rad_s:.3f}rad/s, Q:({nav.q_w:.2f},{nav.q_x:.2f},{nav.q_y:.2f},{nav.q_z:.2f})"
                         self.history_depth.append(nav.depth_meters)
@@ -458,11 +474,17 @@ class SilDashboardClient:
                             }
 
                     elif can_id == CAN_ID_ENV_TELEMETRY:
-                        env = EnvTelemetry.unpack(payload)
+                        try:
+                            env = EnvTelemetry.unpack(payload)
+                        except ValueError:
+                            continue
                         self.env_data = env
                         summary = f"Pres: {env.pressure_hpa:.1f}hPa, Hum: {env.humidity_pct:.1f}%, Leak: 0x{env.leak_flags:02X}"
                     elif can_id == CAN_ID_POWER_TELEMETRY:
-                        pwr = PowerTelemetry.unpack(payload)
+                        try:
+                            pwr = PowerTelemetry.unpack(payload)
+                        except ValueError:
+                            continue
                         self.power_data = pwr
                         summary = f"48V Rail: {pwr.tether_voltage_mv/1000:.1f}V @ {pwr.tether_current_ma/1000:.1f}A, Temp: {pwr.pcb_temp_c_tenths/10:.1f}C"
 
