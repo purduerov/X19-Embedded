@@ -65,7 +65,9 @@ jobs:
           # 3.14 is the interpreter the whole SIL verification transcript was
           # produced on (284/284, the companion 4/4, and the log shape that
           # motivated the ok-counting fix), so the gate runs where it was measured.
-          # The pin is a choice, not a necessity: the discovery was also run end to
+          # A partial pin resolves to the newest 3.14.x, not to 3.14.0; the guide's
+          # table says the same, so the two cannot claim a patch release CI does not
+          # fix. The pin is a choice, not a necessity: the discovery was also run end to
           # end on 3.11.15 and passed there (284/284 in 212 s). Both figures are in
           # docs/sil_simulation_guide.md section 7.6.
           python-version: '3.14'
@@ -76,12 +78,13 @@ jobs:
           # The host SIL surface is a blocking contract, exactly like the CTest step
           # above. Target readiness stays non-blocking in the next step, because 5 of
           # its 6 acceptance contracts are red, each for its own reason: nodes 1 and 3
-          # are missing the CubeMX startup and peripheral-init calls, node 1's BSP is
-          # missing its leak-probe inputs and the emergency-cutoff output, node 2's is
-          # missing the solenoid outputs and the emergency-brake cutoff and latch, and
-          # node 3's is missing INA237 and TMP1075 sourcing, the converter enable pins,
-          # and the ideal-diode status pin. A green run here is evidence about the host
-          # simulation, never about hardware.
+          # are missing the CubeMX startup and peripheral-init calls; all three BSPs
+          # are missing the CAN controller init; node 1's is also missing its leak-probe
+          # inputs and the emergency-cutoff output; node 2's is also missing the solenoid
+          # outputs (nine of the ten bits drive no output) and the emergency-brake cutoff
+          # and latch; and node 3's is also missing INA237 and TMP1075 sourcing, the
+          # converter enable pins, and the ideal-diode status pin. A green run here is
+          # evidence about the host simulation, never about hardware.
           #
           # streamlit is the only third-party package the suites need, and it is
           # required rather than optional: tests/sil_stimulus/test_dashboard_app.py

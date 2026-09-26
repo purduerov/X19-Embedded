@@ -313,9 +313,11 @@ CI runs Python 3.14, because that is the interpreter this suite was verified on:
 
 | Interpreter | Streamlit | Result |
 | :--- | :--- | :--- |
-| 3.14.0 (what CI pins) | 1.55.0 | `Ran 284 tests in 206.329s` — `OK`, exit 0 |
-| 3.14.0 (what CI pins) | 1.64.0 | `Ran 284 tests in 213.870s` — `OK`, exit 0 |
+| 3.14.x (the newest 3.14 release; CI pins `'3.14'`) | 1.55.0 | `Ran 284 tests in 206.329s` — `OK`, exit 0 |
+| 3.14.0 | 1.64.0 | `Ran 284 tests in 213.870s` — `OK`, exit 0 |
 | 3.11.15 | 1.64.0 | `Ran 284 tests in 212.034s` — `OK`, exit 0 |
+
+CI pins `3.14`, not `3.14.0`: `actions/setup-python` resolves a partial version to the newest release in that series, so a runner is on whatever 3.14.x is current. The first two rows are 3.14.0 measurements; the middle one is the Streamlit-upgrade cross-check, and the exact patch release a runner lands on is the one thing in this table CI does not pin — which is why the count and skip assertions below exist rather than a version assertion.
 
 If you change the pin, re-run the discovery on the new version before trusting it. A version error that raises is loud and self-correcting; the dangerous direction is one that turns into a skip, which is why the CI step asserts on the executed-test count and on the skip count rather than on the exit code.
 
@@ -354,7 +356,7 @@ Five of the six fail today, and each fails for its own reason, so read the one y
 | `target_startup_node1` | `HAL_Init`, `SystemClock_Config`, `MX_GPIO_Init`, `MX_FDCAN1_Init`, and `MX_I2C1_Init` never run before `app_main` (5 failures) |
 | `target_startup_node3` | the same five startup calls (5 failures) |
 | `target_bsp_node1` | no CAN controller in `bsp_init`, leak probes 0 and 1 not configured as pulled-up inputs, emergency cutoff not configured as an output (4 failures). **No solenoid assertion at all** — this is the Pi Shield, which has none. |
-| `target_bsp_node2` | no CAN controller, solenoid outputs not initialized as GPIO outputs, none of the ten solenoid bits drives its own output, the emergency brake does not assert the hardware cutoff and does not expose the latch (13 failures) |
+| `target_bsp_node2` | no CAN controller, solenoid outputs not initialized as GPIO outputs, **nine of the ten** solenoid bits do not drive their own output, the emergency brake does not assert the hardware cutoff and does not expose the latch (13 failures) |
 | `target_bsp_node3` | no CAN controller, logic voltage not sourced from INA237 data, PCB temperature not sourced from TMP1075 data, converter enable pins not initialized as outputs, ideal-diode status pin not initialized as a pulled-up input (5 failures). **Neither solenoids nor the emergency brake** — this is the Power Slab, which has neither. |
 
 `target_startup_node2` passes, and it is not the same kind of check as its two siblings. Nodes 1 and 3 are compiled contracts: `tests/CMakeLists.txt` builds `hardware/test_target_startup.c` against the node's real `main.c` under a strict fake HAL. Node 2's is a **text scan** — `cmake -P tests/hardware/check_node2_startup.cmake` reads `nodes/node2_control_board/Core/Src/main.c` and asserts, by `string(FIND)`, that eight calls appear in order (`HAL_Init`, `SystemClock_Config`, `MX_GPIO_Init`, `MX_FDCAN1_Init`, `MX_I2C1_Init`, `MX_TIM1_Init`, `MX_TIM8_Init`, `app_main`). It passes because node 2's `main.c` is fully CubeMX-generated at 553 lines, while the `main.c` of nodes 1 and 3 are 26-line hand-written stubs that call `app_main()` and nothing else. So node 2 passing is weaker evidence than a compiled pass, not a different flavour of the same evidence.
