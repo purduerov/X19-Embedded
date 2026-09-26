@@ -79,6 +79,11 @@ NEUTRAL_PWMS = [NEUTRAL_PWM_US] * 8
 CONTROL_PERIOD_S = 0.050
 HEARTBEAT_TIMEOUT_S = 0.100
 CONTROL_JOIN_TIMEOUT_S = 1.0
+# The 20 Hz worker's thread name. Exposed as a constant because it is the only
+# handle on a worker whose ``_control_thread`` reference has been dropped: a
+# caller that needs to know whether ANY worker is alive has to find them by name,
+# and a duplicated string literal would let the two drift.
+CONTROL_THREAD_NAME = "sil-dashboard-control"
 
 # Node 2 only accepts a thruster command after this authorized signature check
 # (nodes/node2_control_board/app.c).  The exact bytes are load-bearing.
@@ -392,7 +397,33 @@ class SilDashboardClient:
         with self.lock:
             if self.connected:
                 return True
+        # A reconnect can arrive while a worker from the PREVIOUS transport is
+        # still running.  The rx thread can end on its own for any reason --
+        # ``_rx_loop`` sets ``connected = False`` on every exit path, including a
+        # socket error -- and the 20 Hz worker is not watching that, so it keeps
+        # running and keeps transmitting.
+        #
+        # The body below installs a FRESH ``_control_stop`` and clears
+        # ``_control_thread``.  Doing that while a worker is alive orphans it: its
+        # thread object is no longer referenced, and the event it is waiting on is
+        # no longer reachable either, so ``stop_control_loop`` can neither signal
+        # it nor join it.  It then keeps pushing the command it was holding onto
+        # the NEW transport while this object reports ``ARMED`` and a neutral
+        # ``_last_command`` -- a stale reference presented as a clean state, and a
+        # non-neutral command on the wire behind a dashboard that says it is
+        # parked.  So the old worker is stopped and joined first.
+        #
+        # Deliberately BEFORE taking ``self.lock``, never inside the block below:
+        # ``stop_control_loop`` reaches ``_transition_stopped``, which takes
+        # ``self.lock`` itself, and ``self.lock`` is a plain non-reentrant
+        # ``Lock``, so a join under it would deadlock.
+        if self._control_thread is not None:
+            self.stop_control_loop(send_neutral=False)
+        with self.lock:
+            if self.connected:
+                return True
             s = None
+            stale = self.sock
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect((self.host, self.port))
@@ -410,11 +441,33 @@ class SilDashboardClient:
                 self.control_state = ControlState.ARMED
                 self.worker_thread = threading.Thread(target=self._rx_loop, daemon=True)
                 self.worker_thread.start()
+                # The socket this one replaces is closed, not overwritten. Its
+                # reader is already gone -- ``connected`` was False, which only
+                # ``_rx_loop``'s own exit or ``disconnect()`` sets, and
+                # ``disconnect()`` closes it itself -- so nothing is reading it,
+                # and dropping the last reference leaked a descriptor on every
+                # reconnect. Same ordering as ``disconnect()``, which also closes
+                # a socket its reader may still be waking from.
+                if stale is not None:
+                    try:
+                        stale.close()
+                    except OSError:
+                        pass
                 return True
             except (ConnectionRefusedError, OSError):
                 if s is not None:
                     try:
                         s.close()
+                    except OSError:
+                        pass
+                # The socket this attempt replaces is closed here too, not only on
+                # the success path: ``self.sock = None`` below would otherwise drop
+                # the last reference to it and leak a descriptor on every failed
+                # reconnect, which is the case an operator hits repeatedly when
+                # they are trying to reach an engine that is not there.
+                if stale is not None:
+                    try:
+                        stale.close()
                     except OSError:
                         pass
                 self.sock = None
@@ -572,7 +625,7 @@ class SilDashboardClient:
             thread = threading.Thread(
                 target=self._control_loop,
                 args=(stop_event,),
-                name="sil-dashboard-control",
+                name=CONTROL_THREAD_NAME,
                 daemon=True,
             )
             self._control_thread = thread

@@ -76,8 +76,8 @@ if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))
 
 from sil_dashboard_client import (  # noqa: E402  (path setup must precede it)
-    CONTROL_JOIN_TIMEOUT_S,
     CONTROL_PERIOD_S,
+    CONTROL_THREAD_NAME,
     HEARTBEAT_TIMEOUT_S,
     NEUTRAL_PWM_US,
     ControlState,
@@ -1428,28 +1428,54 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
         """
         The 20 Hz worker must be gone after a stop transition.
 
+        The property asserted is "no control worker is alive", located by the
+        client's own thread name (``CONTROL_THREAD_NAME``) rather than by
+        ``client._control_thread``.  The reference is a single slot that
+        ``connect()`` used to overwrite with ``None`` while the previous worker
+        was still running, so it could read clean at the moment a worker was alive
+        and still transmitting; a stale reference reading clean is precisely the
+        failure this suite exists to eliminate.  The referenced thread is included
+        in the search as well, so an alive but differently-named worker is caught.
+
         A bounded wait rather than an instantaneous ``is_alive()`` read: the stop
         signal is observed by the worker thread, so its death is in the future
         from here, and reading liveness in the same breath as the call races the
-        scheduler.  The budget is the client's own ``CONTROL_JOIN_TIMEOUT_S``,
-        imported from the production module, so the test's idea of "prompt" stays
-        tied to the code that implements the stop rather than drifting from it.
-        The entry point has already spent one such budget internally and returns
-        no verdict, so this is the second; a worker that outlives it still fails,
-        and the message says how long it actually took.
+        scheduler.
+
+        The budget is ``CONTROL_PERIOD_S``, derived rather than chosen: the only
+        wait in ``_control_loop`` is ``stop_event.wait(remaining)`` with
+        ``remaining <= CONTROL_PERIOD_S``, so one control period is the exact
+        worst case a signalled worker can take to notice.  This replaces an
+        earlier ``CONTROL_JOIN_TIMEOUT_S`` wait that the entry point had already
+        spent internally, which made the bound twice the client's own join budget
+        for no stated reason; a worker that outlives one control period still
+        fails, and the message says how long it took.
         """
         started = time.monotonic()
-        thread = self.client._control_thread
-        while thread is not None and thread.is_alive():
-            if time.monotonic() - started >= CONTROL_JOIN_TIMEOUT_S:
+        while self._liveControlWorkers():
+            if time.monotonic() - started >= CONTROL_PERIOD_S:
                 break
             time.sleep(0.005)
         elapsed = time.monotonic() - started
-        self.assertTrue(
-            thread is None or not thread.is_alive(),
-            f"The 20 Hz control worker was still running {elapsed:.3f} s after the stop "
-            f"transition, which exceeds the client's own {CONTROL_JOIN_TIMEOUT_S:.1f} s "
-            f"join budget; control_state={self.client.control_state}",
+        live = self._liveControlWorkers()
+        self.assertEqual(
+            live,
+            [],
+            f"A 20 Hz control worker was still alive {elapsed * 1000:.1f} ms after the stop "
+            f"transition, which is past the {CONTROL_PERIOD_S * 1000:.0f} ms control period "
+            f"that bounds how long a signalled worker can take to notice; "
+            f"control_state={self.client.control_state}",
+        )
+
+    def _liveControlWorkers(self) -> list:
+        """Every live 20 Hz control worker in this process, by the client's own name."""
+        candidates = {
+            t for t in threading.enumerate() if t.name == CONTROL_THREAD_NAME
+        }
+        candidates.add(self.client._control_thread)
+        return sorted(
+            (t for t in candidates if t is not None and t.is_alive()),
+            key=lambda t: t.name,
         )
 
     def test_all_stop_stops_the_worker_and_silences_the_command_path(self):

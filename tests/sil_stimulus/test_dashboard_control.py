@@ -23,6 +23,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import unittest
 from pathlib import Path
 
@@ -83,6 +84,24 @@ SEMANTIC_MEAN_GAP_MAX_S = HEARTBEAT_TIMEOUT_S * 0.75
 # elapsed (nodes/node2_control_board/Core/Src/app.c).
 ESC_ARMING_SIM_MS = 3000
 SIM_MS_PER_WALL_S = 0.8  # generous lower bound; the C engine sleeps 10 ms per 10 ms tick
+
+
+def _lock_is_held(lock) -> bool:
+    """
+    Diagnostic: is ``lock`` held by *some* thread right now?
+
+    Neither :class:`threading.Lock` nor :class:`threading.RLock` in CPython
+    exposes ownership, and ``_is_owned()`` on the reentrant flavour only answers
+    for the calling thread.  The only portable question available is "can I take
+    it right now", so that is what is asked, and the answer is released again
+    immediately.  It cannot see a hold that begins and ends between the acquire
+    and the release, so it is evidence of a *sustained* hold only -- which is
+    exactly the case that would explain a worker stuck for whole seconds.
+    """
+    if lock.acquire(blocking=False):
+        lock.release()
+        return False
+    return True
 
 
 class _ThrusterSendSpy:
@@ -403,44 +422,122 @@ class TestDashboardControlAgainstServer(ServerBackedTestCase):
             what="the board outputs to return to neutral",
         )
 
+    def control_worker_diagnostics(self, thread: "threading.Thread") -> str:
+        """
+        Where the 20 Hz worker is, and what it is waiting on, read off the OS.
+
+        A worker that outlives its join budget is one of a small number of
+        things, and "the thread is still alive" does not distinguish any of them.
+        The two that matter are *blocked inside the loop* (so the frame that
+        blocked it is the answer) and *not being scheduled* (so no frame is the
+        answer and the bug is elsewhere).  Only the live stack separates those,
+        so the stack is captured here rather than argued about afterwards.
+
+        The lock ownership probes are the other half.  ``self.lock`` is a plain
+        :class:`threading.Lock` and exposes no ``_is_owned``, so ownership is
+        probed by attempting a non-blocking acquire: if it succeeds, nobody held
+        it and it is released again immediately.  That probe is not atomic with
+        respect to the worker, so it can report "free" for a lock the worker
+        holds for a microsecond -- it is evidence of a *long* hold, which is
+        the only case that explains a multi-second stall.
+        """
+        if thread is None:
+            return "  the client holds no control worker reference at all"
+        ident = getattr(thread, "ident", None)
+        lines = [
+            f"  control worker diagnostics:",
+            f"    thread                : name={thread.name!r} ident={ident} "
+            f"daemon={thread.daemon}",
+            f"    is_alive              : {thread.is_alive()}",
+            f"    client._control_thread: {self.client._control_thread!r}",
+            f"    stop_event is_set     : {self.client._control_stop.is_set()}",
+            f"    control_state         : {self.client.control_state}",
+            f"    connected             : {self.client.connected}",
+            f"    self.lock             : "
+            + ("HELD by some thread" if _lock_is_held(self.client.lock) else "free"),
+            f"    _send_lock            : "
+            + ("HELD by some thread" if _lock_is_held(self.client._send_lock) else "free"),
+        ]
+        frames = sys._current_frames()
+        frame = frames.get(ident) if ident is not None else None
+        if frame is None:
+            lines.append("    >> the worker has no live frame: it is not runnable, "
+                         "so it is NOT blocked in _control_loop. Look for whoever "
+                         "starved or killed it.")
+        else:
+            lines.append("    >> the worker's live stack, innermost frame last:")
+            for entry in traceback.extract_stack(frame):
+                lines.append(f"      {entry.filename}:{entry.lineno} in {entry.name}")
+        return "\n".join(lines)
+
+    def live_control_workers(self) -> list:
+        """
+        Every live 20 Hz control worker in this process, found by the client's own
+        thread name.
+
+        ``client._control_thread`` is a single slot, and asserting on it asserts
+        the wrong thing: ``connect()`` used to overwrite that slot with ``None``
+        while the previous worker was still running, so the slot read "no worker"
+        at the exact moment a worker was alive and still transmitting.  A stale
+        reference reading clean is the failure this branch exists to remove, so
+        the property here is "no control worker is alive", located by the name the
+        client gives the thread rather than by the reference the client holds.
+
+        The referenced thread is included too, so a worker that is alive but
+        somehow unnamed is still caught.
+        """
+        candidates = {t for t in threading.enumerate() if t.name == sil_dashboard_client.CONTROL_THREAD_NAME}
+        candidates.add(self.client._control_thread)
+        return sorted(
+            (t for t in candidates if t is not None and t.is_alive()),
+            key=lambda t: t.name,
+        )
+
     def assert_worker_stopped(self) -> None:
         """
         The 20 Hz control worker must be gone after a stop transition.
 
-        A *bounded wait*, not an instantaneous read, and that is the whole
-        content of the change.  ``stop_control_loop`` signals the worker and then
-        joins it with ``CONTROL_JOIN_TIMEOUT_S``; the signal is observed by
-        another thread, so the thread's death is a moment in the future from the
-        caller's point of view no matter how the join is written.  Reading
-        ``thread.is_alive()`` in the same breath as the call is a race with the
-        scheduler, and this helper is called from six tests that all stop the
-        worker the same way, so the race was not confined to one of them.
+        The property asserted is "no control worker is alive", not "the reference
+        I captured is dead"; see :meth:`live_control_workers`.  Those are different
+        claims, the client can make the first true while the second is false, and
+        only the first is the safety property -- a live worker keeps refreshing the
+        firmware heartbeat behind a dashboard that believes it is parked.
 
-        The budget is the client's own ``CONTROL_JOIN_TIMEOUT_S`` rather than a
-        number chosen here, for two reasons: it is the interval the client
-        itself declares sufficient for this exact join, and it keeps the test's
-        idea of "prompt" tied to the production code's instead of drifting from
-        it.  Note the two budgets are spent in sequence -- the entry point
-        (``disconnect``, ``request_stop``) spends the first one internally and
-        returns no verdict, so this is the second.  That is a deliberate,
-        documented widening and not a licence to wait indefinitely: a worker
-        that outlives the budget still fails, and the message reports how long it
-        actually took so a genuine hang is distinguishable from a slow unwind.
+        A *bounded wait*, not an instantaneous read.  The stop signal is observed
+        by the worker thread, so its death is a moment in the future from the
+        caller's point of view no matter how the join is written, and reading
+        liveness in the same breath as the call races the scheduler.
+
+        The budget is ``CONTROL_PERIOD_S`` and it is derived, not chosen.  It is
+        the exact worst case the worker's own loop allows: the only wait in
+        ``_control_loop`` is ``stop_event.wait(remaining)`` with
+        ``remaining <= CONTROL_PERIOD_S``, and every other step is a non-blocking
+        socket write or a short critical section, so a signalled worker must be
+        gone within one control period.  This *replaces* an earlier
+        ``2 x CONTROL_JOIN_TIMEOUT_S`` wait, which was 20x looser than the
+        contract it was checking and so could only ever have been consumed by a
+        real hang -- a tolerance rather than a bound.  The entry point
+        (``disconnect``, ``request_stop``) has already spent its own join budget
+        internally and returns no verdict, so the wait here is a second look at the
+        same property, not a second chance at it.  A worker that outlives one
+        control period still fails, and the message carries that worker's live
+        stack, so the failure names where it is stuck and not merely that it is.
         """
-        budget = sil_dashboard_client.CONTROL_JOIN_TIMEOUT_S
+        budget = sil_dashboard_client.CONTROL_PERIOD_S
         started = time.monotonic()
-        thread = self.client._control_thread
-        while thread is not None and thread.is_alive():
+        while self.live_control_workers():
             if time.monotonic() - started >= budget:
                 break
             time.sleep(0.005)
         elapsed = time.monotonic() - started
-        self.assertTrue(
-            thread is None or not thread.is_alive(),
-            f"The 20 Hz control worker was still running {elapsed:.3f} s after the "
-            f"stop transition, which exceeds the client's own "
-            f"{budget:.1f} s join budget; control_state={self.client.control_state}, "
-            f"connected={self.client.connected}",
+        live = self.live_control_workers()
+        self.assertEqual(
+            live,
+            [],
+            f"A 20 Hz control worker was still alive {elapsed * 1000:.1f} ms after the "
+            f"stop transition, which is past the {budget * 1000:.0f} ms control period that "
+            f"bounds how long a signalled worker can take to notice\n"
+            f"{self.control_worker_diagnostics(live[0] if live else None)}",
         )
 
     def _wait_for_live_neutral_status(self, timeout_s: float) -> None:
@@ -1138,6 +1235,152 @@ class TestDashboardControlAgainstServer(ServerBackedTestCase):
         self.assertIs(self.client.control_state, ControlState.ESTOP)
         self.assertTrue(self.spy.quiet_for(0.20))
         self._wait_for_neutral(timeout_s=1.0)
+
+    # ------------------------------------------------------------------
+    # Reconnect while a worker is still running
+    # ------------------------------------------------------------------
+
+    def _park_the_worker_inside_a_send(self, park_s: float) -> threading.Event:
+        """
+        Hold the 20 Hz worker inside its socket write until released.
+
+        Returns the event that is set once the worker is parked, so the caller can
+        act while the worker provably cannot re-check the control state.  Only the
+        worker blocks: the test thread's own send has to go through, which is how
+        the park is armed in the first place.
+        """
+        parked = threading.Event()
+        release = threading.Event()
+        self.addCleanup(release.set)
+        original = self.client._send_thruster_frame
+
+        def parked_send(pwms):
+            if threading.current_thread().name == sil_dashboard_client.CONTROL_THREAD_NAME:
+                parked.set()
+                release.wait(park_s)
+            return original(pwms)
+
+        self.client._send_thruster_frame = parked_send
+        self.addCleanup(setattr, self.client, "_send_thruster_frame", original)
+        return parked
+
+    def test_a_reconnect_while_a_worker_is_running_does_not_orphan_it(self):
+        """
+        Invariant: a new transport never inherits the previous one's worker.
+
+        The 20 Hz worker watches the stop event it was *handed*, and
+        ``connect()`` installs a fresh one.  The rx thread can end on its own for
+        any reason -- ``_rx_loop`` sets ``connected = False`` on every exit path,
+        including a socket error -- and the worker does not watch that, so it keeps
+        running.  A reconnect in that state used to overwrite ``_control_stop``
+        with a new ``Event`` and set ``_control_thread = None`` while the worker was
+        still alive, which left it holding a thread object nobody referenced and
+        waiting on an event nothing could set.  It could not be joined, it could
+        not be signalled, and it went on pushing its held command onto the new
+        transport while the client reported ``ARMED`` with a neutral
+        ``_last_command``.
+
+        That is a stale reference reading as a clean state, and it is invisible to
+        an assertion about ``_control_thread`` -- which is exactly why the helper
+        asserts on the live workers by name instead.  The worker is parked inside
+        its write so the state is deterministic rather than a race: without the
+        park it would usually notice ``ARMED`` and exit on its own within one
+        50 ms tick, and the test would pass against the broken code for the wrong
+        reason.
+        """
+        self._wait_until_esc_armed()
+        parked = self._park_the_worker_inside_a_send(park_s=CONTROL_PERIOD_S * 5)
+
+        self.client.send_pwms([1650] * 8)
+        self.assertTrue(
+            parked.wait(1.0),
+            "the worker never entered a send, so nothing is parked and this test "
+            "would prove nothing",
+        )
+
+        # Precondition: a worker is alive and mid-write.
+        self.assertEqual(
+            len(self.live_control_workers()),
+            1,
+            "exactly one worker should be running before the reconnect",
+        )
+
+        # The rx thread ends on its own. This is the real-world trigger: a socket
+        # error inside _rx_loop, with no operator action at all.
+        self.client.running = False
+        self._wait_for(
+            lambda: not self.client.connected,
+            timeout_s=2.0,
+            what="the rx thread to notice it has no transport",
+        )
+        self.assertEqual(
+            len(self.live_control_workers()),
+            1,
+            "losing the rx thread must not stop the worker; that is what makes a "
+            "reconnect able to orphan one",
+        )
+
+        self.assertTrue(
+            self.client.connect(),
+            "the reconnect under test must succeed; a refusal here is a different bug",
+        )
+
+        self.assertEqual(
+            self.live_control_workers(),
+            [],
+            "connect() replaced the worker's stop event and cleared its thread "
+            "reference while the worker was still running, so the worker is now "
+            "unjoinable and unsignalable and is still transmitting the command it "
+            "was holding onto the new transport. The client reports "
+            f"control_state={self.client.control_state} and "
+            f"_last_command={self.client._last_command}, both of which look clean.",
+        )
+        self.assertIsNone(
+            self.client._control_thread,
+            "sanity: the fix must leave no reference behind either",
+        )
+        self.assertEqual(
+            self.client._last_command,
+            NEUTRAL_PWMS,
+            "a new transport hands the control path back neutral",
+        )
+
+    def test_the_reconnected_client_refuses_to_push_the_old_command_onto_the_new_transport(self):
+        """
+        The consequence of the orphan, stated separately because it is the part
+        that reaches the vehicle: an orphan keeps resending at 20 Hz, which both
+        holds a stale non-neutral command on the wire and keeps refreshing the
+        firmware heartbeat behind a dashboard that says it is parked.
+        """
+        self._wait_until_esc_armed()
+        parked = self._park_the_worker_inside_a_send(park_s=CONTROL_PERIOD_S * 5)
+
+        self.client.send_pwms([1650] * 8)
+        self.assertTrue(parked.wait(1.0), "the worker never entered a send")
+
+        self.client.running = False
+        self._wait_for(
+            lambda: not self.client.connected,
+            timeout_s=2.0,
+            what="the rx thread to notice it has no transport",
+        )
+        self.assertTrue(self.client.connect())
+
+        # Everything the reconnect itself transmitted, from here on.
+        baseline = self.spy.count()
+        self.assertTrue(
+            self.spy.quiet_for(CONTROL_PERIOD_S * 6),
+            "a worker orphaned by the reconnect went on transmitting after it: the "
+            f"new transport received {self.spy.count() - baseline} frame(s) while the "
+            f"client reported control_state={self.client.control_state} and a neutral "
+            f"_last_command",
+        )
+        _, payloads = self.spy.snapshot()
+        self.assertTrue(
+            all(p == NEUTRAL_PWMS for p in payloads[baseline:]),
+            "no non-neutral frame may appear on a freshly reconnected transport "
+            f"unless the operator asked for one; saw {payloads[baseline:]}",
+        )
 
 
 class TestDashboardEngineRestart(ServerBackedTestCase):
