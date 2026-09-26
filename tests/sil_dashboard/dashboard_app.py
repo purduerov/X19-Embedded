@@ -823,11 +823,20 @@ UPLINK (mock sensors to dashboard views):
                     new_mask |= (1 << (valve * 2 + 1))
 
         if new_mask != client.solenoid_mask:
+            # send_solenoids refuses a mask that energises both coils of any valve
+            # (rov_can_protocol.c:120-126 zeroes the whole mask for one) and leaves
+            # the recorded target alone, so this diff keeps proposing the same mask
+            # on the next render until the operator clears a coil.  The reason is
+            # shown below rather than swallowed: a silently ignored toggle is the
+            # same "the UI says one thing and the board does another" failure.
             client.send_solenoids(new_mask)
         st.caption(
             f"Command target 0x{client.solenoid_mask:03X} · mock readback 0x{client.actual_solenoid_mask:03X} · "
             f"{stream_age_label(client, CAN_ID_SIL_OUTPUT_STATUS)}"
         )
+        refusal = getattr(client, "last_solenoid_refusal", None)
+        if refusal:
+            st.warning(f"CAN 0x110 not sent — {refusal}")
 
     # =========================================================================
     # TAB 3: NAVIGATION & ATTITUDE (100 Hz)

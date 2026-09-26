@@ -80,6 +80,7 @@ from sil_dashboard_client import (  # noqa: E402  (path setup must precede it)
     ControlState,
     SilDashboardClient,
     compute_thrust_allocation,
+    conflicting_solenoid_valve,
 )
 
 # Importing the dashboard module pulls in streamlit.  A missing streamlit must
@@ -193,6 +194,7 @@ class _RecordingClient:
         self.estop_latched = estop_latched
         self.pwms: List[int] = list(NEUTRAL_PWMS)
         self.solenoid_mask = 0
+        self.last_solenoid_refusal = None
         self.pipeline_surface_cmd = {
             "surge": 0.0, "sway": 0.0, "heave": 0.0,
             "yaw": 0.0, "pitch": 0.0, "roll": 0.0,
@@ -241,6 +243,17 @@ class _RecordingClient:
 
     def send_solenoids(self, mask) -> bool:
         self._record("send_solenoids", mask)
+        # The one shared interlock rule, so this stub cannot disagree with the
+        # firmware about which masks are rejected.  The refusal TEXT is the real
+        # client's; the stub carries the valve number through, which is what the
+        # UI has to show.
+        valve = conflicting_solenoid_valve(mask)
+        if valve is not None:
+            self.last_solenoid_refusal = (
+                f"refused 0x{mask:03X}: it energises both coils of valve {valve}"
+            )
+            return False
+        self.last_solenoid_refusal = None
         self.solenoid_mask = mask
         return True
 
@@ -2100,6 +2113,7 @@ class _StreamlitFakeClient(_RecordingClient):
         self.started_server = False
         self.pwms = list(NEUTRAL_PWMS)
         self.solenoid_mask = 0
+        self.last_solenoid_refusal = None
         self.control_state = ControlState.ARMED
         # The per-tab diff baselines live in dashboard_app keyed by client, and
         # this fake is a process-wide singleton behind st.cache_resource, so they
@@ -2328,6 +2342,54 @@ class TestDashboardUiThroughStreamlit(unittest.TestCase):
                     1650,
                     f"{key} must show the held command, not the pre-preset position",
                 )
+
+    def test_turning_on_both_coils_of_one_valve_is_refused_and_said_out_loud(self):
+        """
+        The operator-reachable interlock violation, through the real script.
+
+        Ten independent toggles build a mask with no interlock check, so switching
+        on both coils of one valve produced a mask the firmware rejects wholesale:
+        rov_can_protocol.c:120-126 zeroes the whole mask, app.c:150-153 then skips
+        bsp_solenoid_set, and every OTHER valve in the mask drops with no operator
+        action while the UI records the rejected mask as the command target.
+        """
+        self._run()
+        self._disable_auto_refresh()
+        self.client.engage(ControlState.ARMED)
+        self._run()
+        self.client.calls.clear()
+        self.at.toggle(key="sol_ext_0").set_value(True)
+        self._run()
+        self.assertEqual(self.client.solenoid_mask, 0x001, "precondition: valve 0 extend went out")
+        self.client.calls.clear()
+        self.at.toggle(key="sol_ret_0").set_value(True)
+        self._run()
+
+        self.assertEqual(
+            self.client.solenoid_mask,
+            0x001,
+            "the rejected mask must not become the command target: valve 0 extend is "
+            "still latched on the board and the UI must keep saying so",
+        )
+        self.assertIn(
+            ("send_solenoids", (0x003,)),
+            self.client.calls,
+            "the toggles still asked for it, so the refusal is what must hold",
+        )
+        warnings = " ".join(element.value for element in self.at.warning)
+        self.assertIn("both coils of valve 0", warnings)
+        self.assertIn("0x110 not sent", warnings)
+
+    def test_a_valid_solenoid_mask_still_shows_no_refusal(self):
+        self._run()
+        self._disable_auto_refresh()
+        self.client.engage(ControlState.ARMED)
+        self._run()
+        self.at.toggle(key="sol_ext_0").set_value(True)
+        self._run()
+        self.assertEqual(self.client.solenoid_mask, 0x001)
+        self.assertIsNone(self.client.last_solenoid_refusal)
+        self.assertNotIn("0x110 not sent", " ".join(e.value for e in self.at.warning))
 
     def test_all_stop_hover_button_calls_request_stop(self):
         """

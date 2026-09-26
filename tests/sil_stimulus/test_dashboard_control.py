@@ -17,6 +17,7 @@ Run from the repository root::
     python -m unittest tests.sil_stimulus.test_dashboard_control -v
 """
 
+import socket
 import sys
 import threading
 import time
@@ -261,6 +262,83 @@ class TestDashboardControlStateMachine(unittest.TestCase):
         self.assertFalse(self.client.request_emergency_break())
         self.assertIs(self.client.control_state, ControlState.ESTOP)
         self.assertIsNone(self.client._control_thread)
+
+
+class TestSolenoidInterlock(unittest.TestCase):
+    """
+    Invariant: the UI cannot ask for a mask the firmware rejects wholesale.
+
+    ``shared/src/rov_can_protocol.c:120-126`` walks the five valves and, for any
+    valve with BOTH coils energised, zeroes the whole mask and returns
+    ``ROV_ERR_INVALID_ARG``; ``nodes/node2_control_board/Core/Src/app.c:150-153``
+    then skips ``bsp_solenoid_set`` entirely, so the outputs keep whatever mask
+    was already there. ``tools/can_stimulus.py`` refuses such a mask and explains
+    exactly that, and the dashboard's ten independent toggles could produce one
+    anyway: valve 0 Extend on (0x001), then valve 1 Retract (0x007) energises both
+    coils of valve 1, the firmware zeroes the mask, and valve 0 silently drops too
+    while the UI records 0x007 as the command target.
+
+    The rule now lives with the code that packs 0x110, so the tool and the UI
+    cannot hold two copies of a firmware decision that will drift.
+    """
+
+    def test_the_tool_and_the_client_share_one_interlock_rule(self):
+        from tools import can_stimulus  # noqa: PLC0415 - only needed by this test
+
+        self.assertIs(
+            can_stimulus.conflicting_solenoid_valve,
+            sil_dashboard_client.conflicting_solenoid_valve,
+            "one firmware rule, one implementation: a second copy would drift and "
+            "the drift would be invisible",
+        )
+
+    def test_a_conflicting_mask_is_named_rather_than_silently_masked(self):
+        # 0x007 is bits 0,1,2: valve 0's pair is fully energised, so valve 0 is the
+        # FIRST conflict even though valve 1 also has a coil lit. 0x002 is one coil
+        # of valve 0 and is therefore legal.
+        for mask, valve in ((0x007, 0), (0x003, 0), (0x00C, 1), (0x3FF, 0), (0x155, None), (0x002, None)):
+            with self.subTest(mask=f"0x{mask:03X}"):
+                self.assertEqual(
+                    sil_dashboard_client.conflicting_solenoid_valve(mask),
+                    valve,
+                )
+
+    def _armed_client(self):
+        """A client that believes it is connected, with a real (unconnected) socket."""
+        client = SilDashboardClient()
+        client.connected = True
+        client.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.addCleanup(client.disconnect)
+        return client
+
+    def test_send_solenoids_refuses_a_mask_that_energises_both_coils(self):
+        client = self._armed_client()
+        written = []
+        client._send_frame = lambda *args, **kwargs: written.append(args[1])
+
+        self.assertFalse(
+            client.send_solenoids(0x007),
+            "a mask the firmware rejects wholesale must not be reported as sent",
+        )
+        self.assertEqual(written, [], "the refusal has to come before the write")
+        self.assertEqual(
+            client.solenoid_mask,
+            0x000,
+            "a refused mask must not become the recorded command target; the board "
+            "never applied it",
+        )
+        self.assertIn("both coils of valve 0", client.last_solenoid_refusal)
+        self.assertIn("rov_can_protocol.c:120-126", client.last_solenoid_refusal)
+
+    def test_a_valid_mask_still_goes_out_unchanged(self):
+        client = self._armed_client()
+        written = []
+        client._send_frame = lambda *args, **kwargs: written.append((args[1], args[2]))
+
+        self.assertTrue(client.send_solenoids(0x0155))
+        self.assertEqual([can_id for can_id, _ in written], [sil_dashboard_client.CAN_ID_SOLENOID_CMD])
+        self.assertEqual(client.solenoid_mask, 0x155)
+        self.assertIsNone(client.last_solenoid_refusal)
 
 
 class TestDashboardControlAgainstServer(unittest.TestCase):
