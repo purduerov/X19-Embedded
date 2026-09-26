@@ -166,9 +166,21 @@ def auto_refresh_due(client, auto_refresh: bool, refresh_rate: float) -> bool:
 # included.  Symmetrically, a thruster command must not make the pilot tab
 # re-send.  One baseline per tab closes both directions.
 #
+# One baseline per *client* is not enough on its own: ``st.cache_resource`` hands
+# every browser session the same client, so a second session inherits the first
+# session's baseline while its own sliders are seeded from the client's current
+# command.  Comparing those two values re-arms thrust on the new session's very
+# first render.  :func:`publish_tab_baseline` therefore seeds a tab's first
+# baseline from :func:`tab_seed_value` -- the same source its widgets seed from --
+# and the predicates additionally treat "the sliders already show the command" as
+# nothing to send.  The baseline is deliberately NOT keyed on the browser session:
+# ``st.session_state`` is not reliably readable outside a script run, and these
+# predicates must stay callable (and testable) without a Streamlit runtime.
+#
 # Keyed weakly by client so a replaced client cannot leak baselines, and held in
 # the UI rather than the client because these are dashboard-owned records of
 # what the operator last dialled in, not protocol state.
+
 _TAB_BASELINES = weakref.WeakKeyDictionary()
 
 #: Stable identifiers for the two slider-diff baselines.
@@ -179,24 +191,47 @@ TAB_THRUSTER = "thruster"
 def tab_baseline(client, tab: str):
     """
     Return the last value *this tab* published, or None if it never has.
-
-    None means "this session has not published anything yet", and the predicates
-    below treat that as "nothing to send" rather than "everything changed".  The
-    sliders are seeded from the client's own current values, so adopting them
-    without transmitting is both safe and correct.
     """
     return _TAB_BASELINES.get(client, {}).get(tab)
 
 
+def tab_seed_value(client, tab: str):
+    """
+    The value a tab's sliders are seeded from on a render with no widget state.
+
+    Must stay identical to the ``value=`` / ``float(...)`` source of the matching
+    ``st.slider`` in main(), because that equality is what makes a fresh session's
+    first render a no-op.  Pilot sliders read ``client.pipeline_surface_cmd``;
+    thruster sliders read ``client.pwms``.
+    """
+    if tab == TAB_PILOT:
+        command = client.pipeline_surface_cmd
+        return (command["surge"], command["sway"], command["heave"], command["yaw"])
+    if tab == TAB_THRUSTER:
+        return tuple(int(value) for value in client.pwms)
+    raise ValueError(f"unknown control tab: {tab!r}")
+
+
 def publish_tab_baseline(client, tab: str, values) -> None:
     """
-    Record what a tab is now displaying, so its next diff finds no change.
+    Record what a tab is now showing, so its next diff finds no change.
 
     Called once per tab per render, after the send decision: it records the
     transmitted value when a send happened and the unchanged widget value when it
     did not, which are the same thing in both cases.
+
+    The FIRST publish for a client adopts :func:`tab_seed_value` instead of the
+    widget value -- the same source the sliders were seeded from -- so a fresh
+    session's baseline and its seeded slider values agree by construction.  Without
+    that, a second session sharing the cached client would hold the *previous*
+    session's widget values as its baseline while its own sliders were seeded from
+    the client's current command, see a difference that no operator caused, and
+    re-arm thrust on its first render.
     """
-    _TAB_BASELINES.setdefault(client, {})[tab] = tuple(values)
+    stored = _TAB_BASELINES.get(client, {}).get(tab)
+    _TAB_BASELINES.setdefault(client, {})[tab] = (
+        tuple(values) if stored is not None else tab_seed_value(client, tab)
+    )
 
 
 def forget_tab_baselines(client) -> None:
@@ -206,28 +241,45 @@ def forget_tab_baselines(client) -> None:
 
 def pilot_axes_changed(client, surge: float, sway: float, heave: float, yaw: float) -> bool:
     """
-    True when the 6-DOF sliders differ from the last axes *this tab* published.
+    True when the 6-DOF sliders differ from the last axes *this tab* published
+    *and* differ from the command the client is already holding.
 
-    Reads the pilot tab's own baseline, never ``client.pwms`` and never a field
-    the thruster tab writes.
+    Both conditions are needed.  The first is the operator's intent, and reading
+    only its own baseline is what keeps the two tabs from fighting.  The second
+    covers a session whose baseline predates the current command: a fresh session's
+    sliders are seeded from the client's command, so "the sliders already show the
+    command" means there is nothing to send, however stale the baseline is.
+
+    Read-only.  It never reads a field the thruster tab writes.
     """
     axes = (surge, sway, heave, yaw)
     baseline = tab_baseline(client, TAB_PILOT)
-    return baseline is not None and axes != baseline
+    if baseline is None:
+        return False
+    if axes == tuple(baseline):
+        return False
+    return axes != tab_seed_value(client, TAB_PILOT)
 
 
 def thruster_targets_changed(client, pwms) -> bool:
     """
     True when the 8 per-channel sliders differ from the last targets *this tab*
-    published.
+    published *and* differ from the command the client is already holding.
 
-    Deliberately does not read ``client.pwms``: every sender writes that field,
-    including the pilot tab, so diffing against it re-arms the thruster tab's
-    stale target whenever the operator uses the other tab.
+    Deliberately does not treat "differs from ``client.pwms``" as the whole test:
+    every sender writes that field, including the pilot tab, and
+    ``request_stop()`` deliberately leaves it stale.  Comparing a fresh session's
+    seeded sliders against a previous session's baseline -- or against a stale
+    ``pwms`` -- is exactly the cross-session re-arm this replaces.
     """
     targets = tuple(pwms)
     baseline = tab_baseline(client, TAB_THRUSTER)
-    return baseline is not None and targets != tuple(baseline)
+    if baseline is None:
+        return False
+    if targets == tuple(baseline):
+        return False
+    return targets != tab_seed_value(client, TAB_THRUSTER)
+
 
 
 def control_state_presentation(client):
@@ -302,8 +354,16 @@ def main():
         col_srv1, col_srv2 = st.columns(2)
         with col_srv1:
             if st.button("Restart Engine", width="stretch"):
-                restart_engine(client)
-                st.rerun()
+                if restart_engine(client):
+                    st.rerun()
+                else:
+                    # No rerun: a Streamlit error does not survive one, and the
+                    # operator needs to read why the engine did not come back.
+                    st.error(
+                        "Restart Engine failed: the SIL engine did not start, or "
+                        "did not accept a connection on 127.0.0.1:8765. Check that "
+                        "sil_bridge_server is built and runnable, then try again."
+                    )
         with col_srv2:
             if st.button("Stop Engine", width="stretch"):
                 stop_engine(client)
