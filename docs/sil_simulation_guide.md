@@ -106,6 +106,19 @@ Dashboard features:
 
 [`tools/can_stimulus.py`](../tools/can_stimulus.py) is the **canonical** stimulus tool. It injects stimulus at the CAN boundary and verifies the result against the board's own `0x7FE` output-status readback, which exists only inside the SIL engine. When nothing is listening on the target port it launches an engine of its own and reaps it on exit.
 
+**When something *is* already listening, the tool refuses** and exits 2, before a single frame is written:
+
+```
+[FAIL] refused: refused before sending any frame: something is already listening on
+127.0.0.1:8765 and this run did not start it, so the checks would drive an engine
+this tool does not own. ...
+```
+
+That is not caution for its own sake. `--emergency-break` drives all eight thrusters to 1800 us and latches the emergency brake of whatever engine it reaches, for the life of that engine, and the dashboard starts an engine on port 8765 on every render — so the commands below, run while a dashboard is open, would otherwise commandeer a live operator's vehicle and report `[PASS]` while doing it. Two ways forward:
+
+- **Use your own engine.** Pass `--port` with a port nothing is listening on; the tool launches one, reaps it, and reports the result honestly.
+- **Deliberately attach.** Pass `--attach-existing` and name the individual checks you want. `--auto` is refused alongside it, because there is no harmless whole-vehicle run against somebody else's engine.
+
 ```powershell
 # Build the native engine the checks drive
 cmake -B build-native -G Ninja
@@ -225,7 +238,7 @@ The dashboard control worker ([`tests/sil_dashboard/sil_dashboard_client.py`](..
 | --- | --- |
 | `0` | every selected check **observed** what it required |
 | `1` | at least one check failed, or the engine could not be reached |
-| `2` | usage error: no action selected, an unusable value, or a refused legacy flag |
+| `2` | usage error: no action selected, an unusable value, a refused legacy flag, or a refusal to actuate an engine this run did not start (see 3) |
 
 A nonzero exit means a required SIL observation was **missing, malformed, stale, or incorrect**. It never means a crash was swallowed: each check turns its own observation failures into a failed result, a guard converts anything that still escapes into a failed result, and the CLI turns a failure to reach the transport into a nonzero status. The tool cannot report success while a check did not actually run. Every result is also streamed as it completes, so a run killed part way through still leaves per-check evidence in its output.
 
@@ -245,7 +258,7 @@ A nonzero exit means a required SIL observation was **missing, malformed, stale,
 Restart the engine (or let this tool launch one) and run the arming check first.
 ```
 
-Run it first, against a fresh engine. That is why `--auto` puts it first, and why every per-node integration test starts an engine of its own. `NNNN` is whatever the engine's virtual clock had already reached; a real capture on a developer machine read `4090`.
+Run it first, against a fresh engine. That is why `--auto` puts it first, why the tool refuses to run against an engine it did not start (3), and why every per-node integration test starts an engine of its own. `NNNN` is whatever the engine's virtual clock had already reached; a real capture on a developer machine read `4090`.
 
 ### 7.5 Pointing the tools at a build tree: `X19_SIL_SERVER`
 

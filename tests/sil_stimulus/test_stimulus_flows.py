@@ -23,6 +23,7 @@ Run from the repository root::
 
 import contextlib
 import io
+import re
 import socket
 import struct
 import subprocess
@@ -63,6 +64,7 @@ from tools.can_stimulus import (  # noqa: E402
     main,
     pack_sil_can_frame,
     run_selected_action,
+    unpack_sil_can_frame,
 )
 from sil_protocol import (  # noqa: E402  (via can_stimulus's sys.path setup)
     SIL_OUTPUT_STATUS_STRUCT,
@@ -1052,7 +1054,8 @@ class TestSilSocketFraming(unittest.TestCase):
             time.sleep(1.0)
 
     def test_split_packet_is_reassembled_across_calls(self):
-        backend = SilSocketBackend("127.0.0.1", self.port, auto_start=False)
+        # attach_existing=True: the loopback peer is this test's own engine.
+        backend = SilSocketBackend("127.0.0.1", self.port, auto_start=False, attach_existing=True)
         backend.connect(timeout_s=2.0)
         self.addCleanup(backend.close)
 
@@ -1075,7 +1078,7 @@ class TestSilSocketFraming(unittest.TestCase):
         self.assertEqual(snapshot.sim_time_ms, self.STATUS_SIM_MS)
 
     def test_frame_listener_sees_telemetry_but_not_the_output_channel(self):
-        backend = SilSocketBackend("127.0.0.1", self.port, auto_start=False)
+        backend = SilSocketBackend("127.0.0.1", self.port, auto_start=False, attach_existing=True)
         backend.connect(timeout_s=2.0)
         self.addCleanup(backend.close)
         seen = []
@@ -1090,7 +1093,9 @@ class TestSilSocketFraming(unittest.TestCase):
     # these tests sees the whole script and the two-frame result is exact rather
     # than approximate.
     def _connected(self):
-        backend = SilSocketBackend("127.0.0.1", self.port, auto_start=False)
+        # attach_existing=True: this loopback peer is a stand-in for an engine the
+        # test started, so the backend legitimately attaches to it.
+        backend = SilSocketBackend("127.0.0.1", self.port, auto_start=False, attach_existing=True)
         backend.connect(timeout_s=2.0)
         self.addCleanup(backend.close)
         return backend
@@ -1163,6 +1168,260 @@ class TestSilSocketFraming(unittest.TestCase):
             "drain_frames must apply the same exclusion, so the already-consumed queue yields "
             "nothing rather than the 0x7FE that recv_frame swallowed",
         )
+
+
+class _RecordingEngine:
+    """
+    A bare TCP peer standing in for an engine somebody ELSE started.
+
+    Accepts one connection and records every SIL packet it is sent, so a test can
+    assert on what the tool actually put on the wire rather than on what the tool
+    says it did.  It sends nothing back: this test is about the refusal arriving
+    before any write, not about a readback.
+    """
+
+    def __init__(self, listening: bool = True):
+        # Bind first and listen second, so a peer can be created on a known port
+        # that is not yet reachable: a connect() to a bound-but-not-listening port
+        # is refused, which is what makes the auto-start branch testable without
+        # launching anything.
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.bind(("127.0.0.1", 0))
+        self.port = self.listener.getsockname()[1]
+        self.frames = []
+        self._stop = threading.Event()
+        self._thread = None
+        if listening:
+            self.open()
+
+    def open(self):
+        if self._thread is not None:
+            return
+        self.listener.listen(1)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self):
+        try:
+            conn, _ = self.listener.accept()
+        except OSError:  # pragma: no cover - only if the test tears down first
+            return
+        with conn:
+            buf = b""
+            conn.settimeout(0.2)
+            while not self._stop.is_set():
+                try:
+                    chunk = conn.recv(4096)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return
+                if not chunk:
+                    return
+                buf += chunk
+                while len(buf) >= SIL_PACKET_SIZE:
+                    can_id, payload = unpack_sil_can_frame(buf[:SIL_PACKET_SIZE])
+                    buf = buf[SIL_PACKET_SIZE:]
+                    self.frames.append((can_id, payload))
+
+    def ids(self):
+        return [can_id for can_id, _ in self.frames]
+
+    def close(self):
+        self._stop.set()
+        with contextlib.suppress(OSError):
+            self.listener.close()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+
+
+class TestEngineOwnership(unittest.TestCase):
+    """
+    Invariant: this tool drives an engine it started, or it refuses.
+
+    The reproduced defect: with an engine already listening on the port, the tool
+    connected to it, drove all eight thrusters to 1800 us, latched *that* engine's
+    emergency brake for the life of the engine, and printed ``[PASS]`` with exit 0.
+    The check's verdict was earned about the board it reached; the defect is the
+    shape the whole branch exists to kill - a success reported without the
+    precondition ("this is my own throwaway engine") ever being established,
+    checked, or disclosed.
+
+    Ownership is the same class of precondition as the output-status readback, so
+    it is enforced the same way: before anything is written.  These tests drive the
+    real ``SilSocketBackend`` and the real ``main()`` against a peer that records
+    every frame, so "nothing was written" is observed rather than assumed.
+    """
+
+    def setUp(self):
+        self.engine = _RecordingEngine()
+        self.addCleanup(self.engine.close)
+
+    def _cli(self, extra=(), backend_factory=None, action=("--emergency-break",)):
+        argv = [
+            "--mode",
+            "sil",
+            "--port",
+            str(self.engine.port),
+            *action,
+            *extra,
+        ]
+        return run_cli(argv, backend_factory=backend_factory or build_real_backend)
+
+    def test_connect_refuses_an_engine_this_backend_did_not_start(self):
+        backend = SilSocketBackend("127.0.0.1", self.engine.port, auto_start=False)
+        self.addCleanup(backend.close)
+        with self.assertRaises(can_stimulus.ForeignEngineError) as caught:
+            backend.connect(timeout_s=2.0)
+        message = str(caught.exception)
+        self.assertIn(str(self.engine.port), message, "the refusal must name the port it found")
+        self.assertIn("--attach-existing", message, "the refusal must name the opt-in")
+        self.assertFalse(backend.connected)
+
+    def test_the_refusal_arrives_before_any_frame_is_written(self):
+        """
+        The load-bearing assertion: no 0x100 and no 0x001 on the wire.
+
+        A refusal that arrives after the actuation is a refusal that is too late,
+        which is why ``_require_output_readback`` runs before the first send. This
+        is the same rule applied to ownership, so it is asserted the same way - on
+        the bytes the foreign engine received, not on the tool's return value.
+        """
+        status_code, printed = self._cli()
+        self.assertEqual(status_code, 2, printed)
+        self.assertEqual(
+            self.engine.ids(),
+            [],
+            "the tool wrote frames to an engine it does not own; the refusal must "
+            "come before the first write, not after it",
+        )
+
+    def test_the_cli_reports_the_refusal_rather_than_a_check_verdict(self):
+        status_code, printed = self._cli()
+        self.assertEqual(status_code, 2, printed)
+        self.assertIn("[FAIL] refused:", printed)
+        self.assertIn(str(self.engine.port), printed)
+        self.assertNotIn("[PASS]", printed)
+
+    def test_the_explicit_opt_in_does_attach_and_is_the_only_way_to(self):
+        """
+        The opt-in path has to work, or the refusal is a dead end.
+
+        Driven through the real ``build_backend`` so the flag is mapped the way it
+        is for an operator. ``--raw-send`` is used because it is the one check
+        that writes a frame the operator named and asserts nothing about the
+        vehicle, so this stays a transport-attachment test rather than an
+        actuation test.
+        """
+        status_code, printed = self._cli(
+            ["--attach-existing", "--raw-send", f"0x{CAN_ID_THRUSTER_CMD:03X}:DC05DC05DC05DC05DC05DC05DC05DC05"],
+            backend_factory=can_stimulus.build_backend,
+            action=(),
+        )
+        self.assertEqual(status_code, 0, printed)
+        self.assertEqual(
+            self.engine.ids(),
+            [CAN_ID_THRUSTER_CMD],
+            "the opt-in must let the named frame through, and only that frame",
+        )
+
+    def test_auto_is_refused_with_the_opt_in_because_it_is_a_whole_vehicle_run(self):
+        """
+        ``--auto`` drives every thruster, actuates a valve, and latches the brake.
+
+        There is no such thing as a harmless ``--auto`` against somebody else's
+        engine, so the two flags cannot be combined: the strict gate is the whole
+        point of the opt-in.
+        """
+        status_code, printed = run_cli(
+            ["--mode", "sil", "--port", str(self.engine.port), "--auto", "--attach-existing"],
+            backend_factory=build_real_backend,
+        )
+        self.assertEqual(status_code, 2, printed)
+        self.assertIn("--auto", printed)
+        self.assertIn("--attach-existing", printed)
+        self.assertEqual(self.engine.ids(), [])
+
+    def test_a_backend_that_owns_its_engine_is_not_refused(self):
+        """
+        The opt-in is not a blanket: a backend with a child of its own connects.
+
+        The condition is ownership, not the presence of a listener, so the
+        auto-start path must be unaffected. The peer is bound but not listening,
+        so the first probe fails exactly as it does against an unused port, and
+        the stand-in ``_start_server`` is what makes the engine reachable.
+        """
+        peer = _RecordingEngine(listening=False)
+        self.addCleanup(peer.close)
+        backend = SilSocketBackend("127.0.0.1", peer.port, auto_start=True)
+        self.addCleanup(backend.close)
+
+        class _Child:
+            """A stand-in Popen: alive, and harmless to close."""
+
+            pid = -1
+
+            @staticmethod
+            def poll():
+                return None
+
+            @staticmethod
+            def terminate():
+                pass
+
+            @staticmethod
+            def kill():
+                pass
+
+            @staticmethod
+            def wait(timeout=None):
+                return 0
+
+        def fake_start(_self):
+            peer.open()
+            _self._process = _Child()  # ownership, without a real child
+
+        with mock.patch.object(SilSocketBackend, "_start_server", fake_start):
+            backend.connect(timeout_s=2.0)
+        self.assertTrue(backend.connected)
+        self.assertTrue(backend.started_server)
+
+    def test_the_ephemeral_port_integration_backend_declares_its_own_attachment(self):
+        """
+        Every in-tree backend that talks to an engine it did not launch must say so.
+
+        ``SilServerProcess`` starts the engine, so the backend behind it legitimately
+        attaches. Pinning that here is what stops the refusal from being "fixed" by
+        relaxing it: a new fixture has to make the same declaration.
+        """
+        source = Path(REPO_ROOT / "tests" / "sil_stimulus" / "test_stimulus_flows.py").read_text(
+            encoding="utf-8"
+        )
+        # Only call sites: a string host argument means it is a construction, so the
+        # ``class ObservingSilBackend(SilSocketBackend)`` definition is not matched.
+        constructions = re.findall(r"ObservingSilBackend\(\"[^\"]*\",[^\n]*\)", source)
+        self.assertTrue(
+            constructions,
+            "no ObservingSilBackend construction was found, so this test would "
+            "silently pass while asserting nothing",
+        )
+        for construction in constructions:
+            with self.subTest(construction=construction):
+                self.assertIn(
+                    "attach_existing=True",
+                    construction,
+                    "a backend that attaches to an externally started engine must say so",
+                )
+
+
+def build_real_backend(args):
+    """
+    The real SIL transport, for the tests that need a real socket and no engine.
+
+    ``auto_start=False`` guarantees nothing is launched, so the only thing these
+    tests can ever reach is whatever is already listening on the port.
+    """
+    return SilSocketBackend(args.host, args.port, auto_start=False)
 
 
 class TestStimulusNonSilTransport(unittest.TestCase):
@@ -2048,7 +2307,12 @@ class TestStimulusAgainstServer(unittest.TestCase):
         """
         port = self.server.port
         return run_cli(
-            argv, backend_factory=lambda args: SilSocketBackend(args.host, port, auto_start=False)
+            argv,
+            # attach_existing=True: this class started the engine, through
+            # SilServerProcess, so the backend is attaching to its own.
+            backend_factory=lambda args: SilSocketBackend(
+                args.host, port, auto_start=False, attach_existing=True
+            ),
         )
 
     def test_auto_cli_succeeds_against_the_real_server(self):
@@ -2085,7 +2349,10 @@ class TestStimulusAgainstServer(unittest.TestCase):
         with mock.patch.object(sys, "stdout", Spy()):
             status_code = main(
                 ["--mode", "sil", "--port", str(port), "--auto"],
-                backend_factory=lambda args: SilSocketBackend(args.host, port, auto_start=False),
+                # attach_existing=True: this class owns the engine.
+                backend_factory=lambda args: SilSocketBackend(
+                    args.host, port, auto_start=False, attach_existing=True
+                ),
             )
         passed = [line for line in streamed if line.startswith("[PASS]")]
         self.assertEqual(status_code, 0, "\n".join(streamed))
@@ -2110,7 +2377,10 @@ class TestStimulusAgainstServer(unittest.TestCase):
         the window out, which is the situation the original defect lived in.
         """
         port = self.server.port
-        tester = VehicleStimulusTester(SilSocketBackend("127.0.0.1", port, auto_start=False))
+        # attach_existing=True: this class owns the engine.
+        tester = VehicleStimulusTester(
+            SilSocketBackend("127.0.0.1", port, auto_start=False, attach_existing=True)
+        )
         tester.backend.connect()
         self.addCleanup(tester.backend.close)
         result = tester.test_emergency_break(
@@ -2406,7 +2676,9 @@ def _engine(executable):
     """
     server = SilServerProcess(executable)
     with server:
-        backend = ObservingSilBackend("127.0.0.1", server.port, auto_start=False)
+        # attach_existing=True: _engine started this engine, so the backend behind
+        # it is attaching to its own rather than commandeering a stranger's.
+        backend = ObservingSilBackend("127.0.0.1", server.port, auto_start=False, attach_existing=True)
         backend.connect()
         # Captured while the engine is still up, because stop() nulls its own handle.
         process = server.process
