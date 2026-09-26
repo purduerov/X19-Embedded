@@ -1084,6 +1084,86 @@ class TestSilSocketFraming(unittest.TestCase):
         self.assertIn(CAN_ID_NAV_TELEMETRY, seen)
         self.assertNotIn(CAN_ID_SIL_OUTPUT_STATUS, seen)
 
+    # -- the output-status rule, single-sourced ----------------------------
+    #
+    # The loopback peer above sends exactly one 0x7FE and one 0x200, so each of
+    # these tests sees the whole script and the two-frame result is exact rather
+    # than approximate.
+    def _connected(self):
+        backend = SilSocketBackend("127.0.0.1", self.port, auto_start=False)
+        backend.connect(timeout_s=2.0)
+        self.addCleanup(backend.close)
+        return backend
+
+    def _assert_readback_decoded(self, backend):
+        """The withheld 0x7FE must still have been decoded into the readback."""
+        snapshot = backend.latest_outputs()
+        self.assertIsNotNone(
+            snapshot, "withholding 0x7FE from the returned list must not skip decoding it"
+        )
+        self.assertEqual(snapshot.pwms, self.STATUS_PWMS)
+        self.assertTrue(snapshot.brake_active)
+        self.assertEqual(snapshot.solenoids, self.STATUS_SOLENOIDS)
+        self.assertEqual(snapshot.sim_time_ms, self.STATUS_SIM_MS)
+
+    def test_drain_frames_withholds_the_output_status_channel_by_default(self):
+        """
+        0x7FE is a mock-BSP readout, not vehicle traffic, so it is not returned.
+
+        It must still reach ``latest_outputs()``: withholding a frame and skipping
+        it would be different defects, and only one of them is wanted.
+        """
+        backend = self._connected()
+        ids = [can_id for can_id, _ in backend.drain_frames(2.0)]
+        self.assertNotIn(
+            CAN_ID_SIL_OUTPUT_STATUS,
+            ids,
+            "drain_frames must withhold 0x7FE by default; the engine emits it every 10 ms tick, "
+            "so a caller counting this list would be counting a mock-BSP channel",
+        )
+        self.assertIn(CAN_ID_NAV_TELEMETRY, ids, "real telemetry must still be returned")
+        self._assert_readback_decoded(backend)
+
+    def test_drain_frames_returns_the_output_status_channel_on_request(self):
+        """The opt-in is the documented escape hatch for the raw stream."""
+        backend = self._connected()
+        frames = backend.drain_frames(2.0, include_output_status=True)
+        ids = [can_id for can_id, _ in frames]
+        self.assertIn(CAN_ID_SIL_OUTPUT_STATUS, ids, "include_output_status=True must return 0x7FE")
+        self.assertIn(CAN_ID_NAV_TELEMETRY, ids, "the opt-in must not cost the telemetry frames")
+        self._assert_readback_decoded(backend)
+        status_payloads = [payload for can_id, payload in frames if can_id == CAN_ID_SIL_OUTPUT_STATUS]
+        self.assertEqual(
+            status_payloads[0],
+            self._status_payload(),
+            "the opt-in must return the frame verbatim, not a re-encoding",
+        )
+
+    def test_drain_frames_and_recv_frame_agree_about_the_output_status_rule(self):
+        """
+        The two read paths must not drift apart on the same channel.
+
+        This is the regression the shared ``_wanted`` predicate exists to prevent:
+        ``drain_frames`` used to return 0x7FE while ``recv_frame`` documented that
+        it never would, and a ``sniff``-style caller fed from ``drain_frames``
+        would have reported counts dominated by the mock channel.
+        """
+        backend = self._connected()
+        frame = backend.recv_frame(timeout_s=2.0)
+        self.assertIsNotNone(frame, "the peer's 0x200 must be reachable")
+        self.assertEqual(
+            frame[0],
+            CAN_ID_NAV_TELEMETRY,
+            "recv_frame must skip the 0x7FE and return the first real frame, not None",
+        )
+        self._assert_readback_decoded(backend)
+        self.assertEqual(
+            [can_id for can_id, _ in backend.drain_frames(0.2)],
+            [],
+            "drain_frames must apply the same exclusion, so the already-consumed queue yields "
+            "nothing rather than the 0x7FE that recv_frame swallowed",
+        )
+
 
 class TestStimulusNonSilTransport(unittest.TestCase):
     """
@@ -1708,6 +1788,58 @@ class TestStimulusVehicleCheckFailures(unittest.TestCase):
         self.assertIn("never reached 1700 us", result.detail)
         self.assertIn("ESC gate is open", result.detail)
 
+    def test_node2_pwm_blames_a_closed_gate_rather_than_the_pwm_path(self):
+        """
+        A budget that expires while the board is still arming has not tested the
+        PWM path at all, and must not be reported as though it had.
+
+        ``RAMP_TIMEOUT_S`` is a fixed cushion on top of the slew ramp, while the
+        arming gate is 3000 ms of *simulated* time, so a slow host can spend the
+        entire default budget arming. Saying only "never reached" sends the
+        operator after a PWM path that was never exercised.
+        """
+        board = FakeBackend(statuses=[status(self.NEUTRAL, sim_time_ms=i * 10) for i in range(40)])
+        result = VehicleStimulusTester(board).test_node2_pwm(0, 1700, **self.FAST)
+        self.assertFalse(result.passed)
+        last_sim_ms = board.latest_outputs().sim_time_ms
+        self.assertLess(
+            last_sim_ms,
+            ESC_ARMING_SIM_MS,
+            "this test is only meaningful while the gate is still shut",
+        )
+        self.assertIn(
+            f"the ESC gate was still closed at sim_time_ms={last_sim_ms}", result.detail
+        )
+        self.assertIn("has NOT examined the PWM path", result.detail)
+        self.assertIn("too-short timeout_s or a slow host", result.detail)
+        # The mechanical evidence sentences are still there, so the new branch
+        # adds a diagnosis rather than replacing one.
+        self.assertIn("never reached 1700 us", result.detail)
+        self.assertIn("ESC gate is open", result.detail)
+
+    def test_node2_pwm_does_not_blame_the_gate_once_it_has_opened(self):
+        """
+        The discriminator for the branch above: past the boundary, the PWM path is
+        what is on trial and the message must say so.
+        """
+        statuses = [
+            status(self.NEUTRAL, sim_time_ms=ESC_ARMING_SIM_MS + i * 10) for i in range(40)
+        ]
+        board = FakeBackend(statuses=statuses)
+        result = VehicleStimulusTester(board).test_node2_pwm(0, 1700, **self.FAST)
+        self.assertFalse(result.passed)
+        self.assertGreaterEqual(
+            board.latest_outputs().sim_time_ms,
+            ESC_ARMING_SIM_MS,
+            "this test is only meaningful once the gate has opened",
+        )
+        self.assertIn("never reached 1700 us", result.detail)
+        self.assertNotIn(
+            "gate was still closed",
+            result.detail,
+            "an open gate must not be blamed for a PWM path that did not move",
+        )
+
     def test_node2_pwm_fails_when_the_hold_decays(self):
         """
         A 100 ms watchdog lapse looks exactly like this, so the check must catch
@@ -2120,7 +2252,10 @@ class ObservingSilBackend(SilSocketBackend):
     ``received`` is collected from ``drain_frames``' own return value rather than
     from a frame listener, because ``_pump`` installs and then restores its own
     listener around every check; a listener registered at connect time would only
-    ever see the gaps between checks.
+    ever see the gaps between checks.  The explicit 0x7FE filter below is now
+    redundant - ``drain_frames`` withholds that channel by default, which
+    ``TestSilSocketFraming`` pins - and is kept so this witness can never mistake
+    a mock-BSP snapshot for telemetry even if that guarantee is ever lost.
     """
 
     def __init__(self, *args, **kwargs):
@@ -2134,8 +2269,8 @@ class ObservingSilBackend(SilSocketBackend):
         self.sent_frames.append((time.monotonic(), can_id, bytes(payload)))
         super().send_frame(can_id, payload)
 
-    def drain_frames(self, timeout_s=0.0):
-        collected = super().drain_frames(timeout_s)
+    def drain_frames(self, timeout_s=0.0, include_output_status=False):
+        collected = super().drain_frames(timeout_s, include_output_status)
         for can_id, payload in collected:
             if can_id != CAN_ID_SIL_OUTPUT_STATUS:
                 self.received.append((can_id, payload))
