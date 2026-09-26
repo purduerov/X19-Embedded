@@ -153,23 +153,27 @@ _LEGITIMATE_SEND_CONDITIONS = (
 
 def _enclosing_condition(lines, index: int) -> str:
     """
-    Return the nearest enclosing ``if`` condition for the line at ``index``.
+    Return the nearest enclosing block condition for the line at ``index``.
 
     Walks backwards for the first line that is less indented than the target and
-    starts a block, which is the condition the target line is executed under.
-    A send at module level of main() (no enclosing ``if``) yields ``""``, which
-    no legitimate condition matches.
+    opens a block, which is the condition the target line is executed under.  An
+    ``if``, ``elif`` and ``else`` all open blocks, and all three must be reported:
+    a send hidden under an ``elif`` (or under a bare ``else``) is exactly as
+    unattended as one hidden under a plain ``if``.  A send with no enclosing block
+    yields ``""``, which no legitimate condition matches.
     """
     target_indent = len(lines[index]) - len(lines[index].lstrip())
+    openers = ("if ", "elif ", "else:", "else ", "for ", "while ", "with ")
     for offset in range(index - 1, -1, -1):
         line = lines[offset]
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         indent = len(line) - len(line.lstrip())
-        if indent < target_indent and stripped.startswith("if "):
+        if indent < target_indent and stripped.startswith(openers):
             return stripped
     return ""
+
 
 
 class _RecordingClient:
@@ -493,15 +497,53 @@ class TestDashboardAppModule(unittest.TestCase):
         in different tabs.  Each must reach ``all_stop()`` directly, so a future
         edit cannot leave one of them sending a command.
         """
-        source = inspect.getsource(dashboard_app.main)
         for label in ("All Stop (Hover)", "All Stop (1500 us)"):
             with self.subTest(button=label):
-                self.assertIn(f'st.button("{label}"', source)
-                after = source.split(f'st.button("{label}"', 1)[1].split("st.rerun()", 1)[0]
-                self.assertIn(
-                    "all_stop(client)", after,
-                    f"the '{label}' button must call all_stop() directly",
-                )
+                self._assert_button_calls_handler(label, "all_stop(client)")
+
+    def test_the_emergency_button_calls_its_handler(self):
+        """
+        Invariant: the E-stop button stays bound to ``trip_emergency_break``.
+
+        The AppTest layer also clicks this button, but AppTest is a Streamlit
+        internal surface that silently skips on an upgrade.  This structural twin
+        means a rename of the button, or of the call inside it, cannot quietly
+        unbind the emergency break from the deadman API.
+        """
+        self._assert_button_calls_handler(
+            "TRIP EMERGENCY BREAK (0x001)", "trip_emergency_break(client)"
+        )
+
+    def _assert_button_calls_handler(self, label: str, call: str) -> None:
+        """
+        Assert the body of ``st.button(label)`` calls ``call``.
+
+        The body is extracted by indentation, not by scanning forward to a
+        ``st.rerun()``: the emergency button's block has no rerun, and a
+        text-to-rerun split would sweep in unrelated code from later tabs and make
+        the assertion vacuous.
+        """
+        lines = inspect.getsource(dashboard_app.main).splitlines()
+        found = [i for i, line in enumerate(lines) if f'st.button("{label}"' in line]
+        self.assertEqual(
+            len(found), 1,
+            f"expected exactly one '{label}' button, found {len(found)}",
+        )
+        start = found[0]
+        indent = len(lines[start]) - len(lines[start].lstrip())
+        body = []
+        for line in lines[start + 1:]:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                if len(line) - len(line.lstrip()) <= indent:
+                    break
+            body.append(line)
+        self.assertIn(
+            call, "\n".join(body),
+            f"the '{label}' button must call {call} directly; its body was "
+            f"{chr(10).join(body)!r}",
+        )
+
 
     def test_main_publishes_a_baseline_for_each_slider_tab(self):
         """
@@ -884,7 +926,233 @@ class TestDashboardHandlerWiring(unittest.TestCase):
         self.assertFalse(client.started_server)
         self.assertFalse(client.connected_after_start)
 
+    def test_a_fresh_session_seeds_its_baseline_from_the_widget_source(self):
+        """
+        Invariant: a tab that has published nothing treats its seeded sliders as
+        "nothing to send", and adopts the seeded value as its baseline.
+
+        Streamlit seeds the sliders from the client's own current command, so on a
+        session's first render the widget values and the seed source agree by
+        construction and the diff is empty.
+        """
+        for tab in (dashboard_app.TAB_PILOT, dashboard_app.TAB_THRUSTER):
+            with self.subTest(tab=tab):
+                client = _RecordingClient()
+                # The client's command is not neutral: a preset or another tab
+                # moved it, and a fresh session's sliders are seeded from it.
+                if tab == dashboard_app.TAB_THRUSTER:
+                    client.send_pwms([1650] * 8)
+                    seeded = [1650] * 8
+                else:
+                    client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+                    seeded = (0.5, 0.0, 0.0, 0.0)
+                self.assertIsNone(
+                    dashboard_app.tab_baseline(client, tab),
+                    "a fresh client must have no baseline for this tab yet",
+                )
+                sent = (
+                    _render_pilot_tab(client, *seeded)
+                    if tab == dashboard_app.TAB_PILOT
+                    else _render_thruster_tab(client, seeded)
+                )
+                self.assertFalse(sent, "a first render must not transmit")
+                self.assertEqual(
+                    dashboard_app.tab_baseline(client, tab),
+                    dashboard_app.tab_seed_value(client, tab),
+                    "the first baseline must be the value the widgets were "
+                    "seeded from",
+                )
+                self.assertEqual(
+                    tuple(seeded), tuple(dashboard_app.tab_seed_value(client, tab)),
+                    "the seeded widget values and the seed source must agree, or "
+                    "the first render could not be a no-op by construction",
+                )
+
+    def test_a_first_render_never_records_widget_values_as_the_baseline(self):
+        """
+        Invariant: a tab's first baseline is the seed source, even if that
+        render's widget values disagree with it.
+
+        A first render adopts ``tab_seed_value`` precisely because Streamlit seeds
+        the widgets from the same place.  If the two ever drift -- a new slider
+        default, a rounding change, a tab that reads a different field -- then
+        recording the widget values would silently adopt the operator's control
+        position as "the command", and the difference between the control and the
+        command would never be sent again.  Seeding from the command side keeps the
+        discrepancy visible on the next render.
+        """
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        _render_thruster_tab(client, NEUTRAL_PWMS)          # first render: seeds
+        self.assertTrue(_render_thruster_tab(client, [1700] * 8))  # full forward
+        dashboard_app.forget_tab_baselines(client)  # a new session's first render
+        self.assertIsNone(dashboard_app.tab_baseline(client, dashboard_app.TAB_THRUSTER))
+
+        # The sliders disagree with the command: a no-op for now, because there is
+        # no baseline to compare against yet.
+        self.assertFalse(_render_thruster_tab(client, [1200] * 8))
+        self.assertEqual(
+            dashboard_app.tab_baseline(client, dashboard_app.TAB_THRUSTER),
+            tuple([1700] * 8),
+            "the first baseline must be the command, not the widget value",
+        )
+        # The next render sees control 1200 against command 1700 and sends it.
+        self.assertTrue(
+            _render_thruster_tab(client, [1200] * 8),
+            "the difference between a control and the command was swallowed",
+        )
+        self.assertEqual(client.pwms, [1200] * 8)
+
+    def test_a_second_session_cannot_rearm_the_previous_ones_command(self):
+        """
+        Invariant: a second session sharing the cached client sends nothing on its
+        first render, for either tab.
+
+        ``st.cache_resource`` hands every session the same client, so the new
+        session inherits the old session's baseline while its own sliders are
+        seeded from the client's current command.  Diffing those two values is an
+        operator action nobody took, and the real client turns it into a RUNNING
+        state with a live 20 Hz worker.
+        """
+        for tab in (dashboard_app.TAB_PILOT, dashboard_app.TAB_THRUSTER):
+            with self.subTest(tab=tab):
+                client = _RecordingClient(control_state=ControlState.RUNNING)
+                if tab == dashboard_app.TAB_THRUSTER:
+                    _render_thruster_tab(client, NEUTRAL_PWMS)
+                    self.assertTrue(_render_thruster_tab(client, [1650] * 8))
+                    # The other tab publishes, moving the command out from under
+                    # the baseline, exactly as the pilot tab does in production.
+                    client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+                    dashboard_app.all_stop(client)
+                    seeded = [int(v) for v in client.pwms]
+                    self.assertNotEqual(seeded, [1650] * 8)
+                    calls_before = len(client.calls)
+                    self.assertFalse(
+                        _render_thruster_tab(client, seeded),
+                        "the new session re-sent the previous session's slider "
+                        "value, re-arming thrust with no operator action",
+                    )
+                else:
+                    _render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0)
+                    self.assertTrue(_render_pilot_tab(client, 0.5, 0.0, 0.0, 0.0))
+                    client.send_pwms([1650] * 8)
+                    dashboard_app.all_stop(client)
+                    seeded = (
+                        client.pipeline_surface_cmd["surge"],
+                        client.pipeline_surface_cmd["sway"],
+                        client.pipeline_surface_cmd["heave"],
+                        client.pipeline_surface_cmd["yaw"],
+                    )
+                    calls_before = len(client.calls)
+                    self.assertFalse(
+                        _render_pilot_tab(client, *seeded),
+                        "the new session re-sent the previous session's axes",
+                    )
+                self.assertEqual(
+                    client.calls[calls_before:],
+                    [],
+                    f"the '{tab}' tab must transmit nothing on a new session's "
+                    f"first render",
+                )
+
+    def test_a_second_session_cannot_rearm_a_pilot_preset_command(self):
+        """
+        Invariant: the pilot tab's own cross-session guard, exposed by a preset.
+
+        A flight preset publishes axes without moving the sliders, so the tab's
+        baseline keeps the *pre-preset* axis while ``pipeline_surface_cmd`` -- the
+        source a new session's axes are seeded from -- holds the preset's axes.  A
+        new session therefore sees its own seeded axes differ from the inherited
+        baseline.  "The axes already show the command" is what makes that a
+        no-op, and it is the only thing that does: without it the new session
+        re-sends and the vehicle re-arms on its first render.
+        """
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        _render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0)      # first render: seeds
+        # "Forward (+0.5 Surge)": publishes axes, leaves the sliders where they are.
+        client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+        dashboard_app.all_stop(client)
+        self.assertEqual(
+            dashboard_app.tab_baseline(client, dashboard_app.TAB_PILOT),
+            (0.0, 0.0, 0.0, 0.0),
+            "precondition: the preset moved the command, not the baseline",
+        )
+
+        # A new session's axes are seeded from the command, not from the baseline.
+        seeded = (
+            client.pipeline_surface_cmd["surge"],
+            client.pipeline_surface_cmd["sway"],
+            client.pipeline_surface_cmd["heave"],
+            client.pipeline_surface_cmd["yaw"],
+        )
+        self.assertEqual(seeded, (0.5, 0.0, 0.0, 0.0))
+        calls_before = len(client.calls)
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(
+                    _render_pilot_tab(client, *seeded),
+                    f"render {render} of a new session re-sent the pilot preset "
+                    f"with no operator action, re-arming thrust",
+                )
+        self.assertEqual(client.calls[calls_before:], [])
+        self.assertEqual(
+            client.pwms, compute_thrust_allocation(0.5, 0.0, 0.0, 0.0),
+            "nothing may have re-published a command; the stop must still hold",
+        )
+
+    def test_preset_buttons_hold_their_command_until_an_axis_moves(self):
+        """
+        Invariant, and an operator-facing behaviour change: a preset button's
+        command is *held*, not cancelled by the next render.
+
+        The presets ("All Forward", "Apply Sync Throttle", the six flight presets)
+        publish a command without moving any slider.  Because they do not touch the
+        diff baseline, the following render finds the sliders unchanged and sends
+        nothing -- so the preset now holds until the operator stops the vehicle or
+        moves a control.  Previously each preset was silently cancelled by its own
+        next render, which made those buttons look broken.
+        """
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        _render_thruster_tab(client, NEUTRAL_PWMS)
+
+        # The operator presses "All Forward (1650 us)": a raw send, no widget move.
+        client.send_pwms([1650] * 8)
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(
+                    _render_thruster_tab(client, NEUTRAL_PWMS),
+                    "the preset command was cancelled by a later render; the "
+                    "operator asked for sustained forward thrust",
+                )
+        self.assertEqual(client.pwms, [1650] * 8)
+
+        # Moving a control is still honoured, and still wins over the preset.
+        self.assertTrue(_render_thruster_tab(client, [1550] * 8))
+        self.assertEqual(client.pwms, [1550] * 8)
+        self.assertFalse(_render_thruster_tab(client, [1550] * 8))
+        # Dragging back to neutral stops the vehicle.
+        self.assertTrue(_render_thruster_tab(client, NEUTRAL_PWMS))
+        self.assertEqual(client.pwms, NEUTRAL_PWMS)
+
+    def test_the_pilot_presets_hold_their_command_too(self):
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        _render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0)
+        # "Forward (+0.5 Surge)": a raw send with the axes left where they are.
+        client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(
+                    _render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0),
+                    "the flight preset was cancelled by a later render",
+                )
+        # Moving an axis is honoured and supersedes the preset.
+        self.assertTrue(_render_pilot_tab(client, 0.25, 0.0, 0.0, 0.0))
+        self.assertFalse(_render_pilot_tab(client, 0.25, 0.0, 0.0, 0.0))
+        # Centring the stick from there is honoured, and stops the vehicle.
+        self.assertTrue(_render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0))
+        self.assertFalse(_render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0))
+
     def test_the_latch_gate_does_not_depend_on_the_displayed_state(self):
+
         """
         Invariant: the interlock keys off the latch itself, not off
         ``control_state``.
@@ -1055,6 +1323,156 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
         time.sleep(2 * CONTROL_PERIOD_S)
         self.assertEqual(self.recorder.thruster_pwms()[-1], expected_held)
 
+    def test_a_second_session_cannot_rearm_a_stopped_vehicle(self):
+        """
+        Invariant: the cross-session re-arm, end to end on the wire.
+
+        ``st.cache_resource`` gives every browser session the same client.  Session
+        A drives the thrusters, then the pilot, then presses All Stop; the stop
+        deliberately leaves ``client.pwms`` holding the pre-stop value.  Session B
+        then opens the dashboard: its sliders are seeded from that stale value while
+        its inherited baseline still holds session A's slider value, so the diff
+        sees a difference nobody caused -- and the real client answers it by setting
+        RUNNING and starting the 20 Hz worker, with the heartbeat refreshed so the
+        firmware watchdog can no longer release the solenoids.
+
+        Session B must transmit nothing, and the worker must stay stopped.
+        """
+        self._reset_to_armed()
+        # --- session A -------------------------------------------------------
+        _render_thruster_tab(self.client, NEUTRAL_PWMS)
+        self.assertTrue(_render_thruster_tab(self.client, [1650] * 8))
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        _render_pilot_tab(self.client, 0.0, 0.0, 0.0, 0.0)
+        self.assertTrue(_render_pilot_tab(self.client, 0.5, 0.0, 0.0, 0.0))
+        self.assertTrue(
+            self.recorder.wait_for_count(WORKER_SPINUP_FRAMES, WORKER_SPINUP_S)
+        )
+
+        dashboard_app.all_stop(self.client)
+        self.assertIs(self.client.control_state, ControlState.STOPPED)
+        self.assertWorkerStopped()
+        after_stop = self.recorder.settle()
+        stale_pwms = list(self.client.pwms)
+        self.assertNotEqual(
+            stale_pwms, NEUTRAL_PWMS,
+            "precondition: request_stop() leaves the commanded-value record "
+            "stale, which is what session B's sliders get seeded from",
+        )
+
+        # --- session B: a fresh browser, the same cached client --------------
+        # No widget state, so Streamlit seeds the sliders from the client.
+        session_b_thruster = [int(value) for value in self.client.pwms]
+        session_b_pilot = (
+            self.client.pipeline_surface_cmd["surge"],
+            self.client.pipeline_surface_cmd["sway"],
+            self.client.pipeline_surface_cmd["heave"],
+            self.client.pipeline_surface_cmd["yaw"],
+        )
+        self.assertNotEqual(session_b_thruster, [1650] * 8)
+        self.assertNotEqual(session_b_thruster, NEUTRAL_PWMS)
+
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(
+                    _render_thruster_tab(self.client, session_b_thruster),
+                    f"render {render} of a new session re-armed the thruster "
+                    f"command with no operator action",
+                )
+                self.assertFalse(
+                    _render_pilot_tab(self.client, *session_b_pilot),
+                    f"render {render} of a new session re-armed the pilot "
+                    f"command with no operator action",
+                )
+                self.assertIs(self.client.control_state, ControlState.STOPPED)
+                self.assertWorkerStopped()
+
+        time.sleep(2 * CONTROL_PERIOD_S)
+        self.assertEqual(
+            self.recorder.count(), after_stop,
+            "a new session put frames on the wire with no operator action",
+        )
+        self.assertTrue(
+            self.recorder.quiet_for(QUIET_WINDOW_S),
+            "the command path came back to life on its own",
+        )
+        self.assertEqual(self.client._last_command, NEUTRAL_PWMS)
+
+    def test_a_second_session_cannot_rearm_after_a_preset_command(self):
+        """
+        Invariant: the same cross-session case with a preset's command in flight.
+
+        The preset's command is the current one, so a fresh session's sliders are
+        seeded from it.  The session must not fight the preset by re-sending its
+        own inherited slider value, and the preset's held command must survive.
+        """
+        self._reset_to_armed()
+        _render_thruster_tab(self.client, NEUTRAL_PWMS)
+        # "All Forward (1650 us)": a raw send that leaves the sliders at 1500.
+        self.assertTrue(self.client.send_pwms([1650] * 8))
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        self.assertTrue(
+            self.recorder.wait_for_count(WORKER_SPINUP_FRAMES, WORKER_SPINUP_S)
+        )
+
+        # A new session's sliders are seeded from the preset's command.
+        session_b_thruster = [int(value) for value in self.client.pwms]
+        self.assertEqual(session_b_thruster, [1650] * 8)
+        for render in range(2):
+            with self.subTest(render=render):
+                self.assertFalse(_render_thruster_tab(self.client, session_b_thruster))
+        self.assertEqual(
+            self.client._last_command, [1650] * 8,
+            "a new session must not disturb a command the operator asked for",
+        )
+
+    def test_a_second_session_cannot_rearm_a_pilot_preset_command(self):
+        """
+        Invariant: the pilot preset's cross-session case, on the wire.
+
+        A flight preset publishes axes without moving the sliders, so the pilot
+        tab's baseline keeps the pre-preset axis while ``pipeline_surface_cmd`` --
+        the source a new session's axes are seeded from -- holds the preset's
+        axes.  The new session sees its own axes differ from the inherited
+        baseline, and must treat that as nothing to send.
+        """
+        self._reset_to_armed()
+        _render_pilot_tab(self.client, 0.0, 0.0, 0.0, 0.0)
+        # "Forward (+0.5 Surge)": a raw send with the axes left at zero.
+        self.assertTrue(self.client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0))
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        self.assertTrue(
+            self.recorder.wait_for_count(WORKER_SPINUP_FRAMES, WORKER_SPINUP_S)
+        )
+        dashboard_app.all_stop(self.client)
+        self.assertIs(self.client.control_state, ControlState.STOPPED)
+        self.assertWorkerStopped()
+        after_stop = self.recorder.settle()
+
+        seeded = (
+            self.client.pipeline_surface_cmd["surge"],
+            self.client.pipeline_surface_cmd["sway"],
+            self.client.pipeline_surface_cmd["heave"],
+            self.client.pipeline_surface_cmd["yaw"],
+        )
+        self.assertEqual(seeded, (0.5, 0.0, 0.0, 0.0))
+        self.assertEqual(
+            dashboard_app.tab_baseline(self.client, dashboard_app.TAB_PILOT),
+            (0.0, 0.0, 0.0, 0.0),
+            "precondition: the preset moved the command, not the baseline",
+        )
+
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(_render_pilot_tab(self.client, *seeded))
+                self.assertIs(self.client.control_state, ControlState.STOPPED)
+                self.assertWorkerStopped()
+        self.assertTrue(
+            self.recorder.quiet_for(QUIET_WINDOW_S),
+            "a new session brought the command path back to life on its own",
+        )
+        self.assertEqual(self.recorder.count(), after_stop)
+
     def test_neither_all_stop_button_is_reversed_by_the_next_rerun(self):
         """
         Invariant: the rerun after an All Stop transmits nothing, on both tabs.
@@ -1108,11 +1526,15 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
         diff on a later render.
 
         Streamlit renders every tab every run, so both diffs run regardless of
-        which tab the operator is looking at.
+        which tab the operator is looking at.  Both tabs are given real operator
+        input first, because a tab whose baseline was never established has
+        nothing to re-send and would make this test vacuous.
         """
         self._reset_to_armed()
         _render_thruster_tab(self.client, NEUTRAL_PWMS)
         self.assertTrue(_render_thruster_tab(self.client, [1650] * 8))
+        _render_pilot_tab(self.client, 0.0, 0.0, 0.0, 0.0)
+        self.assertTrue(_render_pilot_tab(self.client, 0.5, 0.0, 0.0, 0.0))
         self.assertIs(self.client.control_state, ControlState.RUNNING)
         self.assertTrue(
             self.recorder.wait_for_count(WORKER_SPINUP_FRAMES, WORKER_SPINUP_S)
@@ -1284,6 +1706,9 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
                 self.assertTrue(getattr(self.client, entry_point)())
 
                 self.assertIs(self.client.control_state, ControlState.ESTOP)
+                # settle() first: the recorder parses on its own thread, so a
+                # frame written synchronously a moment ago may not be parsed yet.
+                self.recorder.settle()
                 emergency = [
                     payload for can_id, payload in self.recorder.frames()[before:]
                     if can_id == CAN_ID_EMERGENCY_BREAK

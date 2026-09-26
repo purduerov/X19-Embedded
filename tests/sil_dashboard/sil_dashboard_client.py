@@ -570,18 +570,22 @@ class SilDashboardClient:
         Operator STOP: cancel the held command and drive the outputs neutral.
 
         DELIBERATELY leaves ``self.pwms`` and ``self.pipeline_surface_cmd``
-        alone, and only neutralises the worker's held command.  Both of those
-        fields are the Streamlit dashboard's record of the operator's commanded
-        values, and the dashboard diffs its slider widgets against them on every
-        render.  If this transition published a new commanded target -- neutral,
-        or anything else -- the next render would see a change and re-send the
-        pre-stop command with no operator action, re-arming thrust.  Consumers
-        depend on this; do not reset them here.
+        alone, and only neutralises the worker's held command.
 
-        A side effect is that the dashboard's readback of the *commanded* target
-        still shows the pre-stop value after a stop while the board reads back
-        neutral.  The real fix is to separate the display target from the diff
-        baseline, not to reset either field from here.
+        The dashboard reads both of those fields as the value it *seeds* its
+        slider widgets from, and it diffs those widgets against a UI-owned
+        per-tab baseline rather than against these fields.  That means publishing a
+        new value here would not re-arm anything by itself -- the diffs would see
+        the seeded sliders already matching it and stay quiet -- but it would still
+        be a lie: the operator would see a "commanded target" the board was never
+        told.  Consumers depend on these two fields meaning "the operator's
+        commanded value, unchanged since they dialled it in", so keep them that way
+        and do not reset them here.
+
+        A visible consequence is that after a stop the dashboard still shows the
+        pre-stop commanded target while the board reads back neutral.  The real fix
+        is to separate the display target from the diff baseline, not to reset
+        either field from here.
         """
         return self.stop_control_loop(send_neutral=True)
 
