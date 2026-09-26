@@ -571,6 +571,120 @@ class TestDashboardAppModule(unittest.TestCase):
         )
 
 
+class TestPresetDisplayTarget(unittest.TestCase):
+    """
+    Invariant: after a preset the panel shows the command that is being held.
+
+    The pilot presets publish an axis command and hold it at 20 Hz
+    (``test_the_pilot_presets_hold_their_command_too``), but they never moved the
+    four sliders.  Streamlit seeds a keyed widget once and then owns it, so every
+    later render showed 0.0 on the axis panel while four horizontal thrusters were
+    held at full forward: the primary control surface read safe, and the diff that
+    would have corrected it is one-directional by design and can only stay quiet.
+
+    The fix is the one ``request_stop``'s docstring already names: separate the
+    DISPLAY TARGET from the DIFF BASELINE, and have the preset write the display
+    target it just commanded.  The veto, the latch gate, and the per-tab baselines
+    are untouched - ``client.pwms`` stays the operator's commanded-value record,
+    so nothing here can re-arm an All Stop.
+    """
+
+    PILOT_KEYS = dashboard_app.PILOT_SLIDER_KEYS
+
+    def test_a_pilot_preset_publishes_the_axes_it_commanded(self):
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        state: dict = {}
+        self.assertTrue(dashboard_app.pilot_preset(client, 0.5, 0.0, 0.0, 0.0, state=state))
+        self.assertEqual(
+            [state[key] for key in self.PILOT_KEYS],
+            [0.5, 0.0, 0.0, 0.0],
+            "the panel must display the command the preset just published",
+        )
+        self.assertEqual(
+            client.calls,
+            [("send_surface_pilot_command", (0.5, 0.0, 0.0, 0.0))],
+            "the preset must still be the one command on the wire, and only one",
+        )
+
+    def test_a_thruster_preset_publishes_the_targets_it_commanded(self):
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        state: dict = {}
+        self.assertTrue(dashboard_app.thruster_preset(client, [1650] * 8, state=state))
+        self.assertEqual(
+            [state[dashboard_app.THRUSTER_SLIDER_KEY(i)] for i in range(8)],
+            [1650] * 8,
+            "the thruster panel must display the command the preset just published",
+        )
+        self.assertEqual(client.calls, [("send_pwms", ([1650] * 8,))])
+
+    def test_the_displayed_axes_still_do_not_re_send(self):
+        """
+        The veto is the reason this fix is safe, so it is asserted after it.
+
+        The panel now reads 0.5 and the held command is 0.5, so the tab's diff sees
+        a value that already matches the command.  One-directional suppression
+        cannot cause a send; this proves the other half, that it stays quiet.
+        """
+        client = _RecordingClient(control_state=ControlState.RUNNING)
+        _render_pilot_tab(client, 0.0, 0.0, 0.0, 0.0)  # first render: seeds
+        state: dict = {}
+        dashboard_app.pilot_preset(client, 0.5, 0.0, 0.0, 0.0, state=state)
+        calls_before = len(client.calls)
+        displayed = [state[key] for key in self.PILOT_KEYS]
+        for render in range(3):
+            with self.subTest(render=render):
+                self.assertFalse(
+                    _render_pilot_tab(client, *displayed),
+                    "the panel echoing the held command must not re-send it",
+                )
+        self.assertEqual(client.calls[calls_before:], [])
+        self.assertEqual(client.pwms, compute_thrust_allocation(0.5, 0.0, 0.0, 0.0))
+
+    def test_the_display_target_write_happens_before_the_widget_is_created(self):
+        """
+        Streamlit refuses a session-state write after the widget exists.
+
+        ``st.session_state`` raises ``StreamlitWidgetAlreadyInstantiatedError`` if
+        the key's widget was already created in the same run, so each preset block
+        has to be rendered before the sliders it moves.  That is why the pilot
+        column is filled before the slider column: the layout is unchanged, the
+        order of the two ``with`` blocks is load bearing, and nothing in Python
+        says so if it is reversed.
+        """
+        source = inspect.getsource(dashboard_app.main)
+        for handler, widget in (
+            ("pilot_preset(client", "key=PILOT_SLIDER_KEYS[0]"),
+            ("thruster_preset(client", "key=THRUSTER_SLIDER_KEY(i)"),
+        ):
+            with self.subTest(handler=handler):
+                self.assertLess(
+                    source.index(handler),
+                    source.index(widget),
+                    f"{handler} must run before its widget is created, or the "
+                    "display-target write raises instead of taking effect",
+                )
+
+    def test_a_refused_preset_does_not_lie_about_what_it_displayed(self):
+        """
+        A command the client refused must not be shown as commanded.
+
+        ``send_pwms``/``send_surface_pilot_command`` return False when the E-stop
+        is latched or the transport is down.  Writing the display target anyway
+        would put a target on screen that the board was never told, which is the
+        same stale-display defect pointing the other way.
+        """
+
+        class RefusingClient(_RecordingClient):
+            def send_surface_pilot_command(self, surge, sway, heave, yaw, pitch=0.0, roll=0.0):
+                self.calls.append(("send_surface_pilot_command", (surge, sway, heave, yaw)))
+                return False
+
+        client = RefusingClient(control_state=ControlState.ESTOP, estop_latched=True)
+        state: dict = {}
+        self.assertFalse(dashboard_app.pilot_preset(client, 0.5, 0.0, 0.0, 0.0, state=state))
+        self.assertEqual(state, {}, "a refused command must leave the panel alone")
+
+
 def _render_pilot_tab(client, surge, sway, heave, yaw) -> bool:
     """
     Do exactly what ``main()``'s pilot tab does on one render.  True if it sent.
@@ -2156,6 +2270,64 @@ class TestDashboardUiThroughStreamlit(unittest.TestCase):
             self.client.send_calls(), [],
             f"clicking '{label}' must not put a command on the wire",
         )
+
+    def test_a_pilot_preset_leaves_the_slider_showing_the_held_command(self):
+        """
+        The end-to-end version of the stale-display defect, on the real script.
+
+        A preset holds ``compute_thrust_allocation(0.5, 0, 0, 0)`` at 20 Hz
+        indefinitely, and Streamlit seeds a keyed widget once. Before the fix the
+        rendered slider stayed at 0.0 for as long as that command was held, so the
+        tab's own baseline was all zero and the panel read safe while four
+        horizontal thrusters were commanded forward.
+        """
+        self._run()
+        self._disable_auto_refresh()
+        self.client.engage(ControlState.RUNNING)
+        self._run()
+        self.client.calls.clear()
+        self._button(self.at, "Forward (+0.5 Surge)").click()
+        self._run()
+
+        self.assertEqual(
+            self.client.send_calls(),
+            [("send_surface_pilot_command", (0.5, 0.0, 0.0, 0.0))],
+            "the preset must be the only command the click produces",
+        )
+        self.assertEqual(
+            self.client.pwms,
+            compute_thrust_allocation(0.5, 0.0, 0.0, 0.0),
+            "precondition: the command is held at 20 Hz, not one-shot",
+        )
+        surge = self.at.slider(key=dashboard_app.PILOT_SLIDER_KEYS[0])
+        self.assertEqual(
+            surge.value,
+            0.5,
+            "the panel must show the command being held; it read 0.0 while four "
+            "thrusters were held forward",
+        )
+        for key in dashboard_app.PILOT_SLIDER_KEYS[1:]:
+            with self.subTest(key=key):
+                self.assertEqual(self.at.slider(key=key).value, 0.0)
+
+    def test_a_thruster_preset_leaves_the_sliders_showing_the_held_command(self):
+        self._run()
+        self._disable_auto_refresh()
+        self.client.engage(ControlState.RUNNING)
+        self._run()
+        self.client.calls.clear()
+        self._button(self.at, "All Forward (1650 us)").click()
+        self._run()
+
+        self.assertEqual(self.client.send_calls(), [("send_pwms", ([1650] * 8,))])
+        for channel in range(8):
+            key = dashboard_app.THRUSTER_SLIDER_KEY(channel)
+            with self.subTest(channel=channel):
+                self.assertEqual(
+                    self.at.slider(key=key).value,
+                    1650,
+                    f"{key} must show the held command, not the pre-preset position",
+                )
 
     def test_all_stop_hover_button_calls_request_stop(self):
         """
