@@ -260,6 +260,14 @@ Restart the engine (or let this tool launch one) and run the arming check first.
 
 Run it first, against a fresh engine. That is why `--auto` puts it first, why the tool refuses to run against an engine it did not start (3), and why every per-node integration test starts an engine of its own. `NNNN` is whatever the engine's virtual clock had already reached; a real capture on a developer machine read `4090`.
 
+### 7.4a A check can fail for a reason that is not the vehicle
+
+Every check measures on the **engine's virtual clock**, not on wall time. The engine advances simulated time by 10 ms per 10 ms of real sleep, so on a loaded or virtualised host the simulation can run several times slower than real time. A check that needs N telemetry frames therefore has to wait N frame-periods of *simulated* time, and the tools compute that budget from the clock the frames actually carry rather than from how long the wall has been.
+
+This matters when a check **fails**: a frame-count shortfall on a host running at a fraction of real time says the host was too slow, not that the Power Slab or the Pi Shield is unhealthy. Read the failure text — it names which clock the window was measured on. Before blaming a node for a telemetry-count failure, re-run the same command on an idle machine and compare.
+
+The converse is the property the tooling exists to guarantee: no check can pass by inferring a rate from a constant. Where a rate is reported, it is derived from the `sim_time_ms` deltas in the engine's own output-status snapshots, and a transport that produces no snapshots reports `UNMEASURED` rather than a guess.
+
 ### 7.5 Pointing the tools at a build tree: `X19_SIL_SERVER`
 
 Both the stimulus tools and the SIL test suites look for the native engine in `build-native/tests/`, then `build/`, `build-test/`, and `build-host/`. Set `X19_SIL_SERVER` to select a binary explicitly whenever it lives anywhere else:
@@ -309,15 +317,19 @@ That bound is the single source of truth for CI: the workflow step holds it in o
 
 The 26 tests in `test_dashboard_control.py` cover the 20 Hz deadman in the client itself and need no Streamlit at all, so a missing install degrades to 229 passing plus 55 skipped rather than to a total loss.
 
-CI runs Python 3.14, because that is the interpreter this suite was verified on: the 284/284 result, the timing, the companion result, and the log shape all come from 3.14. The pin is a choice, not a necessity — the suite was also run end to end on 3.11.15 and passed there too, so the code is not version-fragile:
+CI runs Python 3.14, because that is the interpreter this suite was verified on: the passing result, the timing, the companion result, and the log shape all come from 3.14. The pin is a choice, not a necessity — the suite was also run end to end on 3.11.15 and passed there too, so the code is not version-fragile.
+
+The counts below are the size of the suite **at the moment each row was measured**. The suite has grown since the 3.11 row was taken, so treat that row as evidence that the *code* runs on 3.11, not as the current count. The current count is 336, verified on 3.14.
 
 | Interpreter | Streamlit | Result |
 | :--- | :--- | :--- |
-| 3.14.x (the newest 3.14 release; CI pins `'3.14'`) | 1.55.0 | `Ran 284 tests in 206.329s` — `OK`, exit 0 |
+| 3.14.x (the newest 3.14 release; CI pins `'3.14'`) | 1.64.0 | `Ran 336 tests in 217.312s` — `OK`, `skipped=0`, exit 0 |
 | 3.14.0 | 1.64.0 | `Ran 284 tests in 213.870s` — `OK`, exit 0 |
 | 3.11.15 | 1.64.0 | `Ran 284 tests in 212.034s` — `OK`, exit 0 |
 
-CI pins `3.14`, not `3.14.0`: `actions/setup-python` resolves a partial version to the newest release in that series, so a runner is on whatever 3.14.x is current. The first two rows are 3.14.0 measurements; the middle one is the Streamlit-upgrade cross-check, and the exact patch release a runner lands on is the one thing in this table CI does not pin — which is why the count and skip assertions below exist rather than a version assertion.
+If you add tests, re-run the discovery on every row you want to keep quoting and update the counts. A stale count in this table is worse than no table: it is the kind of second, quietly-drifting description of coverage that the rest of this section exists to prevent.
+
+CI pins `3.14`, not `3.14.0`: `actions/setup-python` resolves a partial version to the newest release in that series, so a runner is on whatever 3.14.x is current. The second row is a 3.14.0 measurement, and the exact patch release a runner lands on is the one thing in this table CI does not pin — which is why the count and skip assertions below exist rather than a version assertion.
 
 If you change the pin, re-run the discovery on the new version before trusting it. A version error that raises is loud and self-correcting; the dangerous direction is one that turns into a skip, which is why the CI step asserts on the executed-test count and on the skip count rather than on the exit code.
 
@@ -333,7 +345,7 @@ To tell a real pass from a silent skip:
 
 - Run with `-v`. Each skip prints its reason, so the log names exactly what was not verified.
 - Read the trailing summary. A bare `OK` means everything ran; `OK (skipped=N)` means N checks were not verified.
-- Check that the count is non-trivial. A real run is 284 `ok` lines; a run where every line says `skipped` is a skip, not a pass.
+- Check that the count is non-trivial. A real run is 336 `ok` lines; a run where every line says `skipped` is a skip, not a pass.
 - Remember that one missing dependency can cost a whole module. `test_dashboard_app.py` skips all 55 of its tests at once when `streamlit` is absent, and reports that as a single skip, so `OK (skipped=1)` does not mean one test was skipped.
 - Confirm the engine was found. Point `X19_SIL_SERVER` at the binary (7.5) instead of relying on the default search, so a renamed or relocated build tree cannot silently convert the suite into skips.
 
