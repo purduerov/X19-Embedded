@@ -22,6 +22,7 @@ Run from the repository root::
 """
 
 import contextlib
+import inspect
 import io
 import re
 import socket
@@ -848,6 +849,65 @@ class TestStimulusCliStatus(unittest.TestCase):
         )
         self.assertEqual(status_code, 1)
         self.assertIn("broken pipe", printed)
+
+    def test_main_delegates_its_summary_to_the_shared_formatter(self):
+        """
+        Invariant: the operator-facing summary has exactly one implementation.
+
+        ``main`` streams every per-check line itself, so its closing block is
+        ``StimulusReport.format(include_checks=False)`` and nothing else. It used
+        to be a second hand-written copy of that text: a maintainer could change
+        ``format()`` and the operator would never see it, or change ``main``'s copy
+        and the format tests would stay green. Two copies of safety-relevant text
+        that can drift is the defect, not the duplication being tidy.
+        """
+        source = inspect.getsource(can_stimulus.main)
+        self.assertNotIn(
+            "Summary:",
+            source,
+            "main() must not spell the summary out itself; StimulusReport.format "
+            "owns that text",
+        )
+        self.assertIn("print_report(", source, "main() must delegate to print_report()")
+
+    def test_the_operator_reads_exactly_what_the_shared_format_produces(self):
+        """
+        The shipped output and ``format()`` must be the same bytes, not two truths.
+
+        This is the coupling the duplication defeated: it walks the real ``main``
+        with a failing report and requires the tail of its stdout to equal
+        ``StimulusReport.format(include_checks=False)`` exactly, so the
+        ``Summary:`` line and every ``[FAIL]`` line the operator files are pinned
+        to the one function the format tests already cover.
+        """
+        failing = StimulusReport(
+            [
+                CheckResult("node1_env", True, "3 frames decoded"),
+                CheckResult("node2_solenoid", False, "no 0x7FE readback within 1.0 s"),
+                CheckResult("node3_power", False, "check raised KeyError: 'tether_current_ma'"),
+            ]
+        )
+
+        class FailingTester:
+            def __init__(self, backend, on_result=None):
+                self.on_result = on_result
+
+            def run_full_smoke(self):
+                if self.on_result is not None:
+                    for result in failing.results:
+                        self.on_result(result)
+                return failing
+
+        status_code, printed = run_cli(["--mode", "sil", "--auto"], tester_class=FailingTester)
+        self.assertEqual(status_code, 1)
+        expected = failing.format(include_checks=False).splitlines()
+        self.assertEqual(
+            printed.splitlines()[-len(expected):],
+            expected,
+            "main()'s closing block must be exactly format(include_checks=False)",
+        )
+        self.assertIn("Summary: 3 check(s), 1 passed, 2 failed", printed)
+        self.assertIn("[FAIL] 2 check(s) failed: node2_solenoid, node3_power", printed)
 
     def test_main_returns_nonzero_when_no_action_is_selected(self):
         status_code, printed = run_cli(["--mode", "sil"])
