@@ -154,6 +154,78 @@ def auto_refresh_due(client, auto_refresh: bool, refresh_rate: float) -> bool:
     return bool(auto_refresh) and bool(client.connected)
 
 
+# --- Display targets ---------------------------------------------------------
+# The DISPLAY TARGET is what a control panel shows; the DIFF BASELINE (above) is
+# what it compares against to decide the operator moved something. They are
+# separate records on purpose, and confusing them is how the panel came to read
+# 0.0 while four thrusters were held forward.
+#
+# A preset button publishes a command and holds it, but it does not drag a
+# slider, and Streamlit seeds a keyed widget once and then owns it. So the panel
+# kept showing the pre-preset axes for as long as the command was held. Writing
+# the display target the preset just commanded fixes that without touching the
+# baseline: the veto still sees "the axes already show the command" and stays
+# quiet, and the operator finally sees what the vehicle is doing.
+PILOT_SLIDER_KEYS = ("slider_surge", "slider_sway", "slider_heave", "slider_yaw")
+
+
+def THRUSTER_SLIDER_KEY(channel: int) -> str:
+    """The session-state key of one thruster slider; shared by the tab and the presets."""
+    return f"thruster_slider_tab2_{channel}"
+
+
+def write_display_targets(state, keys, values) -> None:
+    """
+    Publish ``values`` as what the widgets named by ``keys`` should display.
+
+    Assigning to a widget's session-state key before that widget is created is
+    Streamlit's supported way to set it programmatically, and it is the only one:
+    the same assignment after the widget has been instantiated in this run raises
+    ``StreamlitWidgetAlreadyInstantiatedError``.  That is why each preset block in
+    ``main()`` is rendered BEFORE the sliders it moves, and why ``main()``'s pilot
+    column is filled before its slider column.  The two column blocks are
+    independent containers, so the order they are written in does not change the
+    layout.
+
+    Read and write only: this is the display target, never the diff baseline.
+    """
+    for key, value in zip(keys, values):
+        state[key] = value
+
+
+def pilot_preset(client, surge: float, sway: float, heave: float, yaw: float, state=None) -> bool:
+    """
+    Operator flight preset: publish the axes, then show them.
+
+    The command is the client's, and it is held at 20 Hz until the operator stops
+    the vehicle or moves an axis.  The display target is written only when the
+    client ACCEPTED the command: ``send_surface_pilot_command`` returns False when
+    the E-stop is latched or the transport is down, and showing a target the board
+    was never told is the same stale display pointing the other way.
+    """
+    if not client.send_surface_pilot_command(surge, sway, heave, yaw):
+        return False
+    write_display_targets(
+        st.session_state if state is None else state,
+        PILOT_SLIDER_KEYS,
+        (surge, sway, heave, yaw),
+    )
+    return True
+
+
+def thruster_preset(client, pwms, state=None) -> bool:
+    """Operator thruster preset: publish the eight targets, then show them."""
+    targets = [int(value) for value in pwms]
+    if not client.send_pwms(targets):
+        return False
+    write_display_targets(
+        st.session_state if state is None else state,
+        [THRUSTER_SLIDER_KEY(channel) for channel in range(len(targets))],
+        targets,
+    )
+    return True
+
+
 # --- Per-tab diff baselines -------------------------------------------------
 # Streamlit renders every tab on every run, and each control tab diffs its
 # slider widgets against a baseline to decide "did the operator move something?".
@@ -462,15 +534,16 @@ UPLINK (mock sensors to dashboard views):
         st.markdown("### 1. Topside Pilot Flight Deck")
         col_ctrl1, col_ctrl2 = st.columns([1, 1])
 
-        with col_ctrl1:
-            st.markdown("**6-DOF Flight Axes** (Drag to pilot vehicle)")
-            surge = st.slider("Surge (Forward / Reverse)", -1.0, 1.0, float(client.pipeline_surface_cmd["surge"]), 0.05, key="slider_surge")
-            sway = st.slider("Sway (Strafe Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["sway"]), 0.05, key="slider_sway")
-            heave = st.slider("Heave (Dive / Ascend)", -1.0, 1.0, float(client.pipeline_surface_cmd["heave"]), 0.05, key="slider_heave")
-            yaw = st.slider("Yaw (Turn Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["yaw"]), 0.05, key="slider_yaw")
-
+        # The preset column is written FIRST, before the sliders it moves.
+        # st.columns() hands back independent containers, so this does not change
+        # the layout - axes on the left, presets on the right.  The ORDER is what
+        # is load bearing: a preset writes the display target into st.session_state,
+        # and Streamlit refuses that assignment for a widget already instantiated
+        # in the same run, so reversing these two blocks raises instead of taking
+        # effect.  TestPresetDisplayTarget pins the order.
         with col_ctrl2:
             st.markdown("**Flight Presets**")
+
             preset_cols = st.columns(3)
             with preset_cols[0]:
                 if st.button("All Stop (Hover)", width="stretch"):
@@ -478,35 +551,43 @@ UPLINK (mock sensors to dashboard views):
                     st.rerun()
             with preset_cols[1]:
                 if st.button("Forward (+0.5 Surge)", width="stretch"):
-                    client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+                    pilot_preset(client, 0.5, 0.0, 0.0, 0.0)
                     st.rerun()
             with preset_cols[2]:
                 if st.button("Reverse (-0.5 Surge)", width="stretch"):
-                    client.send_surface_pilot_command(-0.5, 0.0, 0.0, 0.0)
+                    pilot_preset(client, -0.5, 0.0, 0.0, 0.0)
                     st.rerun()
 
             preset_cols2 = st.columns(3)
             with preset_cols2[0]:
                 if st.button("Strafe Right (+0.5 Sway)", width="stretch"):
-                    client.send_surface_pilot_command(0.0, 0.5, 0.0, 0.0)
+                    pilot_preset(client, 0.0, 0.5, 0.0, 0.0)
                     st.rerun()
             with preset_cols2[1]:
                 if st.button("Dive (+0.5 Heave)", width="stretch"):
-                    client.send_surface_pilot_command(0.0, 0.0, 0.5, 0.0)
+                    pilot_preset(client, 0.0, 0.0, 0.5, 0.0)
                     st.rerun()
             with preset_cols2[2]:
                 if st.button("Yaw Right (+0.5 Yaw)", width="stretch"):
-                    client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.5)
+                    pilot_preset(client, 0.0, 0.0, 0.0, 0.5)
                     st.rerun()
 
-            # Diff against the pilot tab's OWN baseline, then record what the tab
-            # is showing.  The thruster tab's sliders keep their own baseline, so
-            # a command published by either tab cannot be read as a slider move
-            # on the other.
-            pilot_axes = (surge, sway, heave, yaw)
-            if pilot_axes_changed(client, *pilot_axes):
-                client.send_surface_pilot_command(*pilot_axes)
-            publish_tab_baseline(client, TAB_PILOT, pilot_axes)
+        with col_ctrl1:
+            st.markdown("**6-DOF Flight Axes** (Drag to pilot vehicle)")
+            surge = st.slider("Surge (Forward / Reverse)", -1.0, 1.0, float(client.pipeline_surface_cmd["surge"]), 0.05, key=PILOT_SLIDER_KEYS[0])
+            sway = st.slider("Sway (Strafe Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["sway"]), 0.05, key=PILOT_SLIDER_KEYS[1])
+            heave = st.slider("Heave (Dive / Ascend)", -1.0, 1.0, float(client.pipeline_surface_cmd["heave"]), 0.05, key=PILOT_SLIDER_KEYS[2])
+            yaw = st.slider("Yaw (Turn Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["yaw"]), 0.05, key=PILOT_SLIDER_KEYS[3])
+
+        # Diff against the pilot tab's OWN baseline, then record what the tab is
+        # showing.  The thruster tab's sliders keep their own baseline, so a command
+        # published by either tab cannot be read as a slider move on the other.
+        # Deliberately outside both column blocks: it needs the slider values, which
+        # is the other half of why the preset column above is written first.
+        pilot_axes = (surge, sway, heave, yaw)
+        if pilot_axes_changed(client, *pilot_axes):
+            client.send_surface_pilot_command(*pilot_axes)
+        publish_tab_baseline(client, TAB_PILOT, pilot_axes)
 
         st.divider()
         st.markdown("### 2. Live End-to-End Message Flow Inspector")
@@ -688,12 +769,12 @@ UPLINK (mock sensors to dashboard views):
                 st.rerun()
         with col_all2:
             if st.button("All Forward (1650 us)", width="stretch", key="btn_all_fwd_tab2"):
-                client.send_pwms([1650] * 8)
+                thruster_preset(client, [1650] * 8)
                 st.rerun()
         with col_all3:
             global_slider = st.slider("Master Sync Throttle", 1000, 2000, 1500, step=10, key="sync_throttle_tab2")
             if st.button("Apply Sync Throttle", key="btn_apply_sync_tab2"):
-                client.send_pwms([global_slider] * 8)
+                thruster_preset(client, [global_slider] * 8)
                 st.rerun()
 
         pwm_cols = st.columns(4)
@@ -714,7 +795,7 @@ UPLINK (mock sensors to dashboard views):
                     max_value=2000,
                     value=int(client.pwms[i]),
                     step=5,
-                    key=f"thruster_slider_tab2_{i}",
+                    key=THRUSTER_SLIDER_KEY(i),
                 )
                 new_pwms[i] = val
                 delta = val - 1500
