@@ -384,10 +384,18 @@ class TestTableMatchesCanonicalParser(unittest.TestCase):
             ("--test-thruster", int),
             ("--test-all", int),
             ("--test-depth", float),
-            ("--test-solenoid", int),
         ):
             with self.subTest(legacy=legacy):
                 self.assertIs(canonical_action(LEGACY_FLAGS[legacy]).type, expected_type)
+
+    def test_the_mask_flag_reaches_the_prefix_aware_parser(self):
+        # Not int: that is the form that rejected 0x0001. Not int(x, 0) either:
+        # that one accepts 0x but newly rejects a zero-padded decimal, trading the
+        # old break for a new one.
+        self.assertIs(
+            canonical_action(LEGACY_FLAGS["--test-solenoid"]).type,
+            can_stimulus.int_literal,
+        )
 
     def test_boolean_legacy_flags_map_to_boolean_canonical_options(self):
         for legacy in ("--test-arm", "--test-emergency"):
@@ -718,7 +726,10 @@ class TestSubprocessEntryPoints(unittest.TestCase):
         self.assertNotIn("usage: can_stimulus.py", text)
 
     def test_an_argparse_error_names_this_program(self):
-        completed = run_wrapper("--test-solenoid", "0x0001")
+        # A non-numeric pulse, so the error is argparse's own and names this
+        # program. It used to be --test-solenoid 0x0001, which stopped being an
+        # error once the canonical parser learned the hex spelling.
+        completed = run_wrapper("--test-thruster", "0", "not-a-number")
         self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
         self.assertIn("node2_stimulus.py: error:", completed.stderr)
 
@@ -780,13 +791,29 @@ class TestSubprocessEntryPoints(unittest.TestCase):
         self.assertNotIn("[FAIL]", completed.stdout + completed.stderr)
         self.assertEqual(completed.stdout, "")
 
-    def test_hex_solenoid_mask_is_rejected_loudly(self):
-        # The prototype parsed masks with int(x, 0), so 0x0001 worked there. The
-        # canonical parser uses type=int, so a hex literal is now a usage error -
-        # loud and nonzero, never a silently different mask.
+    def test_a_hex_solenoid_mask_reaches_the_canonical_tool_as_one(self):
+        """
+        The hex break is closed upstream, so the legacy form works again.
+
+        The prototype parsed masks with ``int(x, 0)``, so ``0x0001`` worked there.
+        The canonical parser briefly used ``type=int`` and made it a usage error,
+        which Task 6's fix round refused to accept.  It now uses the shared
+        prefix-aware parser, so this reaches the tool as ``--node2-solenoid 1``.
+
+        ``no_autostart_env`` points ``X19_SIL_SERVER`` at a path that does not
+        exist, so no engine is launched and the run stops at the transport.  That
+        is enough: reaching the transport at all means argparse accepted the mask,
+        which is the whole claim.
+        """
         completed = run_wrapper("--test-solenoid", "0x0001")
-        self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
-        self.assertIn("0x0001", completed.stdout + completed.stderr)
+        combined = completed.stdout + completed.stderr
+        self.assertNotIn("usage:", combined, "the hex spelling must not be a usage error")
+        self.assertNotIn("error:", combined, f"the hex spelling must not be a usage error:\n{combined}")
+        self.assertIn(
+            "X19 CAN stimulus",
+            completed.stdout,
+            "the tool must have parsed the command line and started running",
+        )
 
     def test_runs_from_an_unrelated_working_directory(self):
         # The wrapper reaches the canonical tool by absolute path from __file__,
