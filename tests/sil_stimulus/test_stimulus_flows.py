@@ -25,11 +25,13 @@ import contextlib
 import io
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
 import unittest
 from pathlib import Path
+from typing import NamedTuple
 from unittest import mock
 
 # tests/sil_stimulus/test_stimulus_flows.py -> tests/sil_stimulus -> tests -> repo root
@@ -2172,24 +2174,109 @@ class ObservingSilBackend(SilSocketBackend):
         return [(when, payload) for when, frame_id, payload in self.sent_frames if frame_id == can_id]
 
 
+class EngineRun(NamedTuple):
+    """
+    The engine a test is talking to, the backend on it, and the child it owns.
+
+    ``process`` exists because ``SilServerProcess`` cannot answer "did the child
+    actually die?" after teardown. ``stop()`` assigns ``self.process = None`` as
+    its **last** statement (sil_test_support.py:244-252), so ``is_running``
+    (sil_test_support.py:206-208) is False for every engine that has been through
+    ``__exit__`` - including one that ignored ``terminate()`` and had to be killed.
+    Asserting on ``is_running`` after teardown is therefore vacuous: it can only
+    ever pass.
+
+    Holding the ``Popen`` keeps the OS-level fact reachable afterwards, and
+    ``poll() is not None`` is exactly that fact: the child has been reaped. This
+    needs no change to Task 1's fixture, which is left byte-intact.
+    """
+
+    server: SilServerProcess
+    backend: ObservingSilBackend
+    process: subprocess.Popen
+
+
+def _assert_engine_reaped(test, run):
+    """
+    The engine child must have exited, checked at the OS level.
+
+    Deliberately not ``assertFalse(run.server.is_running)``: that attribute is
+    False by construction after teardown, so it would pass even if a child had
+    survived. ``Popen.poll()`` re-reads the process table, so it fails when one is
+    still running, which is the only failure this claim is about.
+    """
+    test.assertIsNotNone(
+        run.process.poll(),
+        f"the sil_bridge_server child (pid {run.process.pid}) is still running after the test's "
+        "context manager exited; terminate() was ignored and kill() did not finish, so this "
+        "test leaked a process",
+    )
+
+
+def _force_kill(process):
+    """addCleanup helper: never leave the probe process behind, pass or fail."""
+    if process.poll() is None:
+        process.kill()
+        process.wait(timeout=5)
+
+
+class TestEngineTeardownAssertion(unittest.TestCase):
+    """
+    The teardown assertion must be capable of failing, or it is decoration.
+
+    The vacuous form it replaced (``assertFalse(server.is_running)`` after
+    ``__exit__``) passed for every engine that ever existed, because ``stop()``
+    nulls the fixture's own handle as its last statement. These two tests pin the
+    replacement against that failure mode in both directions, so the property
+    "nothing was left running" is a claim the suite actually makes rather than
+    one it appears to make. They need no engine binary and cost no wall time.
+    """
+
+    def _probe(self, code):
+        process = subprocess.Popen(
+            [sys.executable, "-c", code],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        self.addCleanup(_force_kill, process)
+        return process
+
+    def test_a_surviving_child_fails_the_teardown_assertion(self):
+        process = self._probe("import time; time.sleep(30)")
+        self.assertIsNone(
+            process.poll(), "the probe must be alive for this test to mean anything"
+        )
+        with self.assertRaises(AssertionError):
+            _assert_engine_reaped(self, EngineRun(server=None, backend=None, process=process))
+
+    def test_a_reaped_child_passes_the_teardown_assertion(self):
+        process = self._probe("pass")
+        process.wait(timeout=5)
+        self.assertIsNotNone(process.poll(), "the probe must have exited")
+        _assert_engine_reaped(self, EngineRun(server=None, backend=None, process=process))
+
+
 @contextlib.contextmanager
 def _engine(executable):
     """
-    A private engine and a connected observing backend.
+    A private engine, the backend connected to it, and the child process it owns.
 
     Each test gets its own process on its own ephemeral port - ``SilServerProcess``
     reserves the port through ``free_tcp_port``, so no two tests and nothing
     outside this file can collide on 8765 - and the server is terminated on
     every exit path, including an assertion failure or a skip raised inside the
-    block. The caller can assert ``server.is_running`` afterwards to prove
-    nothing was left behind.
+    block. The caller asserts on ``EngineRun.process.poll()`` afterwards, so
+    "nothing was left running" is re-read from the OS rather than taken on trust
+    from a fixture attribute that teardown has already cleared.
     """
     server = SilServerProcess(executable)
     with server:
         backend = ObservingSilBackend("127.0.0.1", server.port, auto_start=False)
         backend.connect()
+        # Captured while the engine is still up, because stop() nulls its own handle.
+        process = server.process
         try:
-            yield server, backend
+            yield EngineRun(server=server, backend=backend, process=process)
         finally:
             backend.close()
 
@@ -2227,7 +2314,8 @@ class SilNodeIntegrationTests(unittest.TestCase):
         regression that halved the reported humidity would be caught here and
         would sail through a range check.
         """
-        with _engine(self.server_exe) as (server, backend):
+        with _engine(self.server_exe) as run:
+            backend = run.backend
             result = VehicleStimulusTester(backend).monitor_node1_env(3.0)
             self.assertTrue(result.passed, result.detail)
 
@@ -2243,23 +2331,27 @@ class SilNodeIntegrationTests(unittest.TestCase):
                     "is 13 B and a short record cannot be a valid reading",
                 )
                 record = EnvTelemetry.unpack(payload)
-                self.assertAlmostEqual(
+                # Exact equality, not a tolerance. All three values are exactly
+                # representable in IEEE-754 binary32 - 1013.25 is 1013 + 1/4, and
+                # 35.0 and 24.0 are integers - so they survive the mock's float,
+                # the C struct's float, and struct's "<3f" round trip with no
+                # rounding at any hop. A tolerance here would let a 0.0004 drift
+                # through a test whose stated purpose is catching drift, and would
+                # contradict the principle recorded at the top of this section.
+                self.assertEqual(
                     record.pressure_hpa,
                     SIL_ENV_PRESSURE_HPA,
-                    places=3,
-                    msg=f"0x210 frame {index}: node1 app.c:206 publishes the BME280 reading verbatim",
+                    f"0x210 frame {index}: node1 app.c:206 publishes the BME280 reading verbatim",
                 )
-                self.assertAlmostEqual(
+                self.assertEqual(
                     record.humidity_pct,
                     SIL_ENV_HUMIDITY_PCT,
-                    places=3,
-                    msg=f"0x210 frame {index}: node1 app.c:208",
+                    f"0x210 frame {index}: node1 app.c:208",
                 )
-                self.assertAlmostEqual(
+                self.assertEqual(
                     record.temperature_c,
                     SIL_ENV_TEMPERATURE_C,
-                    places=3,
-                    msg=f"0x210 frame {index}: node1 app.c:210",
+                    f"0x210 frame {index}: node1 app.c:210",
                 )
                 self.assertEqual(
                     record.leak_flags,
@@ -2267,7 +2359,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
                     f"0x210 frame {index} flags a leak; a set bit means node 1 should already "
                     "have broadcast an emergency break (node1 app.c:220-222)",
                 )
-        self.assertFalse(server.is_running, "the engine must not outlive the test")
+        _assert_engine_reaped(self, run)
 
     # -- node 2: control board --------------------------------------------
     def test_node2_arming_gate_is_neutral_before_3000ms_and_open_after(self):
@@ -2286,7 +2378,8 @@ class SilNodeIntegrationTests(unittest.TestCase):
         neutral is at or after the boundary. That third assertion is what
         separates a real arming gate from "the outputs happened to be neutral".
         """
-        with _engine(self.server_exe) as (server, backend):
+        with _engine(self.server_exe) as run:
+            backend = run.backend
             result = VehicleStimulusTester(backend).test_node2_arming()
             self.assertTrue(result.passed, result.detail)
 
@@ -2324,7 +2417,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
                 sorted(s.sim_time_ms for s in backend.readbacks),
                 "the engine's virtual clock must never run backwards",
             )
-        self.assertFalse(server.is_running, "the engine must not outlive the test")
+        _assert_engine_reaped(self, run)
 
     def test_node2_pwm_resends_at_20hz_and_holds_on_the_firmware_readback(self):
         """
@@ -2352,12 +2445,20 @@ class SilNodeIntegrationTests(unittest.TestCase):
         channel = 3
         pulse_us = 1750
         hold_s = 1.0
-        with _engine(self.server_exe) as (server, backend):
+        with _engine(self.server_exe) as run:
+            backend = run.backend
             tester = VehicleStimulusTester(backend)
             armed = tester.test_node2_arming()
             self.assertTrue(armed.passed, f"arming precondition failed: {armed.detail}")
 
+            # Two marks, not one. The arming precondition above drove the board to
+            # SMOKE_SINGLE_PWM_US (1700) and filled backend.readbacks with those
+            # snapshots; windowing only the SENT frames would let an arming-era
+            # readback satisfy the floor below if that constant were ever retuned to
+            # this test's pulse, which would make "the readback is the evidence"
+            # vacuous.
             send_mark = len(backend.sent_frames)
+            readback_mark = len(backend.readbacks)
             result = tester.test_node2_pwm(channel, pulse_us, duration_s=hold_s)
             self.assertTrue(result.passed, result.detail)
 
@@ -2411,10 +2512,14 @@ class SilNodeIntegrationTests(unittest.TestCase):
                 resend_hz, 25.0, f"0x100 arrived at {resend_hz:.1f} Hz, faster than the 20 Hz resend"
             )
 
-            # The evidence is the readback, not the write.
-            held = [s for s in backend.readbacks if s.pwms[channel] == pulse_us]
+            # The evidence is the readback, not the write - and only the readbacks
+            # this check produced, per the readback mark set above.
+            held = [s for s in backend.readbacks[readback_mark:] if s.pwms[channel] == pulse_us]
             self.assertGreaterEqual(
-                len(held), 3, f"only {len(held)} 0x7FE snapshot(s) showed {pulse_us} us on channel {channel}"
+                len(held),
+                3,
+                f"only {len(held)} 0x7FE snapshot(s) inside the PWM check's own window showed "
+                f"{pulse_us} us on channel {channel}",
             )
             for snapshot in held:
                 self.assertEqual(snapshot.pwms[channel], pulse_us)
@@ -2504,7 +2609,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
                 f"thrust came back after the watchdog dropped the channel, at "
                 f"sim_time_ms={after_drop[0].sim_time_ms}" if after_drop else "",
             )
-        self.assertFalse(server.is_running, "the engine must not outlive the test")
+        _assert_engine_reaped(self, run)
 
     def test_node2_solenoid_mask_changes_the_firmware_readback(self):
         """
@@ -2526,7 +2631,8 @@ class SilNodeIntegrationTests(unittest.TestCase):
             can_stimulus.conflicting_solenoid_valve(mask),
             f"0x{mask:04X} energises both coils of a valve and the firmware would reject it",
         )
-        with _engine(self.server_exe) as (server, backend):
+        with _engine(self.server_exe) as run:
+            backend = run.backend
             result = VehicleStimulusTester(backend).test_node2_solenoid(mask)
             self.assertTrue(result.passed, result.detail)
 
@@ -2548,7 +2654,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
                 any(s.solenoids == 0 for s in backend.readbacks[first_on + 1:]),
                 "the board must return to 0x0000 after being commanded to release",
             )
-        self.assertFalse(server.is_running, "the engine must not outlive the test")
+        _assert_engine_reaped(self, run)
 
     def test_node2_emergency_break_latches_the_brake_at_neutral(self):
         """
@@ -2562,7 +2668,8 @@ class SilNodeIntegrationTests(unittest.TestCase):
         arranges its own precondition, so this cannot pass against a board that
         was never ACTIVE.
         """
-        with _engine(self.server_exe) as (server, backend):
+        with _engine(self.server_exe) as run:
+            backend = run.backend
             result = VehicleStimulusTester(backend).test_emergency_break()
             self.assertTrue(result.passed, result.detail)
 
@@ -2606,7 +2713,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
                 if resumed
                 else "",
             )
-        self.assertFalse(server.is_running, "the engine must not outlive the test")
+        _assert_engine_reaped(self, run)
 
     # -- node 3: power slab -----------------------------------------------
     def test_node3_reports_the_plant_power_telemetry_on_0x300(self):
@@ -2623,7 +2730,8 @@ class SilNodeIntegrationTests(unittest.TestCase):
         eFuse alert (nodes/node3_power_slab/Core/Src/app.c:185-195), which would
         have tripped this board's brake.
         """
-        with _engine(self.server_exe) as (server, backend):
+        with _engine(self.server_exe) as run:
+            backend = run.backend
             result = VehicleStimulusTester(backend).monitor_node3_power(3.0)
             self.assertTrue(result.passed, result.detail)
 
@@ -2663,17 +2771,26 @@ class SilNodeIntegrationTests(unittest.TestCase):
                     len(record.v12_current_ma), 4, "four 12 V bricks are reported (rov_parameters.h:25)"
                 )
                 self.assertGreaterEqual(
-                    record.tether_current_ma, SIL_TETHER_MA_MIN, f"0x300 frame {index} tether current"
+                    record.tether_current_ma,
+                    SIL_TETHER_MA_MIN,
+                    f"0x300 frame {index} reports a tether current of "
+                    f"{record.tether_current_ma / 1000.0:.3f} A, below the "
+                    f"{SIL_TETHER_MA_MIN / 1000.0:.2f} A the plant's summed brick power "
+                    "produces (node3 app.c:121, :160-161)",
                 )
                 self.assertLessEqual(
                     record.tether_current_ma,
                     SIL_TETHER_MA_MAX,
-                    f"0x300 frame {index}: node3 app.c:160-161 divides the summed brick power by "
-                    f"the 48.0 V tether, which is about {SIL_TETHER_MA_MIN / 10:.0f}-"
-                    f"{SIL_TETHER_MA_MAX / 10:.1f} A here",
+                    f"0x300 frame {index} reports a tether current of "
+                    f"{record.tether_current_ma / 1000.0:.3f} A. node3 app.c:160-161 divides "
+                    "the summed brick power by the 48.0 V tether, which is about "
+                    f"{SIL_TETHER_MA_MIN / 1000.0:.2f}-{SIL_TETHER_MA_MAX / 1000.0:.2f} A here",
                 )
                 self.assertLessEqual(
-                    record.tether_current_ma, 25000, "0x300 frame {index} above the 25 A tether limit"
+                    record.tether_current_ma,
+                    25000,
+                    f"0x300 frame {index} reports {record.tether_current_ma / 1000.0:.2f} A, "
+                    "above the 25 A tether limit (rov_parameters.h:18)",
                 )
                 self.assertEqual(
                     record.pcb_temp_c_tenths,
@@ -2688,7 +2805,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
                     "node3 app.c:185-195 would have broadcast a 0x005 eFuse alert that trips this "
                     "board's brake (node2 app.c:121-126)",
                 )
-        self.assertFalse(server.is_running, "the engine must not outlive the test")
+        _assert_engine_reaped(self, run)
 
     # -- the property this suite exists for --------------------------------
     def test_a_node_that_stops_acting_produces_failed_checks_not_passes(self):
@@ -2712,7 +2829,8 @@ class SilNodeIntegrationTests(unittest.TestCase):
         anything. No firmware is mutated and no assertion is faked: the vehicle
         really is stopped, and the really-produced check really does fail.
         """
-        with _engine(self.server_exe) as (server, backend):
+        with _engine(self.server_exe) as run:
+            backend = run.backend
             backend.send_frame(CAN_ID_EMERGENCY_BREAK, AUTHORIZED_BREAK_FRAME)
             latched = backend.pump_until(lambda s: s.brake_active, 3.0)
             self.assertIsNotNone(
@@ -2748,7 +2866,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
                 if moved
                 else "",
             )
-        self.assertFalse(server.is_running, "the engine must not outlive the test")
+        _assert_engine_reaped(self, run)
 
 
 if __name__ == "__main__":
