@@ -119,6 +119,7 @@ __all__ = [
     "CAN_ID_TIME_SYNC_RESP",
     "CAN_ID_USB_HUB_TELEMETRY",
     "ESC_ARMING_SIM_MS",
+    "ForeignEngineError",
     "MIN_ARMING_SAMPLES",
     "NEUTRAL_PWMS",
     "NEUTRAL_US",
@@ -454,6 +455,17 @@ class _BaseBackend:
         self.close()
 
 
+class ForeignEngineError(ConnectionError):
+    """
+    A SIL engine this backend did not start is already listening on the port.
+
+    Raised by :meth:`SilSocketBackend.connect` before anything is written.  It is a
+    distinct type, not a bare ``ConnectionError``, because "the port was busy" and
+    "that engine belongs to somebody else" call for different operator responses:
+    the first is a retry, the second is a decision.
+    """
+
+
 class SilSocketBackend(_BaseBackend):
     """
     SIL transport: a TCP connection to ``sil_bridge_server``.
@@ -464,6 +476,8 @@ class SilSocketBackend(_BaseBackend):
       (``sil_test_support.server_executable``);
     * connect to an already-running server if one is listening, and only launch
       a child when nothing answers *and* auto_start is on *and* the mode is SIL;
+    * refuse an engine it did not start, unless ``attach_existing`` says the
+      caller meant it (:class:`ForeignEngineError`);
     * refuse a payload over 64 bytes with ``ValueError`` before touching the wire;
     * buffer partial TCP reads across calls (delegated to
       ``sil_test_support.recv_frames``, whose buffer is keyed per socket);
@@ -489,11 +503,15 @@ class SilSocketBackend(_BaseBackend):
         port: int = DEFAULT_SIL_PORT,
         auto_start: bool = True,
         mode: str = "sil",
+        attach_existing: bool = False,
     ) -> None:
         self.host = host
         self.port = int(port)
         self.auto_start = bool(auto_start)
         self.mode = mode
+        # Deliberate attachment to an engine somebody else started. False by
+        # default, and it has to be: see connect() and ForeignEngineError.
+        self.attach_existing = bool(attach_existing)
         self._sock: Optional[socket.socket] = None
         self._process: Optional[subprocess.Popen] = None
         self._pending: List[Tuple[int, bytes]] = []
@@ -519,6 +537,7 @@ class SilSocketBackend(_BaseBackend):
         if self._sock is not None:
             return
         if self._try_connect(min(1.0, max(0.05, timeout_s))):
+            self._require_ownership()
             return
         if not self.auto_start:
             raise ConnectionError(
@@ -538,6 +557,44 @@ class SilSocketBackend(_BaseBackend):
             # to happen here too.
             self.close()
             raise
+
+    def _require_ownership(self) -> None:
+        """
+        Refuse a connection to an engine this backend did not start.
+
+        Silently reusing whatever answers is the same defect class as writing a
+        frame that cannot be read back: a run that reports success about an engine
+        it commandeered.  ``--emergency-break`` against somebody else's engine
+        drives all eight thrusters to 1800 us and latches *their* emergency brake
+        for the life of that engine, and the dashboard auto-starts an engine on
+        the default port on every render, so the documented commands reach this
+        path while a dashboard is open.
+
+        Ownership is therefore a precondition, checked before anything is written
+        for the same reason ``_require_output_readback`` is: a refusal that
+        arrives after the actuation is a refusal that is too late.  ``attach_existing``
+        is the explicit opt-in, for a caller that really did start the engine
+        (Task 5's integration tests, through ``SilServerProcess``) or that means
+        to share one on purpose.
+        """
+        if self.attach_existing or self.started_server:
+            return
+        sock, self._sock = self._sock, None
+        if sock is not None:
+            with contextlib.suppress(OSError):
+                sock.close()
+        raise ForeignEngineError(
+            f"refused before sending any frame: something is already listening on "
+            f"{self.host}:{self.port} and this run did not start it, so the checks would drive "
+            "an engine this tool does not own. --emergency-break alone latches that engine's "
+            "brake for the life of it, and the dashboard starts an engine on the default port "
+            "on every render, so this is reachable while someone else is using the vehicle. "
+            "To use your own engine, pass --port with a port nothing is listening on and the "
+            f"tool will launch and reap one. To deliberately attach to the engine on "
+            f"{self.host}:{self.port}, pass --attach-existing and select the individual checks "
+            "you want; --auto is refused with it, because there is no harmless whole-vehicle "
+            "run against somebody else's engine."
+        )
 
     def _try_connect(self, timeout_s: float) -> bool:
         try:
@@ -2181,6 +2238,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--interface", default="can0", help="python-can interface for --mode can")
     parser.add_argument("--uart-port", default="/dev/ttyUSB0", help="serial port for --mode uart")
     parser.add_argument("--baudrate", type=int, default=115200, help="baud rate for --mode uart")
+    parser.add_argument(
+        "--attach-existing",
+        action="store_true",
+        help=(
+            "deliberately drive the engine that is already listening on the port instead of "
+            "refusing to touch an engine this run did not start. The default is to refuse, "
+            "because every check here actuates and the emergency break latches the brake of "
+            "whatever engine it reaches, for the life of that engine. Cannot be combined with "
+            "--auto."
+        ),
+    )
 
     parser.add_argument("--node1-env", action="store_true", help="monitor 0x210 enclosure telemetry")
     parser.add_argument("--node2-arm", action="store_true", help="verify the 3000 ms ESC arming gate")
@@ -2220,7 +2288,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def build_backend(args: argparse.Namespace) -> _BaseBackend:
     if args.mode == "sil":
-        return SilSocketBackend(args.host, args.port, auto_start=True, mode="sil")
+        return SilSocketBackend(
+            args.host,
+            args.port,
+            auto_start=True,
+            mode="sil",
+            attach_existing=bool(getattr(args, "attach_existing", False)),
+        )
     if args.mode == "can":
         return PythonCanBackend(interface=args.interface)
     if args.mode == "uart":
@@ -2341,6 +2415,19 @@ def main(argv: Optional[Sequence[str]] = None, backend_factory=None) -> int:
             "checks individually."
         )
         return 2
+    if args.auto and args.attach_existing:
+        # Refused in the pre-flight, before a transport is even built, for the same
+        # reason the ownership check is: --auto drives all eight thrusters, actuates
+        # a valve, and latches the brake, so there is no harmless version of it
+        # against an engine this run did not start. The operator names the checks
+        # they want instead, and the refusal names the way out.
+        print(
+            "[FAIL] refused: --auto cannot be combined with --attach-existing. --auto drives all "
+            "eight thrusters, actuates a valve, and latches the emergency brake, so running it "
+            "against an engine this run did not start commandeers somebody else's vehicle. Drop "
+            "--auto and name the checks you want to run against it."
+        )
+        return 2
 
     target = target_label(args)
     print(
@@ -2351,6 +2438,16 @@ def main(argv: Optional[Sequence[str]] = None, backend_factory=None) -> int:
     try:
         backend = backend_factory(args)
         backend.connect()
+    except ForeignEngineError as exc:
+        # Its own branch, not the generic one below: the generic wording ("could
+        # not open the transport") describes a fault, and this is a decision. A
+        # refusal dressed as a connection failure is how the precondition becomes
+        # invisible to the operator reading the log.
+        print(f"[FAIL] refused: {exc}")
+        if backend is not None:
+            with contextlib.suppress(Exception):
+                backend.close()
+        return 2
     except Exception as exc:  # noqa: BLE001 - a failed connect is a failed run
         print(
             f"[FAIL] could not open the {args.mode} transport at {target}: "
