@@ -17,8 +17,10 @@ Run from the repository root::
     python -m unittest tests.sil_stimulus.test_dashboard_control -v
 """
 
+import signal
 import socket
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -27,14 +29,18 @@ from pathlib import Path
 try:
     from .sil_test_support import (
         REPO_ROOT,
+        ServerBackedTestCase,
         SilServerProcess,
+        describe_exit,
         free_tcp_port,
         require_server_executable,
     )
 except ImportError:  # pragma: no cover - direct execution fallback
     from sil_test_support import (  # type: ignore[no-redef]
         REPO_ROOT,
+        ServerBackedTestCase,
         SilServerProcess,
+        describe_exit,
         free_tcp_port,
         require_server_executable,
     )
@@ -341,7 +347,7 @@ class TestSolenoidInterlock(unittest.TestCase):
         self.assertIsNone(client.last_solenoid_refusal)
 
 
-class TestDashboardControlAgainstServer(unittest.TestCase):
+class TestDashboardControlAgainstServer(ServerBackedTestCase):
     """
     End-to-end control-path tests against the native SIL server.
 
@@ -390,11 +396,43 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
         )
 
     def assert_worker_stopped(self) -> None:
-        """No control worker may still be scheduled after a stop transition."""
+        """
+        The 20 Hz control worker must be gone after a stop transition.
+
+        A *bounded wait*, not an instantaneous read, and that is the whole
+        content of the change.  ``stop_control_loop`` signals the worker and then
+        joins it with ``CONTROL_JOIN_TIMEOUT_S``; the signal is observed by
+        another thread, so the thread's death is a moment in the future from the
+        caller's point of view no matter how the join is written.  Reading
+        ``thread.is_alive()`` in the same breath as the call is a race with the
+        scheduler, and this helper is called from six tests that all stop the
+        worker the same way, so the race was not confined to one of them.
+
+        The budget is the client's own ``CONTROL_JOIN_TIMEOUT_S`` rather than a
+        number chosen here, for two reasons: it is the interval the client
+        itself declares sufficient for this exact join, and it keeps the test's
+        idea of "prompt" tied to the production code's instead of drifting from
+        it.  Note the two budgets are spent in sequence -- the entry point
+        (``disconnect``, ``request_stop``) spends the first one internally and
+        returns no verdict, so this is the second.  That is a deliberate,
+        documented widening and not a licence to wait indefinitely: a worker
+        that outlives the budget still fails, and the message reports how long it
+        actually took so a genuine hang is distinguishable from a slow unwind.
+        """
+        budget = sil_dashboard_client.CONTROL_JOIN_TIMEOUT_S
+        started = time.monotonic()
         thread = self.client._control_thread
+        while thread is not None and thread.is_alive():
+            if time.monotonic() - started >= budget:
+                break
+            time.sleep(0.005)
+        elapsed = time.monotonic() - started
         self.assertTrue(
             thread is None or not thread.is_alive(),
-            "The 20 Hz control worker is still running after a stop transition",
+            f"The 20 Hz control worker was still running {elapsed:.3f} s after the "
+            f"stop transition, which exceeds the client's own "
+            f"{budget:.1f} s join budget; control_state={self.client.control_state}, "
+            f"connected={self.client.connected}",
         )
 
     def _wait_for_live_neutral_status(self, timeout_s: float) -> None:
@@ -409,6 +447,34 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
                 what="a fresh neutral output-status snapshot",
             )
             return
+
+    def assert_output_status_is_live(self) -> None:
+        """
+        The 0x7FE snapshot must have arrived *recently*, not merely hold a value.
+
+        ``actual_pwms`` is filled by the client's reader thread, so an assertion
+        comparing it against an expected value is vacuous if telemetry has
+        stopped: the last value received would still be sitting there, equal or
+        not.  The existing per-test ``_wait_for(...)`` predicates establish
+        liveness *before* they compare, but a test that sleeps and then compares
+        -- ``test_pilot_command_entry_point_sustains_thrust`` does exactly that
+        -- has to state the freshness requirement itself, or a dead telemetry
+        path turns it into a test that passes when the vehicle is doing nothing.
+        """
+        received = self.client.output_status_received_monotonic
+        age = None if received is None else time.monotonic() - received
+        self.assertIsNotNone(
+            received,
+            "no 0x7FE output-status frame has been received at all, so every "
+            "actual_pwms assertion in this test would be reading a default",
+        )
+        self.assertLess(
+            age,
+            0.2,
+            f"the last 0x7FE snapshot is {age * 1000:.0f} ms old; telemetry has stopped, so "
+            f"the comparison that follows would pass or fail on a stale value "
+            f"(actual_pwms={self.client.actual_pwms})",
+        )
 
     # ------------------------------------------------------------------
     # Sustained control
@@ -718,6 +784,12 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
             what="the outputs to match the pilot allocation",
         )
         time.sleep(0.40)  # > 100 ms heartbeat window
+        # Freshness first.  ``actual_pwms`` is filled by the client's reader
+        # thread, so after a bare sleep the comparison below could be reading a
+        # value that arrived before the sleep started -- and would then pass
+        # vacuously on a host where telemetry had stopped.  Stating the
+        # requirement makes the check fail loudly instead.
+        self.assert_output_status_is_live()
         self.assertEqual(
             self.client.actual_pwms, self.client.pwms,
             "The pilot command must persist past the 100 ms heartbeat window",
@@ -812,6 +884,25 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
         """
         Invariant: after an explicit disconnect the worker stops transmitting,
         and the firmware heartbeat watchdog forces neutral within 100 ms.
+
+        The reconnect is asserted exactly once, with no retry and no tolerance.
+        That is not caution about flakiness, it is the point: a retry would turn
+        a real defect into a green run, which is the entire class of failure this
+        suite exists to eliminate.  ``SilDashboardClient.connect()`` returns
+        False only when the blocking ``s.connect()`` raises ``OSError``, and a
+        blocking connect to a live listener succeeds through the kernel's accept
+        backlog whether or not the server has called ``accept()`` yet.  So a
+        False here is not "the server had not got round to it" -- it means
+        nothing was listening on that port at all.
+
+        Which of the two things broke is therefore not a matter of inference, and
+        this test does not infer it.  It reads both facts off the OS and says
+        which: ``Popen.poll()`` for "is the engine process still alive", a
+        bind-probe for "does anything still own the port", and the engine's own
+        captured stdout/stderr for what it thought happened.  Those three go into
+        the failure message, and ``ServerBackedTestCase`` repeats them on every
+        other assertion in this class, so the next failure answers its own
+        question instead of arriving as a bare ``False is not true``.
         """
         self._wait_until_esc_armed()
         self.client.send_pwms([1650] * 8)
@@ -819,6 +910,14 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
             lambda: self.client.actual_pwms == [1650] * 8,
             timeout_s=2.0,
             what="the outputs to reach 1650 us",
+        )
+        # Precondition, stated rather than assumed: the engine is up and owns the
+        # port before the disconnect under test, so a later "nothing is
+        # listening" is something that happened during the test.
+        self.assertTrue(
+            self.server.is_running,
+            f"precondition: the engine was already gone before the disconnect under "
+            f"test.\n{self.server.failure_report()}",
         )
 
         self.client.disconnect()
@@ -831,7 +930,43 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
 
         # Reconnect (which the operator does with the engine restart button) and
         # read back the board: the watchdog, not the dashboard, neutralized it.
-        self.assertTrue(self.client.connect())
+        reconnected = self.client.connect()
+        if not reconnected:
+            # Name the two possibilities separately.  They are different bugs
+            # with different fixes, and collapsing them is what made the
+            # original Linux failure undiagnosable.
+            engine_gone = not self.server.is_running
+            port_free = not self.server.port_is_bound()
+            if engine_gone:
+                cause = (
+                    "The SIL engine PROCESS DIED while this test held no client. The "
+                    "dashboard's connect() was refused because nothing was listening, "
+                    "not because the reconnect raced. Read the exit status and the "
+                    "server's own output below for the cause."
+                )
+            elif port_free:
+                cause = (
+                    "The engine process is still alive but has RELEASED the port, so the "
+                    "connect() was refused by the OS. That is a different defect from a "
+                    "dead process and from a connect that raced; the engine's own output "
+                    "below should say whether it tore its listener down."
+                )
+            else:
+                cause = (
+                    "The engine process is ALIVE and still owns the port, yet the "
+                    "client's connect() raised OSError. The refusal came from the "
+                    "client or the socket layer, not from the simulator, and the engine "
+                    "output below is unlikely to explain it."
+                )
+            self.fail(
+                f"connect() after an explicit disconnect returned False.\n{cause}\n"
+                f"{self.server.failure_report()}"
+            )
+        self.assertTrue(
+            reconnected,
+            "connect() after an explicit disconnect returned False; see the engine "
+            "diagnostics appended to this message",
+        )
         self.assertIs(self.client.control_state, ControlState.ARMED)
         self._wait_for_neutral(timeout_s=2.0)
         self._wait_for_live_neutral_status(timeout_s=2.0)
@@ -997,7 +1132,7 @@ class TestDashboardControlAgainstServer(unittest.TestCase):
         self._wait_for_neutral(timeout_s=1.0)
 
 
-class TestDashboardEngineRestart(unittest.TestCase):
+class TestDashboardEngineRestart(ServerBackedTestCase):
     """
     The engine-restart disarm path, driven through the real production code.
 
@@ -1006,6 +1141,10 @@ class TestDashboardEngineRestart(unittest.TestCase):
     ``start_server_process()``) instead of sharing one started by
     ``SilServerProcess``. Two servers cannot bind the same port, so the two
     fixtures are mutually exclusive.
+
+    It still gets the shared failure diagnostics: ``ServerBackedTestCase`` falls
+    back to the client's own ``c_stdout_log`` when there is no fixture-owned
+    engine, so a failure here reports the engine's captured output too.
     """
 
     @classmethod
@@ -1094,6 +1233,256 @@ class TestDashboardEngineRestart(unittest.TestCase):
             self.client._estop_latched,
             "A bare disconnect must not clear the ESTOP latch; the operator has to "
             "restart the engine",
+        )
+
+
+# --------------------------------------------------------------------------
+# The failure diagnostics themselves
+# --------------------------------------------------------------------------
+#
+# The reconnect test above can only answer "did the engine die, or did the
+# connect race?" if the fixture it reports through actually works.  These tests
+# are that proof, and they need no engine binary: a stand-in child that binds a
+# socket and prints a banner exercises exactly the capture path, and an inner
+# TestCase with a deliberately failing method exercises exactly the reporting
+# path.  Without them a regression in the diagnostics would stay invisible until
+# the next real engine failure -- which is precisely when it is most expensive.
+
+
+class TestEngineFailureDiagnostics(unittest.TestCase):
+    """
+    The fixture must capture the engine's output, and keep it after teardown.
+
+    Driven against the real ``sil_bridge_server`` rather than a stand-in, because
+    the strings these assertions look for are the engine's own banner and
+    connection messages -- the exact text a failure report has to carry.  A
+    synthetic child would prove the pipe works without proving the useful thing.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.server_exe = require_server_executable()
+
+    def setUp(self) -> None:
+        self.server = SilServerProcess(self.server_exe)
+        self.addCleanup(self.server.stop)
+
+    def test_the_engines_own_output_is_captured_rather_than_discarded(self):
+        """
+        Invariant: what the engine printed is reachable after it has spoken.
+
+        The whole point of the change.  ``SilServerProcess`` used to launch with
+        ``stdout=DEVNULL``, so the engine's startup banner, its
+        "Client disconnected, waiting for reconnection..." line, and any bind or
+        crash message were produced and thrown away, and a failure left no
+        evidence at all.
+        """
+        self.server.start()
+        self.assertTrue(self.server.is_running)
+        output = self.server.server_output()
+        self.assertIn(
+            "Software-in-the-Loop (SIL) Multi-Node Bus Server Active",
+            output,
+            "the engine's own stdout must be captured, not sent to DEVNULL",
+        )
+        self.assertIn(
+            f"127.0.0.1:{self.server.port}",
+            output,
+            "the banner must name the port the fixture chose, so a report can be "
+            "matched to the engine it came from",
+        )
+
+    def test_captured_output_survives_the_fixtures_own_teardown(self):
+        """
+        Invariant: teardown cannot destroy the evidence it is asked to preserve.
+
+        A diagnostic that only works while the fixture is alive is nearly
+        useless: a failure is reported after the context manager has exited, and
+        an ``addCleanup``-ordered ``stop()`` removes the log file.  So the
+        content is read out and retained before the file goes, and
+        ``server_output()`` keeps answering from memory.
+        """
+        self.server.start()
+        self.assertIn("Bus Server Active", self.server.server_output())
+        self.server.stop()
+        self.assertIn(
+            "Bus Server Active",
+            self.server.server_output(),
+            "stop() must retain the captured output; the failure message is built "
+            "after teardown has run",
+        )
+        self.assertFalse(
+            [
+                path.name
+                for path in Path(tempfile.gettempdir()).iterdir()
+                if path.is_file() and path.name.startswith("sil_bridge_server-")
+            ],
+            "the capture file must not be left behind on disk",
+        )
+
+    def test_the_report_separates_a_dead_engine_from_a_refused_connect(self):
+        """
+        Invariant: the two failure modes cannot report the same sentence.
+
+        This is the requirement the original Linux failure violated.  The report
+        has to name liveness, name the exit, and say which of "the engine is
+        gone" / "the engine is alive" applies -- because those two have
+        different fixes and must never be conflated.
+        """
+        self.server.start()
+        self.assertIn("process alive         : yes", self.server.failure_report())
+        killed = self._report_after_kill()
+        self.assertIn("process alive         : NO", killed)
+        self.assertIn(
+            "this is not a connect race",
+            killed,
+            "a reaped engine process means nothing is listening, which is the "
+            "opposite conclusion from a connect that raced",
+        )
+        # How it died is platform-shaped -- POSIX reports a signal, Windows a
+        # terminate exit code -- so the assertion is that the fate is *named at
+        # all* rather than left as "still running".  The signal-name mapping
+        # itself is pinned separately, where it can be exercised on every
+        # platform rather than only on the one that produced it.
+        self.assertNotIn(
+            "still running",
+            killed,
+            "a reaped process has a known fate; the report must state it",
+        )
+
+    def _report_after_kill(self) -> str:
+        self.server.process.kill()
+        self.server.process.wait(timeout=5)
+        return self.server.failure_report()
+
+    def test_an_exit_by_signal_is_named_rather_than_only_numbered(self):
+        """
+        Invariant: ``returncode`` is translated, because the number means nothing.
+
+        POSIX reports a signal death as a negative return code, and ``-13`` is
+        SIGPIPE -- the single most informative token in a whole engine-crash
+        report.  Windows has no SIGPIPE at all, so there the same call must
+        still report the number rather than raise on an unknown enum member.
+        """
+        self.assertIn("still running", describe_exit(None))
+        self.assertIn("exited normally with code 3", describe_exit(3))
+        for name in ("SIGTERM", "SIGABRT"):
+            with self.subTest(signal=name):
+                number = int(getattr(signal, name))
+                self.assertIn(name, describe_exit(-number))
+                self.assertIn(str(number), describe_exit(-number))
+        # SIGPIPE exists only where a socket send can raise it.  Where it does
+        # not, the contract is still that the number survives and nothing raises.
+        pipe = describe_exit(-13)
+        if hasattr(signal, "SIGPIPE"):
+            self.assertIn("SIGPIPE", pipe)
+        else:
+            self.assertIn("signal 13", pipe)
+            self.assertIn("unnamed", pipe)
+
+
+class TestServerBackedDiagnosticsAreWired(unittest.TestCase):
+    """
+    Invariant: a failure in a server-backed class really does carry the evidence.
+
+    The wrapper in ``ServerBackedTestCase`` installs itself on the test method
+    in ``__init__``, which is easy to break silently -- a renamed attribute,
+    changed unittest internals, a subclass that forgets its base -- and the
+    symptom would only appear on the next *real* engine failure, as an
+    undiagnosable one.  So the mechanism is pinned directly here: run an inner
+    case the way the runner does and require the engine block in the recorded
+    failure.
+
+    Both inner cases are defined *inside* the test methods, not at module
+    scope.  A module-level ``TestCase`` with a ``test_*`` method is collected by
+    ``unittest discover``, which would run a deliberately failing case as part
+    of the suite and report an error -- the exact thing being tested here would
+    then break the run it is meant to describe.
+    """
+
+    class _Stub:
+        """Enough of ``SilServerProcess`` for the report; no child, no socket."""
+
+        def failure_report(self) -> str:
+            return "  sil_bridge_server diagnostics:\n    process alive         : NO"
+
+    def test_an_assertion_failure_is_reissued_with_the_engine_diagnostics(self):
+        class _Failing(ServerBackedTestCase):
+            def setUp(self) -> None:
+                self.server = self.OUTER._Stub()
+
+            def test_it_fails(self) -> None:
+                self.assertTrue(False, "the original failure text")
+
+        _Failing.OUTER = self
+        result = unittest.TestResult()
+        _Failing("test_it_fails").run(result)
+        self.assertEqual(result.testsRun, 1, "the inner case must have run at all")
+        self.assertEqual(len(result.failures), 1, f"expected one failure: {result.errors}")
+        text = result.failures[0][1]
+        self.assertIn(
+            "the original failure text",
+            text,
+            "the wrapper must preserve the assertion's own message",
+        )
+        self.assertIn(
+            "process alive         : NO",
+            text,
+            "the engine diagnostics must be appended to the failure, or a dead "
+            "engine and a refused connect stay indistinguishable",
+        )
+
+    def test_a_passing_test_is_left_completely_alone(self):
+        class _Passing(ServerBackedTestCase):
+            def test_it_passes(self) -> None:
+                self.assertTrue(True)
+
+        result = unittest.TestResult()
+        _Passing("test_it_passes").run(result)
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.failures) + len(result.errors), 0)
+        self.assertEqual(len(result.skipped), 0, "the wrapper must not introduce a skip")
+
+    def test_a_dotted_test_id_still_loads(self):
+        """
+        Invariant: the wrapper does not break ``module.Class.test_name``.
+
+        This one is here because it broke.  A first attempt used a plain
+        ``def`` wrapper, and ``TestLoader.loadTestsFromName`` in CPython 3.14
+        checks ``isinstance(getattr(instance, name), types.FunctionType)`` to
+        tell a test method from a static method
+        (unittest/loader.py:187).  A function on the instance failed that check,
+        the loader fell through, and calling the unbound method produced
+        ``TypeError: missing 1 required positional argument: 'self'`` -- for
+        every test in every class that inherited the base.  Discovery did not
+        notice, because discovery never takes that branch, so only a dotted id
+        revealed it.
+
+        The id is built from ``__name__`` rather than hard-coded, because
+        ``discover -s tests/sil_stimulus`` imports this module as a *top-level*
+        ``test_dashboard_control`` while ``python -m unittest
+        tests.sil_stimulus....`` imports it as a package submodule.  A fixed
+        ``tests.sil_stimulus....`` prefix loads a second, distinct copy of the
+        module under the dotted form, so the class identity differs and the
+        assertion below is about the import style rather than about the loader.
+
+        Loading runs no test, so this needs no engine binary.
+        """
+        loaded = unittest.TestLoader().loadTestsFromName(
+            f"{__name__}.TestDashboardEngineRestart"
+            ".test_engine_restart_clears_the_estop_latch"
+        )
+        self.assertEqual(loaded.countTestCases(), 1, f"dotted load produced: {loaded}")
+        (case,) = list(loaded)
+        self.assertIsInstance(
+            case, unittest.TestCase,
+            "the loader must return a real test case, not an error placeholder -- "
+            "that is what the plain-function wrapper produced",
+        )
+        self.assertEqual(type(case).__name__, "TestDashboardEngineRestart")
+        self.assertEqual(
+            case._testMethodName,
+            "test_engine_restart_clears_the_estop_latch",
         )
 
 

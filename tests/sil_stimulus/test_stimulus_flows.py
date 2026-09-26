@@ -76,9 +76,15 @@ from sil_protocol import (  # noqa: E402  (via can_stimulus's sys.path setup)
 )
 
 try:
-    from .sil_test_support import SilServerProcess, free_tcp_port, require_server_executable
+    from .sil_test_support import (
+        ServerBackedTestCase,
+        SilServerProcess,
+        free_tcp_port,
+        require_server_executable,
+    )
 except ImportError:  # pragma: no cover - direct execution fallback
     from sil_test_support import (  # type: ignore[no-redef]
+        ServerBackedTestCase,
         SilServerProcess,
         free_tcp_port,
         require_server_executable,
@@ -1244,7 +1250,13 @@ class _RecordingEngine:
     assert on what the tool actually put on the wire rather than on what the tool
     says it did.  It sends nothing back: this test is about the refusal arriving
     before any write, not about a readback.
+
+    ``RECV_POLL_S`` is the peer's own read window, and the observe/settle helpers
+    below are expressed in multiples of it, so "has the recorder caught up?" is
+    answered against the recorder's real cadence rather than a guessed sleep.
     """
+
+    RECV_POLL_S = 0.2
 
     def __init__(self, listening: bool = True):
         # Bind first and listen second, so a peer can be created on a known port
@@ -1255,6 +1267,7 @@ class _RecordingEngine:
         self.listener.bind(("127.0.0.1", 0))
         self.port = self.listener.getsockname()[1]
         self.frames = []
+        self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
         if listening:
@@ -1274,7 +1287,7 @@ class _RecordingEngine:
             return
         with conn:
             buf = b""
-            conn.settimeout(0.2)
+            conn.settimeout(self.RECV_POLL_S)
             while not self._stop.is_set():
                 try:
                     chunk = conn.recv(4096)
@@ -1288,10 +1301,58 @@ class _RecordingEngine:
                 while len(buf) >= SIL_PACKET_SIZE:
                     can_id, payload = unpack_sil_can_frame(buf[:SIL_PACKET_SIZE])
                     buf = buf[SIL_PACKET_SIZE:]
-                    self.frames.append((can_id, payload))
+                    with self._lock:
+                        self.frames.append((can_id, payload))
 
     def ids(self):
-        return [can_id for can_id, _ in self.frames]
+        with self._lock:
+            return [can_id for can_id, _ in self.frames]
+
+    def count(self):
+        with self._lock:
+            return len(self.frames)
+
+    def wait_for_count(self, minimum: int, timeout_s: float = 2.0) -> bool:
+        """
+        Bounded wait for at least ``minimum`` frames to be recorded.
+
+        ``_serve`` parses on its own thread, so ``ids()`` read straight after a
+        synchronous write is a *lower bound* and can lag by a frame.  This peer
+        had the same defect as the dashboard's wire recorder -- a test asserted
+        ``[CAN_ID_THRUSTER_CMD]`` immediately after the CLI returned, and on a
+        loaded host the reader thread had not got there yet and the list was
+        empty.  Polling to convergence is the honest form of "the frame arrived".
+        """
+        deadline = time.monotonic() + timeout_s
+        while True:
+            if self.count() >= minimum:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.005)
+
+    def settle(self, quiet_s: float = 2 * RECV_POLL_S, timeout_s: float = 2.0) -> int:
+        """
+        Return the frame count once the recorder has stopped seeing new frames.
+
+        The counterpart to :meth:`wait_for_count`, for the "nothing else was
+        written" claim, which cannot be expressed as a wait for something to
+        appear.  Settling means "no new frame for two full read windows", the
+        smallest observation that distinguishes drained from still-arriving, and
+        it is bounded so a genuinely live stream fails the caller's assertion
+        instead of hanging the suite.
+        """
+        deadline = time.monotonic() + timeout_s
+        last, stable_since = -1, time.monotonic()
+        while True:
+            current = self.count()
+            if current != last:
+                last, stable_since = current, time.monotonic()
+            elif time.monotonic() - stable_since >= quiet_s:
+                return current
+            if time.monotonic() >= deadline:
+                return current
+            time.sleep(0.01)
 
     def close(self):
         self._stop.set()
@@ -1385,6 +1446,14 @@ class TestEngineOwnership(unittest.TestCase):
             action=(),
         )
         self.assertEqual(status_code, 0, printed)
+        # Bounded wait, not an immediate read.  The CLI returns once the write
+        # has left the socket; _serve parses on its own thread, so ids() is a
+        # lower bound that can lag by a frame.  Reading it directly here made the
+        # test depend on which thread the scheduler ran.
+        self.assertTrue(
+            self.engine.wait_for_count(1),
+            "the opt-in never let any frame reach the engine",
+        )
         self.assertEqual(
             self.engine.ids(),
             [CAN_ID_THRUSTER_CMD],
@@ -1406,6 +1475,10 @@ class TestEngineOwnership(unittest.TestCase):
         self.assertEqual(status_code, 2, printed)
         self.assertIn("--auto", printed)
         self.assertIn("--attach-existing", printed)
+        # Settle before claiming nothing arrived: an unsettled read of an
+        # asynchronous recorder proves nothing in the "nothing" direction, and
+        # this is the assertion the whole ownership gate rests on.
+        self.engine.settle()
         self.assertEqual(self.engine.ids(), [])
 
     def test_a_backend_that_owns_its_engine_is_not_refused(self):
@@ -2700,7 +2773,7 @@ class TestStimulusVehicleCheckFailures(unittest.TestCase):
         self.assertIn("no frames decoded", result.detail)
 
 
-class TestStimulusAgainstServer(unittest.TestCase):
+class TestStimulusAgainstServer(ServerBackedTestCase):
     """
     End-to-end CLI coverage against the real native server.
 
@@ -3083,7 +3156,7 @@ class TestEngineTeardownAssertion(unittest.TestCase):
 
 
 @contextlib.contextmanager
-def _engine(executable):
+def _engine(executable, test=None):
     """
     A private engine, the backend connected to it, and the child process it owns.
 
@@ -3094,6 +3167,12 @@ def _engine(executable):
     block. The caller asserts on ``EngineRun.process.poll()`` afterwards, so
     "nothing was left running" is re-read from the OS rather than taken on trust
     from a fixture attribute that teardown has already cleared.
+
+    ``test`` is the calling TestCase, published on it as ``server`` for as long
+    as the engine lives.  That is how these tests get the engine's captured
+    stdout/stderr attached to any assertion failure: ``ServerBackedTestCase``
+    reads ``self.server``.  Passing it is optional so the helper stays usable
+    from a plain function, but every call site here is a TestCase.
     """
     server = SilServerProcess(executable)
     with server:
@@ -3103,13 +3182,15 @@ def _engine(executable):
         backend.connect()
         # Captured while the engine is still up, because stop() nulls its own handle.
         process = server.process
+        if test is not None:
+            test.server = server
         try:
             yield EngineRun(server=server, backend=backend, process=process)
         finally:
             backend.close()
 
 
-class SilNodeIntegrationTests(unittest.TestCase):
+class SilNodeIntegrationTests(ServerBackedTestCase):
     """
     One end-to-end test per vehicle node, each against its own real engine.
 
@@ -3142,7 +3223,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
         regression that halved the reported humidity would be caught here and
         would sail through a range check.
         """
-        with _engine(self.server_exe) as run:
+        with _engine(self.server_exe, self) as run:
             backend = run.backend
             result = VehicleStimulusTester(backend).monitor_node1_env(3.0)
             self.assertTrue(result.passed, result.detail)
@@ -3206,7 +3287,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
         neutral is at or after the boundary. That third assertion is what
         separates a real arming gate from "the outputs happened to be neutral".
         """
-        with _engine(self.server_exe) as run:
+        with _engine(self.server_exe, self) as run:
             backend = run.backend
             result = VehicleStimulusTester(backend).test_node2_arming()
             self.assertTrue(result.passed, result.detail)
@@ -3273,7 +3354,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
         channel = 3
         pulse_us = 1750
         hold_s = 1.0
-        with _engine(self.server_exe) as run:
+        with _engine(self.server_exe, self) as run:
             backend = run.backend
             tester = VehicleStimulusTester(backend)
             armed = tester.test_node2_arming()
@@ -3459,7 +3540,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
             can_stimulus.conflicting_solenoid_valve(mask),
             f"0x{mask:04X} energises both coils of a valve and the firmware would reject it",
         )
-        with _engine(self.server_exe) as run:
+        with _engine(self.server_exe, self) as run:
             backend = run.backend
             result = VehicleStimulusTester(backend).test_node2_solenoid(mask)
             self.assertTrue(result.passed, result.detail)
@@ -3496,7 +3577,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
         arranges its own precondition, so this cannot pass against a board that
         was never ACTIVE.
         """
-        with _engine(self.server_exe) as run:
+        with _engine(self.server_exe, self) as run:
             backend = run.backend
             result = VehicleStimulusTester(backend).test_emergency_break()
             self.assertTrue(result.passed, result.detail)
@@ -3558,7 +3639,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
         eFuse alert (nodes/node3_power_slab/Core/Src/app.c:185-195), which would
         have tripped this board's brake.
         """
-        with _engine(self.server_exe) as run:
+        with _engine(self.server_exe, self) as run:
             backend = run.backend
             result = VehicleStimulusTester(backend).monitor_node3_power(3.0)
             self.assertTrue(result.passed, result.detail)
@@ -3657,7 +3738,7 @@ class SilNodeIntegrationTests(unittest.TestCase):
         anything. No firmware is mutated and no assertion is faked: the vehicle
         really is stopped, and the really-produced check really does fail.
         """
-        with _engine(self.server_exe) as run:
+        with _engine(self.server_exe, self) as run:
             backend = run.backend
             backend.send_frame(CAN_ID_EMERGENCY_BREAK, AUTHORIZED_BREAK_FRAME)
             latched = backend.pump_until(lambda s: s.brake_active, 3.0)

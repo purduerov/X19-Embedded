@@ -51,6 +51,7 @@ try:
         CAN_ID_THRUSTER_CMD,
         REPO_ROOT,
         SIL_PACKET_SIZE,
+        ServerBackedTestCase,
         SilServerProcess,
         ThrusterCommand,
         require_server_executable,
@@ -62,6 +63,7 @@ except ImportError:  # pragma: no cover - direct execution fallback
         CAN_ID_THRUSTER_CMD,
         REPO_ROOT,
         SIL_PACKET_SIZE,
+        ServerBackedTestCase,
         SilServerProcess,
         ThrusterCommand,
         require_server_executable,
@@ -74,6 +76,7 @@ if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))
 
 from sil_dashboard_client import (  # noqa: E402  (path setup must precede it)
+    CONTROL_JOIN_TIMEOUT_S,
     CONTROL_PERIOD_S,
     HEARTBEAT_TIMEOUT_S,
     NEUTRAL_PWM_US,
@@ -293,7 +296,29 @@ class _RecordingClient:
 
 
 class _WireRecorder:
-    """Parses every SIL frame the client writes, in wire order, on a reader thread."""
+    """
+    Parses every SIL frame the client writes, in wire order, on a reader thread.
+
+    The reader is asynchronous by construction, so *every* accessor here is a
+    lower bound on what the client has sent, never an exact reading of it.  A
+    test that reads ``frames()`` straight after a synchronous ``sendall`` and
+    then decides something is measuring the scheduler, not the wire.  The
+    ``wait_for_*`` helpers are the disciplined alternative: each one is a
+    bounded wait on the property actually being asserted, so it converges
+    instead of guessing a sleep long enough to win the race on the machine it
+    was written on.
+    """
+
+    #: Test-only hook: seconds the reader thread sleeps before each ``recv``.
+    #: Zero is the real behaviour; a test that sets it is proving its
+    #: assertions survive a reader the scheduler can starve at will.  Kept
+    #: below ``RECV_POLL_S`` so an injected delay slows the reader down without
+    #: also changing how long it blocks waiting for data.
+    reader_delay_s = 0.0
+
+    #: The reader's own poll interval. Also the ceiling on any injected delay,
+    #: so ``reader_delay_s`` is a pure "the parser is slower" knob.
+    RECV_POLL_S = 0.05
 
     def __init__(self, sock: socket.socket) -> None:
         self._sock = sock
@@ -307,8 +332,12 @@ class _WireRecorder:
         self._thread.start()
 
     def _run(self) -> None:
-        self._sock.settimeout(0.05)
+        self._sock.settimeout(self.RECV_POLL_S)
         while not self._stop.is_set():
+            if self.reader_delay_s:
+                # An arbitrary delay, deliberately not a polite one: the point
+                # is to prove no assertion below depends on the reader winning.
+                time.sleep(self.reader_delay_s)
             try:
                 chunk = self._sock.recv(SIL_PACKET_SIZE * 8)
             except (socket.timeout, TimeoutError):
@@ -350,6 +379,10 @@ class _WireRecorder:
             for can_id, payload in self.frames() if can_id == CAN_ID_THRUSTER_CMD
         ]
 
+    def payloads_for(self, can_id: int) -> List[bytes]:
+        """Every payload seen on ``can_id``, in wire order. Subject to the same lag."""
+        return [payload for frame_id, payload in self.frames() if frame_id == can_id]
+
     def wait_for_count(self, minimum: int, timeout_s: float) -> bool:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
@@ -357,6 +390,42 @@ class _WireRecorder:
                 return True
             time.sleep(0.005)
         return self.count() >= minimum
+
+    def wait_for_can_id(self, can_id: int, minimum: int = 1, timeout_s: float = 2.0) -> bool:
+        """
+        Bounded wait for at least ``minimum`` frames on ``can_id``.
+
+        This is the "did this frame reach the wire?" question, asked as a wait
+        rather than as an instantaneous read.  A synchronous send returns as
+        soon as the bytes are in the socket buffer; the reader that turns them
+        into frames is a separate thread, so the honest form of the assertion is
+        "it arrived within the budget", not "it had arrived when I looked".
+        """
+        deadline = time.monotonic() + timeout_s
+        while True:
+            if len(self.payloads_for(can_id)) >= minimum:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.005)
+
+    def wait_for_pwms(self, expected: List[int], timeout_s: float = 2.0) -> bool:
+        """
+        Bounded wait until the most recent thruster frame carries ``expected``.
+
+        For "the command path is still sending exactly this", which is a
+        statement about the stream's current tail rather than about one instant
+        of it: polling to convergence is what makes it independent of how far
+        behind the reader thread happens to be.
+        """
+        deadline = time.monotonic() + timeout_s
+        while True:
+            sent = self.thruster_pwms()
+            if sent and sent[-1] == list(expected):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.005)
 
     def quiet_for(self, duration_s: float) -> bool:
         before = self.count()
@@ -1356,10 +1425,31 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
         self.addCleanup(self.transport.close, self.client)
 
     def assertWorkerStopped(self) -> None:
+        """
+        The 20 Hz worker must be gone after a stop transition.
+
+        A bounded wait rather than an instantaneous ``is_alive()`` read: the stop
+        signal is observed by the worker thread, so its death is in the future
+        from here, and reading liveness in the same breath as the call races the
+        scheduler.  The budget is the client's own ``CONTROL_JOIN_TIMEOUT_S``,
+        imported from the production module, so the test's idea of "prompt" stays
+        tied to the code that implements the stop rather than drifting from it.
+        The entry point has already spent one such budget internally and returns
+        no verdict, so this is the second; a worker that outlives it still fails,
+        and the message says how long it actually took.
+        """
+        started = time.monotonic()
         thread = self.client._control_thread
+        while thread is not None and thread.is_alive():
+            if time.monotonic() - started >= CONTROL_JOIN_TIMEOUT_S:
+                break
+            time.sleep(0.005)
+        elapsed = time.monotonic() - started
         self.assertTrue(
             thread is None or not thread.is_alive(),
-            "The 20 Hz control worker is still running after an All Stop",
+            f"The 20 Hz control worker was still running {elapsed:.3f} s after the stop "
+            f"transition, which exceeds the client's own {CONTROL_JOIN_TIMEOUT_S:.1f} s "
+            f"join budget; control_state={self.client.control_state}",
         )
 
     def test_all_stop_stops_the_worker_and_silences_the_command_path(self):
@@ -1468,8 +1558,15 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
                 self.assertEqual(self.client._last_command, expected_held)
 
         # And the command path is still sending exactly the pilot's command.
-        time.sleep(2 * CONTROL_PERIOD_S)
-        self.assertEqual(self.recorder.thruster_pwms()[-1], expected_held)
+        # A bounded wait on the property, not a fixed sleep followed by a read:
+        # the tail of the stream is what is being claimed, and polling to
+        # convergence is what makes the claim independent of the reader thread.
+        self.assertTrue(
+            self.recorder.wait_for_pwms(expected_held, timeout_s=WORKER_SPINUP_S),
+            f"the command path stopped carrying the pilot's allocation; last thruster "
+            f"frame was {self.recorder.thruster_pwms()[-1:]} "
+            f"(expected {expected_held})",
+        )
 
     def test_a_second_session_cannot_rearm_a_stopped_vehicle(self):
         """
@@ -1535,7 +1632,7 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
                 self.assertIs(self.client.control_state, ControlState.STOPPED)
                 self.assertWorkerStopped()
 
-        time.sleep(2 * CONTROL_PERIOD_S)
+        self.recorder.settle()
         self.assertEqual(
             self.recorder.count(), after_stop,
             "a new session put frames on the wire with no operator action",
@@ -1662,7 +1759,7 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
                             f"later render, re-arming thrust with no operator "
                             f"action",
                         )
-                time.sleep(2 * CONTROL_PERIOD_S)
+                self.recorder.settle()
                 self.assertEqual(
                     self.recorder.count(), after_stop,
                     f"A frame was transmitted after the {tab} tab's All Stop",
@@ -1798,7 +1895,9 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
             {"surge": 0.0, "sway": 0.0, "heave": 0.0, "yaw": 0.0}
         )
         self.assertIs(self.client.control_state, ControlState.ARMED)
-        time.sleep(2 * CONTROL_PERIOD_S)
+        # Settle before handing the fixture to the next subtest, so the
+        # subtest's first baseline cannot be a lagging count.
+        self.recorder.settle()
 
     def test_emergency_break_sends_the_authorized_frame_and_latches(self):
         """
@@ -1813,10 +1912,19 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
 
         self.assertIs(self.client.control_state, ControlState.ESTOP)
         self.assertWorkerStopped()
-        emergency_frames = [
-            payload for can_id, payload in self.recorder.frames()
-            if can_id == CAN_ID_EMERGENCY_BREAK
-        ]
+        # A bounded wait on the property being asserted.  This used to be a bare
+        # ``recorder.frames()`` read taken straight after the synchronous send,
+        # which is precisely what ``settle()``'s docstring warns against: the
+        # reader is a separate thread, so the read either saw the emergency
+        # frame or measured parser latency, and which one it got was a coin toss
+        # decided by the scheduler.  On the Linux runner it lost.
+        self.assertTrue(
+            self.recorder.wait_for_can_id(
+                CAN_ID_EMERGENCY_BREAK, timeout_s=WORKER_SPINUP_S
+            ),
+            "no emergency frame reached the wire",
+        )
+        emergency_frames = self.recorder.payloads_for(CAN_ID_EMERGENCY_BREAK)
         self.assertTrue(emergency_frames, "no emergency frame reached the wire")
         self.assertTrue(
             all(payload[:2] == b"\xAA\x55" for payload in emergency_frames),
@@ -1837,6 +1945,67 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
         self.assertEqual(self.recorder.count(), after_trip)
         self.assertIs(self.client.control_state, ControlState.ESTOP)
 
+    def test_the_emergency_break_assertions_survive_a_starved_reader_thread(self):
+        """
+        Invariant: what is pinned on the wire does not depend on the reader
+        thread winning a race.
+
+        This is the meta-test for the discipline ``settle()``'s docstring
+        describes and the emergency-break test above used to break.  It replays
+        that same sequence with ``_WireRecorder.reader_delay_s`` set so the
+        parser is deliberately slower than the test's own thread, which is the
+        condition the Linux runner hit by accident: there the reader lost the
+        race, ``frames()`` returned before the emergency frame was parsed, and
+        the assertion failed with "no emergency frame reached the wire" for a
+        frame that was in fact transmitted.
+
+        What this buys is the *absence* of a class of flake.  Every assertion
+        here is either a bounded wait on the property it claims, or a comparison
+        against a baseline that ``settle()``/``wait_for_*`` already established,
+        so widening the delay changes how long the test takes and nothing else.
+        If someone later replaces one of those with an instantaneous read, this
+        test fails on purpose instead of the suite failing at random on a
+        faster or busier machine.
+        """
+        self.recorder.reader_delay_s = 4 * _WireRecorder.RECV_POLL_S
+
+        self.assertTrue(self.client.send_pwms([1650] * 8))
+        self.assertIs(self.client.control_state, ControlState.RUNNING)
+        self.assertTrue(
+            self.recorder.wait_for_count(WORKER_SPINUP_FRAMES, WORKER_SPINUP_S),
+            "precondition: the worker must be transmitting through a slow reader",
+        )
+
+        self.assertTrue(dashboard_app.trip_emergency_break(self.client))
+        self.assertIs(self.client.control_state, ControlState.ESTOP)
+        self.assertWorkerStopped()
+        self.assertTrue(
+            self.recorder.wait_for_can_id(
+                CAN_ID_EMERGENCY_BREAK, timeout_s=WORKER_SPINUP_S
+            ),
+            "no emergency frame reached the wire, even though the reader was given "
+            f"{self.recorder.reader_delay_s:.0f} ms of slack per poll",
+        )
+        emergency = self.recorder.payloads_for(CAN_ID_EMERGENCY_BREAK)
+        self.assertEqual(emergency[0][:3], b"\xAA\x55\x01")
+
+        # The "nothing more was sent" half, which is the part that genuinely
+        # needs a baseline: a starved reader inflates ``count()`` late, so an
+        # un-settled baseline would read LOW here and the comparison would pass
+        # for the wrong reason, or a late-parsed pre-stop frame would read HIGH
+        # and fail for the wrong reason.
+        after_trip = self.recorder.settle()
+        self.assertTrue(
+            self.recorder.wait_for_pwms(NEUTRAL_PWMS, timeout_s=WORKER_SPINUP_S),
+            "the last thruster frame after the break must be neutral",
+        )
+        self.assertTrue(
+            self.recorder.quiet_for(QUIET_WINDOW_S),
+            "The command path kept transmitting after the emergency break",
+        )
+        self.assertEqual(self.recorder.count(), after_trip)
+        self.assertIs(self.client.control_state, ControlState.ESTOP)
+
     def test_emergency_alias_and_canonical_entry_point_are_the_same_action(self):
         """
         Invariant: ``trigger_emergency_break`` is a true alias of
@@ -1849,7 +2018,12 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
             with self.subTest(entry_point=entry_point):
                 self._reset_to_armed()
                 self.assertTrue(self.client.send_pwms([1650] * 8))
-                before = len(self.recorder.frames())
+                # settle() for the baseline too, not just for the read. A count
+                # taken before the send can lag by a frame, and this slice is
+                # indexed by it: an unsettled baseline would silently widen the
+                # window and let the *previous* subtest's emergency frame stand
+                # in for this one.
+                before = self.recorder.settle()
 
                 self.assertTrue(getattr(self.client, entry_point)())
 
@@ -1907,7 +2081,7 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
         )
 
 
-class TestDashboardHandlersAgainstServer(unittest.TestCase):
+class TestDashboardHandlersAgainstServer(ServerBackedTestCase):
     """
     The same handlers driving the real native ``sil_bridge_server``.
 

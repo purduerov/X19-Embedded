@@ -13,9 +13,11 @@ Usage from the repository root::
 from __future__ import annotations
 
 import os
+import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 import weakref
@@ -68,9 +70,11 @@ __all__ = [
     "SERVER_EXE",
     "SERVER_STEM",
     "SIL_PACKET_SIZE",
+    "ServerBackedTestCase",
     "SilServerProcess",
     "SolenoidCommand",
     "ThrusterCommand",
+    "describe_exit",
     "free_tcp_port",
     "pack_sil_can_frame",
     "recv_frames",
@@ -121,6 +125,28 @@ def free_tcp_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
+
+
+def describe_exit(returncode: Optional[int]) -> str:
+    """
+    Turn a child's ``Popen.returncode`` into the sentence a human needs.
+
+    A negative return code is POSIX for "killed by signal -N", and naming the
+    signal is the whole point: ``returncode == -13`` on the Linux runner is
+    SIGPIPE, and without the name a dead simulator is indistinguishable from a
+    refused connection.  ``Popen`` cannot tell you the name itself; this can,
+    because ``signal.Signals`` is the authority on the numbering.
+    """
+    if returncode is None:
+        return "still running (not yet reaped)"
+    if returncode >= 0:
+        return f"exited normally with code {returncode}"
+    number = -returncode
+    try:
+        name = signal.Signals(number).name
+    except ValueError:  # pragma: no cover - only for a signal this build lacks
+        return f"killed by signal {number} (unnamed on this platform)"
+    return f"killed by signal {number} ({name})"
 
 
 def send_raw_frame(sock: socket.socket, can_id: int, payload: bytes) -> None:
@@ -196,12 +222,40 @@ class SilServerProcess:
     ``tests/sil_bridge_server.c``): ``--port`` and ``--cycles`` (``0`` means run
     indefinitely).  ``stop()`` is always safe to call, so a failing test can
     never leak a simulator process.
+
+    The child's stdout and stderr are **captured**, not discarded.  They used to
+    go to ``DEVNULL``, which meant a failing server left no evidence at all: the
+    "Client disconnected, waiting for reconnection..." line, the bind failure,
+    and the crash message were all produced and all thrown away, so a dead
+    simulator and a refused connection reported identically.  ``server_output()``
+    and ``failure_report()`` exist to close that gap.
+
+    The capture target is a temporary **file**, not a pipe, and that is
+    deliberate.  ``DEVNULL`` was presumably chosen to avoid the classic
+    pipe-fill deadlock, where a child that writes more than the pipe buffer
+    blocks forever because nobody is draining it.  A pipe would reintroduce
+    exactly that hazard unless a reader thread were added, and a reader thread
+    is a second thing that can be wrong.  A regular file has no capacity limit,
+    so the server can print as much as it likes and never blocks; the tests only
+    ever read the file, and only on failure.
     """
+
+    #: How much of the captured output ``failure_report`` includes.  The server
+    #: prints a line per 200 cycles plus every accepted command, so a long test
+    #: can accumulate thousands of lines; the tail is where a disconnect, a
+    #: bind failure, or a crash always is.
+    REPORT_TAIL_LINES = 40
 
     def __init__(self, executable: Path, port: Optional[int] = None) -> None:
         self.executable = Path(executable)
         self.port = int(port) if port is not None else free_tcp_port()
         self.process: Optional[subprocess.Popen] = None
+        self._log_path: Optional[Path] = None
+        self._log_handle = None
+        #: Read from disk and kept when the file is removed, so diagnostics
+        #: survive ``stop()`` and the fixture's own teardown cannot destroy the
+        #: evidence before the failure message is built.
+        self._retained_output = ""
 
     @property
     def is_running(self) -> bool:
@@ -211,18 +265,32 @@ class SilServerProcess:
         if self.is_running:
             raise RuntimeError(f"SIL server is already running on port {self.port}")
 
-        self.process = subprocess.Popen(
-            [str(self.executable), "--port", str(self.port), "--cycles", "0"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
+        handle, path = tempfile.mkstemp(
+            prefix="sil_bridge_server-", suffix=".log", text=True
         )
+        self._log_path = Path(path)
+        self._log_handle = os.fdopen(handle, "w", encoding="utf-8", errors="replace")
+        self._retained_output = ""
+
+        try:
+            self.process = subprocess.Popen(
+                [str(self.executable), "--port", str(self.port), "--cycles", "0"],
+                stdout=self._log_handle,
+                stderr=subprocess.STDOUT,
+            )
+        except OSError:
+            # The fixture must not leave a temp file behind when the binary
+            # cannot even be exec'd; the caller's SkipTest/require path has
+            # already vetted the executable, so this is a genuine surprise.
+            self._close_log()
+            raise
 
         deadline = time.monotonic() + SERVER_START_TIMEOUT_S
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 raise RuntimeError(
-                    f"SIL server exited with code {self.process.returncode} before listening "
-                    f"on port {self.port}"
+                    f"SIL server {describe_exit(self.process.returncode)} before listening "
+                    f"on port {self.port}. Its own output was:\n{self.server_output()}"
                 )
             try:
                 probe = socket.create_connection(("127.0.0.1", self.port), timeout=0.1)
@@ -233,13 +301,137 @@ class SilServerProcess:
                 return
 
         self.stop()
-        raise RuntimeError(f"SIL server did not listen on port {self.port}")
+        raise RuntimeError(
+            f"SIL server did not listen on port {self.port}. Its own output was:\n"
+            f"{self.server_output()}"
+        )
+
+    def server_output(self) -> str:
+        """
+        Everything the server has written to stdout/stderr so far.
+
+        Safe to call at any point in the fixture's life, including after
+        ``stop()``: the file is read before it is removed, and the content is
+        retained so teardown cannot erase the evidence.
+        """
+        if self._log_path is not None and self._log_path.exists():
+            try:
+                # Read a snapshot the child may still be appending to.  The
+                # child's own stdio buffer is flushed by the fflush() calls in
+                # sil_bridge_server.c, so anything it meant to say about the
+                # connection is already here.
+                return self._log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:  # pragma: no cover - the file vanished under us
+                pass
+        return self._retained_output
+
+    def failure_report(self) -> str:
+        """
+        A self-diagnosing block for an assertion message.
+
+        The three facts it reports are deliberately distinct, because a single
+        "connect() returned False" cannot tell them apart:
+
+        * whether the **process** is still alive (``Popen.poll()`` re-reads the
+          process table, so this is an OS fact, not a cached flag);
+        * how it **exited**, by name -- a signal-terminated child is the whole
+          diagnosis in one token;
+        * whether the **port** still has an owner, probed by attempting to bind
+          it.  Binding is used rather than connecting on purpose: the SIL server
+          is single-client and *replaces* its current connection on every
+          accept, so a connect-probe would silently steal the test's own
+          socket and turn a diagnostic into a second, self-inflicted failure.
+
+        The probe binds with the default options, i.e. without ``SO_REUSEADDR``.
+        That is what makes it meaningful: a socket actively ``listen()``-ing on
+        the port cannot be bound a second time on either platform.
+        """
+        process = self.process
+        returncode = process.poll() if process is not None else None
+        alive = process is not None and returncode is None
+        output = self.server_output()
+
+        lines = [
+            "  sil_bridge_server diagnostics:",
+            f"    executable            : {self.executable}",
+            f"    port                  : {self.port}",
+            f"    process alive         : {'yes' if alive else 'NO'}",
+            f"    process exit          : {describe_exit(returncode)}",
+            f"    port still bound      : {'yes' if self.port_is_bound() else 'no'}",
+        ]
+        if process is not None and returncode is not None:
+            lines.append(
+                "    >> the engine process is GONE, so this is not a connect race: nothing is "
+                "listening, which is why the client's connect() was refused. Read the exit line "
+                "above and the server's own output below."
+            )
+        elif process is not None:
+            lines.append(
+                "    >> the engine process is ALIVE and still owns the port, so a refused "
+                "connect() came from the client or the socket layer, not from a dead simulator."
+            )
+
+        if not output.strip():
+            lines.append("    server stdout/stderr  : (empty - the engine printed nothing)")
+        else:
+            captured = output.splitlines()
+            kept = captured[-self.REPORT_TAIL_LINES :]
+            omitted = len(captured) - len(kept)
+            lines.append(
+                f"    server stdout/stderr  : {len(captured)} line(s)"
+                + (f", showing the last {len(kept)}" if omitted else "")
+            )
+            lines.append("    --- begin server output ---")
+            lines.extend(f"    {line}" for line in kept)
+            lines.append("    --- end server output ---")
+        return "\n".join(lines)
+
+    def port_is_bound(self) -> bool:
+        """
+        True when some socket still owns ``self.port``.
+
+        Diagnostic only.  See ``failure_report`` for why this binds instead of
+        connecting, and for why ``SO_REUSEADDR`` is left off: without it a second
+        bind onto a listening port fails on Windows and on Linux alike, which is
+        the answer this method is after.
+        """
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", self.port))
+        except OSError:
+            return True
+        else:
+            return False
+        finally:
+            probe.close()
 
     def connect_socket(self, timeout: float = 3.0) -> socket.socket:
         """Open a client connection to the running server (caller closes it)."""
         if not self.is_running:
             raise RuntimeError("SIL server is not running; call start() first")
         return socket.create_connection(("127.0.0.1", self.port), timeout=timeout)
+
+    def _close_log(self) -> None:
+        """Read the log into memory, then remove the temp file."""
+        if self._log_path is not None and self._log_path.exists():
+            try:
+                self._retained_output = self._log_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError:  # pragma: no cover - the file vanished under us
+                pass
+        if self._log_handle is not None:
+            try:
+                self._log_handle.close()
+            except OSError:  # pragma: no cover
+                pass
+            self._log_handle = None
+        if self._log_path is not None:
+            try:
+                self._log_path.unlink()
+            except OSError:  # pragma: no cover - already gone
+                pass
+            self._log_path = None
 
     def stop(self) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -250,6 +442,7 @@ class SilServerProcess:
                 self.process.kill()
                 self.process.wait(timeout=SERVER_SHUTDOWN_TIMEOUT_S)
         self.process = None
+        self._close_log()
 
     def __enter__(self) -> "SilServerProcess":
         self.start()
@@ -257,3 +450,95 @@ class SilServerProcess:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.stop()
+
+
+class _FailureAnnotatingMethod:
+    """
+    Callable wrapper that appends the engine's diagnostics to a failure.
+
+    Deliberately a callable *object* rather than a ``def`` wrapper or a
+    ``functools.partial``.  ``unittest.TestLoader.loadTestsFromName`` resolves a
+    dotted test id (``module.Class.test_name``) by fetching the attribute off the
+    class, instantiating, and then checking
+    ``isinstance(getattr(instance, name), types.FunctionType)``
+    (unittest/loader.py:187).  An instance attribute that *is* a function makes
+    that check fall through, after which the loader calls the unbound class
+    function with no arguments and dies with
+    ``TypeError: missing 1 required positional argument: 'self'``.  Any object
+    with ``__call__`` keeps ``python -m unittest module.Class.test_x`` working,
+    which is exactly how both originally-failing tests are re-run in isolation.
+    """
+
+    def __init__(self, method, diagnostics) -> None:
+        self._method = method
+        self._diagnostics = diagnostics
+
+    def __call__(self):
+        try:
+            return self._method()
+        except AssertionError as exc:
+            context = self._diagnostics()
+            if context:
+                raise AssertionError(f"{exc}\n{context}") from None
+            raise
+
+
+class ServerBackedTestCase(unittest.TestCase):
+    """
+    Base for test classes that talk to a real ``sil_bridge_server``.
+
+    Every assertion failure raised by the test method is re-raised with the
+    engine's own diagnostics appended.  This exists because of a real CI
+    failure: ``test_disconnect_stops_transmission_and_the_watchdog_drops_to_
+    neutral`` reported ``AssertionError: False is not true`` from
+    ``SilDashboardClient.connect()`` on the Linux runner and nothing else, and
+    the fixture was discarding the child's stdout, so "the engine died" and "the
+    reconnect was refused" were the same message.  Appending the evidence to
+    *every* failure in the class, rather than to a hand-picked few, is
+    deliberate: the point is that the next failure answers its own question
+    without anyone having to remember which assertion to annotate.
+
+    ``subTest`` failures are not annotated -- unittest records those inside the
+    subtest's own outcome rather than propagating them to the test method.
+
+    The wrapper is installed in ``__init__`` because ``TestCase.run`` resolves
+    ``self._testMethodName`` *before* it calls ``setUp()``: an instance
+    attribute set from ``setUp`` would never be the callable that gets run.
+    """
+
+    #: Replaced by the subclass's ``setUp``. ``None`` is fine and means "no
+    #: fixture-owned engine", in which case the client's own captured child
+    #: output is used instead (see ``_server_diagnostics``).
+    server: Optional[SilServerProcess] = None
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        method = getattr(self, self._testMethodName)
+        if isinstance(method, _FailureAnnotatingMethod):
+            return
+        setattr(
+            self,
+            self._testMethodName,
+            _FailureAnnotatingMethod(method, self._server_diagnostics),
+        )
+
+    def _server_diagnostics(self) -> str:
+        """
+        The engine's evidence, or ``""`` when there is no engine to report on.
+
+        Two sources, because two classes own their engine differently:
+        ``SilServerProcess`` captures the child's output to a file, while
+        ``SilDashboardClient.start_server_process`` tees it into
+        ``c_stdout_log``. Both are consulted, so the client-owned-engine class
+        gets the same treatment as the fixture-owned one.
+        """
+        if self.server is not None:
+            return self.server.failure_report()
+        client = getattr(self, "client", None)
+        log = getattr(client, "c_stdout_log", None)
+        if not log:
+            return ""
+        return (
+            "  sil_bridge_server diagnostics (captured by the client):\n"
+            + "\n".join(f"    {line}" for line in list(log)[-40:])
+        )
