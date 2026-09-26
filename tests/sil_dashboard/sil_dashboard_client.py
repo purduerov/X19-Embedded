@@ -636,6 +636,16 @@ class SilDashboardClient:
         to refuse an automatic reconnect that would silently disarm it -- without
         being able to set it.
 
+        CALLERS MUST GATE ON THIS BEFORE RECONNECTING.  Any successful
+        :meth:`connect` clears the latch, so a client that reconnects
+        automatically will disarm a tripped emergency break with no operator
+        action; the dashboard is the one caller in this repository and it gates on
+        this property in ``dashboard_app.ensure_transport`` before it ever reaches
+        ``start_server_process`` or ``connect``.  A new caller that reconnects on a
+        timer, or on a transport error, has to do the same or the latch is not an
+        interlock.  This is the contract the plan specified, so the behaviour is
+        unchanged and only the requirement on callers is stated.
+
         ``control_state`` cannot answer this question: :meth:`disconnect`
         overwrites it with ``DISCONNECTED`` while leaving the latch set, so a
         latched client can report a non-ESTOP state.
