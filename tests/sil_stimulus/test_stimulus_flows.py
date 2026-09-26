@@ -2383,6 +2383,243 @@ class TestSimulatedRateClaims(unittest.TestCase):
         self.assertIn("unmeasured", result.detail.lower())
 
 
+class _EngineClockPowerStream:
+    """
+    A transport whose 0x300 cadence is driven by the ENGINE's clock, not the wall clock.
+
+    This models the two things the real SIL engine does that matter to
+    ``monitor_node3_power``, and nothing else:
+
+    * every read window publishes a FRESH 0x7FE snapshot, so the check can see
+      the engine's ``time_get_ms()`` the way it does against a live engine; and
+    * a 0x300 goes out when the first window opens the stream and then only once
+      the sim clock has advanced a full ``power_period_sim_ms`` since the last
+      one -- which is the server's own rule
+      (``sil_bridge_server.c:407-413``: ``now_ms - s_last_tx_pwr >= 1000`` with
+      ``now_ms`` taken from ``time_get_ms()``).
+
+    ``tick_sim_ms`` is therefore how much SIMULATED time one read window
+    consumes, and it is the knob that makes a host slow: with
+    ``window_s == READ_POLL_S`` a ``tick_sim_ms`` below ``READ_POLL_S * 1000`` is
+    an engine running slower than real time, which is the case that used to fail
+    a perfectly healthy Power Slab.  Putting the slowness in the ENGINE rather
+    than in the tool is the point: the tool has no business knowing how fast the
+    host is.
+
+    ``power_period_sim_ms`` set absurdly high is the "genuinely starved" case:
+    the engine's clock runs normally, so a full design period of engine time
+    passes inside the window, and the second 0x300 simply never comes.
+    """
+
+    provides_output_readback = True
+
+    def __init__(
+        self,
+        payload,
+        tick_sim_ms=10,
+        power_period_sim_ms=None,
+        window_s=None,
+        deliver_power=True,
+    ):
+        self._payload = payload
+        self._tick_sim_ms = tick_sim_ms
+        self._deliver_power = deliver_power
+        self._window_s = window_s if window_s is not None else can_stimulus.READ_POLL_S
+        self._power_period_sim_ms = (
+            can_stimulus.POWER_TELEMETRY_SIM_PERIOD_MS
+            if power_period_sim_ms is None
+            else power_period_sim_ms
+        )
+        self.sim_ms = 0
+        self.windows = 0
+        self.power_frames = 0
+        self._last_power_ms = 0
+        self._initial_sent = False
+        self.sent = []
+        self._latest = None
+        self._listener = None
+
+    # -- transport surface ------------------------------------------------
+    def connect(self, timeout_s=None):
+        pass
+
+    def close(self):
+        pass
+
+    def set_frame_listener(self, listener):
+        previous, self._listener = self._listener, listener
+        return previous
+
+    def send_frame(self, can_id, payload):
+        self.sent.append((can_id, bytes(payload)))
+
+    def latest_outputs(self):
+        return self._latest
+
+    def describe_destination(self, can_id):
+        return f"CAN 0x{can_id:03X}"
+
+    def drain_frames(self, timeout_s=0.0):
+        # One window is one poll slice of wall time during which the engine gets
+        # through one of its loop iterations -- which on a slow host advances
+        # less simulated time than the slice is worth.
+        time.sleep(min(self._window_s, max(0.0, timeout_s)) or self._window_s)
+        self.sim_ms += self._tick_sim_ms
+        self.windows += 1
+        self._latest = status(sim_time_ms=self.sim_ms)
+        # The server sends the FIRST 0x300 on accept and only then starts
+        # gating on the period (s_pwr_initial_sent, sil_bridge_server.c:408-412).
+        # ``deliver_power=False`` is the slab that never published one at all.
+        if self._deliver_power and (
+            not self._initial_sent or self.sim_ms - self._last_power_ms >= self._power_period_sim_ms
+        ):
+            self._initial_sent = True
+            self._last_power_ms = self.sim_ms
+            self.power_frames += 1
+            if self._listener is not None:
+                self._listener(CAN_ID_POWER_TELEMETRY, self._payload)
+        return []
+
+
+class TestNode3PowerWindowIsOnTheEngineClock(unittest.TestCase):
+    """
+    Invariant: "is the Power Slab alive" is a question about SIMULATED time.
+
+    ``monitor_node3_power`` used to require 2 frames inside a 3.0 s **wall**
+    window.  The engine emits 0x300 on accept and then only once its own clock
+    has advanced 1000 ms (``sil_bridge_server.c:407-413``), and the engine
+    advances that clock 10 ms per loop iteration before sleeping 10 ms
+    (``sil_bridge_server.c:288,451``).  A host that cannot hold 100 Hz therefore
+    runs its sim clock slower than real time, and below roughly a third of real
+    time a 3.0 s wall window contains exactly one 0x300 -- on a slab that is
+    streaming perfectly.  The old check failed it, and its message blamed the
+    slab ("one per second") for a shortfall that was entirely the host's.
+
+    The slow-clock case is the one that was broken, so it is the one asserted
+    here, together with the case that must still fail: a starved stream on an
+    engine whose clock IS running.
+    """
+
+    #: READ_POLL_S is 20 ms, so 10 ms of sim per window is an engine at half
+    #: real time: comfortably below the ~0.33x that broke the old check, and
+    #: slow enough that 0.3 s of wall time carries only ~150 ms of engine time.
+    SLOW_TICK_SIM_MS = 10
+    SLOW_WINDOW_S = 0.3
+
+    def _tester(
+        self,
+        tick_sim_ms,
+        power_period_sim_ms=None,
+        payload=None,
+        duration_s=0.3,
+        deliver_power=True,
+    ):
+        stream = _EngineClockPowerStream(
+            power_payload() if payload is None else payload,
+            tick_sim_ms=tick_sim_ms,
+            power_period_sim_ms=power_period_sim_ms,
+            deliver_power=deliver_power,
+        )
+        return stream, VehicleStimulusTester(stream), duration_s
+
+    def test_a_slow_engine_clock_still_yields_a_live_power_stream(self):
+        """
+        The case that used to fail: the host cannot hold 100 Hz, so the engine's
+        own clock is the only clock on which "two frames" means anything.
+        """
+        stream, tester, window = self._tester(self.SLOW_TICK_SIM_MS, duration_s=self.SLOW_WINDOW_S)
+
+        result = tester.monitor_node3_power(duration_s=window)
+
+        self.assertTrue(
+            result.passed,
+            "an engine running at half real time is a slow host, not a dead power "
+            f"stream: {result.detail}",
+        )
+        self.assertGreaterEqual(
+            stream.power_frames,
+            2,
+            "the check passed without ever seeing a second 0x300, so it proved "
+            "nothing about the stream",
+        )
+        self.assertIn(
+            "ms of SIMULATED time",
+            result.detail,
+            "the pass text must report the engine's own span, not the wall "
+            f"window: {result.detail!r}",
+        )
+        # The window on its own was nowhere near a design period of engine time,
+        # so passing required the check to keep reading on the sim clock.
+        self.assertLess(
+            stream.sim_ms - 2 * self.SLOW_TICK_SIM_MS,
+            can_stimulus.POWER_TELEMETRY_SIM_PERIOD_MS,
+            "the fixture is no longer the slow host this test is about",
+        )
+
+    def test_a_starved_stream_still_fails_even_though_the_clock_is_running(self):
+        """
+        The extension must not turn "one frame" into a pass.
+
+        The engine's clock is healthy here and covers more than a full design
+        period inside the window, so the second 0x300 is genuinely overdue.  This
+        is the check's whole purpose, so it is asserted directly rather than left
+        to the slow-clock test above.
+        """
+        # 100 ms of engine time per 20 ms window, so a quarter-second window
+        # covers ~1.2 s of simulated time: a full period and then some, with no
+        # extension needed.  10 minutes between power frames: the clock runs,
+        # the stream does not.
+        stream, tester, window = self._tester(100, power_period_sim_ms=600_000, duration_s=0.25)
+
+        result = tester.monitor_node3_power(duration_s=window)
+
+        self.assertFalse(result.passed, "a starved power stream must fail")
+        self.assertEqual(stream.power_frames, 1, "the fixture must actually be starved")
+        self.assertIn(
+            "SIMULATED",
+            result.detail,
+            "the failure must name the clock the count was judged on, or it reads "
+            "as a claim about the slab's own cadence",
+        )
+        self.assertIn("was due", result.detail, result.detail)
+        self.assertIn(
+            "time_get_ms",
+            result.detail,
+            "the failure must point at the engine-side gate it is measured "
+            "against, so a reader can check the premise instead of the slab",
+        )
+
+    def test_the_extension_ends_when_the_frame_lands_and_not_when_the_budget_does(self):
+        """
+        Waiting for the engine's clock must not mean waiting without a bound.
+
+        Measured in the fixture's own currency -- read windows -- rather than in
+        wall seconds, because how long a window takes is the host's business and
+        asserting on it here would be a wall-clock bound in a test about a
+        simulated clock.
+        """
+        tester_for_budget = VehicleStimulusTester(_EngineClockPowerStream(power_payload()))
+        budget_s = can_stimulus.VehicleStimulusTester._sim_period_wall_budget_s(tester_for_budget)
+        budget_windows = budget_s / can_stimulus.READ_POLL_S
+        self.assertGreater(budget_s, 0.0, "the slow-host budget must be a real interval")
+
+        # A tick just under real time, so the first window covers a good part of
+        # a design period and the extension has real work to do either way.
+        stream, tester, window = self._tester(19, duration_s=0.3)
+
+        result = tester.monitor_node3_power(duration_s=window)
+
+        self.assertTrue(result.passed, result.detail)
+        self.assertGreaterEqual(stream.power_frames, 2, "the second frame never arrived")
+        self.assertLess(
+            stream.windows,
+            budget_windows * 0.6,
+            f"the check read {stream.windows} windows; a full "
+            f"{budget_s:.2f} s budget is about {budget_windows:.0f} of them, so this "
+            "waited out the budget instead of stopping when the frame landed",
+        )
+
+
 class TestStimulusVehicleCheckFailures(unittest.TestCase):
     """
     Failure-path coverage for the six vehicle checks.
@@ -2443,16 +2680,85 @@ class TestStimulusVehicleCheckFailures(unittest.TestCase):
 
     # -- node3_power ------------------------------------------------------
     def test_node3_power_fails_when_nothing_arrives(self):
+        """
+        Nothing on the wire at all is a failure, whatever the clock is doing.
+
+        This is the branch where the transport published no 0x7FE, so the
+        simulated rate is not measurable and the message has to say that instead
+        of quoting a cadence it cannot see.  The companion case -- a live engine
+        clock and still no 0x300 -- is
+        ``test_node3_power_says_a_dead_stream_is_dead_even_with_a_live_clock``
+        below; both existed as one test before the window moved onto the engine's
+        clock, and one message cannot honestly cover both.
+        """
         result = VehicleStimulusTester(FakeBackend()).monitor_node3_power(duration_s=0.05)
         self.assertFalse(result.passed)
         self.assertIn("no 0x300 power telemetry", result.detail)
+        self.assertIn(
+            "could not be measured",
+            result.detail,
+            "with no 0x7FE readback the simulated rate is unmeasurable, and the "
+            f"message must say so rather than assert one: {result.detail!r}",
+        )
+        self.assertIn(
+            "SIMULATED",
+            result.detail,
+            f"the message must name the clock the cadence belongs to: {result.detail!r}",
+        )
 
-    def test_node3_power_fails_on_a_single_frame(self):
+    def test_node3_power_says_a_dead_stream_is_dead_even_with_a_live_clock(self):
+        """
+        The other no-frame branch: the engine's clock is running and healthy, and
+        still not one 0x300 arrived.  That is a genuinely dead stream and it must
+        be reported as one, which is a different statement from the one above and
+        needs its own pin.
+        """
+        stream = _EngineClockPowerStream(power_payload(), tick_sim_ms=100, deliver_power=False)
+
+        result = VehicleStimulusTester(stream).monitor_node3_power(duration_s=0.25)
+
+        self.assertFalse(result.passed, "no 0x300 on a live clock is a dead stream")
+        self.assertEqual(stream.power_frames, 0, "the fixture must publish nothing at all")
+        self.assertGreater(
+            stream.sim_ms,
+            can_stimulus.POWER_TELEMETRY_SIM_PERIOD_MS,
+            "the clock must have covered a design period, or this is the slow-host "
+            "case rather than a dead stream",
+        )
+        self.assertIn("no 0x300 power telemetry", result.detail)
+        self.assertIn("SIMULATED", result.detail)
+        self.assertIn(
+            "dead power stream, not a slow host",
+            result.detail,
+            "a live engine clock with no telemetry is a fault, and the message must "
+            f"not leave room for reading it as host timing: {result.detail!r}",
+        )
+
+    def test_node3_power_fails_on_a_single_frame_when_there_is_no_clock_to_judge_it_by(self):
+        """
+        One frame, on a transport that never published the engine's clock.
+
+        The name used to be ``..._fails_on_a_single_frame``, which stated the
+        unconditional rule "a single frame fails" -- and that rule is exactly the
+        defect this branch exists to remove, because on a slow host a single
+        frame is the most a healthy slab can have produced.  The count is only a
+        verdict when it is judged against a design period of engine time.  With
+        no clock available the window is wall time, so the check still fails (a
+        check that could not be run must not pass) and the message has to say the
+        rate was unmeasured rather than imply it was short.
+        """
         result = self._telemetry_tester(
             CAN_ID_POWER_TELEMETRY, power_payload(), repeats=1
         ).monitor_node3_power(duration_s=0.05)
         self.assertFalse(result.passed)
         self.assertIn("at least 2 are required", result.detail)
+        self.assertIn(
+            "UNMEASURED",
+            result.detail,
+            "a wall-time count on a transport with no engine clock cannot be "
+            f"reported as a cadence: {result.detail!r}",
+        )
+        self.assertIn("WALL", result.detail, result.detail)
 
     def test_node3_power_fails_on_an_undecodable_frame(self):
         result = self._telemetry_tester(
@@ -3629,15 +3935,24 @@ class SilNodeIntegrationTests(ServerBackedTestCase):
         """
         Node 3's power telemetry, decoded from the real engine.
 
-        Requires at least one 0x300 frame (the server emits the first on connect
-        and then 1 Hz - tests/sil_bridge_server.c:383-389), that it is a full
-        20-byte ``PowerTelemetry`` record, and that every field carries the value
-        the power slab computes from the plant-driven brick sensors. The tether
-        current is a computed quotient, so it is asserted as a tight band with
-        its derivation; everything else is pinned exactly. The fault bit must be
-        clear: a set bit means the slab latched a fault and broadcast a 0x005
-        eFuse alert (nodes/node3_power_slab/Core/Src/app.c:185-195), which would
-        have tripped this board's brake.
+        Requires at least two 0x300 frames, which is what distinguishes a live
+        stream from a single stale frame: the server emits the first on accept
+        and then only once its own clock has advanced a full 1000 ms
+        (tests/sil_bridge_server.c:407-413, where the gate is
+        ``now_ms - s_last_tx_pwr >= 1000`` on ``time_get_ms()``).  The count is
+        therefore a statement about SIMULATED time, and this is the real-engine
+        half of that: the check now keeps reading until the engine's clock has
+        covered a design period, so it does not care how fast the host is, and
+        ``backend.received`` below has at least the two frames the gate owes.
+
+        Also requires that each frame is a full 20-byte ``PowerTelemetry``
+        record, and that every field carries the value the power slab computes
+        from the plant-driven brick sensors. The tether current is a computed
+        quotient, so it is asserted as a tight band with its derivation;
+        everything else is pinned exactly. The fault bit must be clear: a set bit
+        means the slab latched a fault and broadcast a 0x005 eFuse alert
+        (nodes/node3_power_slab/Core/Src/app.c:185-195), which would have
+        tripped this board's brake.
         """
         with _engine(self.server_exe, self) as run:
             backend = run.backend
@@ -3646,7 +3961,12 @@ class SilNodeIntegrationTests(ServerBackedTestCase):
 
             frames = [payload for can_id, payload in backend.received if can_id == CAN_ID_POWER_TELEMETRY]
             self.assertGreaterEqual(
-                len(frames), 2, f"expected a live 0x300 stream, got {len(frames)} frame(s)"
+                len(frames),
+                2,
+                f"the engine's clock is supposed to have covered a full 0x300 design "
+                f"period before the check demands a second frame, so fewer than two "
+                f"means the stream is dead, not that the host is slow; got {len(frames)} "
+                f"frame(s)",
             )
             for index, payload in enumerate(frames):
                 self.assertEqual(

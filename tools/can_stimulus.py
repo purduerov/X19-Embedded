@@ -248,6 +248,14 @@ EMERGENCY_TIMEOUT_S = 3.0
 # it unthrottled, so a fifth of the design rate is already a broken stream. It is
 # deliberately a floor on evidence, not a claim that the design rate was met.
 MIN_TELEMETRY_HZ = 20.0
+# Design period of the 0x300 power stream, in the engine's OWN clock. The server
+# sends the first 0x300 on accept and then only when the sim clock has advanced a
+# full period (sil_bridge_server.c:407-413 tests `now_ms - s_last_tx_pwr >=
+# 1000`, and `now_ms` is `time_get_ms()`, the sim clock, not the wall clock).
+# So "is the slab alive" is a question about simulated milliseconds: a host
+# running the engine at a third of real time legitimately produces ONE 0x300 in
+# a 3.0 s wall window, and a count taken in wall time would fail a healthy slab.
+POWER_TELEMETRY_SIM_PERIOD_MS = 1000
 
 # Defaults for the combined smoke run. The emergency break is last because it
 # latches for the life of the engine (rov_safety.c:37-40 has no clear path, and
@@ -1185,6 +1193,20 @@ class VehicleStimulusTester:
         travel_ms = abs(pulse_us - NEUTRAL_US) / PWM_SLEW_RATE_US_PER_MS
         return travel_ms / 1000.0 / max(1e-6, sim_rate) + slack_s
 
+    def _sim_period_wall_budget_s(self, sim_period_ms: int = POWER_TELEMETRY_SIM_PERIOD_MS) -> float:
+        """
+        Wall-clock budget for the engine to live through ``sim_period_ms``.
+
+        ``SIM_MS_PER_WALL_S`` is a deliberately generous LOWER bound on the
+        engine's tick rate, so dividing by it OVER-estimates the wall time a
+        given amount of simulated time needs.  That is the safe direction for a
+        budget -- a host that is slower still fits, a host that is faster simply
+        stops early -- and it is the same input ``_ramp_budget_s`` uses.  It stays
+        a BUDGET input: nothing here reports a rate derived from it, because a
+        lower bound is not a measurement.
+        """
+        return sim_period_ms / 1000.0 / SIM_MS_PER_WALL_S + SIM_WALL_SLACK_S
+
     # -- node 1: Pi shield -------------------------------------------------
     def monitor_node1_env(self, duration_s: float = 3.0) -> CheckResult:
         """
@@ -1810,32 +1832,128 @@ class VehicleStimulusTester:
         Watch 0x300 power telemetry from the power slab.
 
         The server sends the first 0x300 immediately on connect and then one per
-        second (``sil_bridge_server.c:383-389``), so a 3.0 s window must contain
-        more than one frame.  Every frame must decode as a full 20-byte
-        ``PowerTelemetry`` record, the rails must sit in their documented
-        envelopes, the four 12 V brick currents must be present and sane, and the
-        fault bit (``status_flags & 0x0001``, node3 ``app.c:186,197``) must be
-        clear.  A set fault bit means the slab latched a fault and broadcast a
-        0x005 eFuse alert, which trips the control board's brake (``app.c:121-126``).
+        ``POWER_TELEMETRY_SIM_PERIOD_MS`` (1000 ms) of **simulated** time
+        (``sil_bridge_server.c:407-413``), so "more than one frame arrived" is a
+        statement about the engine's own clock and nothing else.  Every frame must
+        decode as a full 20-byte ``PowerTelemetry`` record, the rails must sit in
+        their documented envelopes, the four 12 V brick currents must be present
+        and sane, and the fault bit (``status_flags & 0x0001``, node3
+        ``app.c:186,197``) must be clear.  A set fault bit means the slab latched
+        a fault and broadcast a 0x005 eFuse alert, which trips the control board's
+        brake (``app.c:121-126``).
+
+        WHY THE WINDOW IS NOT COUNTED IN WALL TIME
+        ------------------------------------------
+        A 3.0 s *wall* window is 3.0 s of simulated time only on a host that keeps
+        up with the engine.  The engine advances the sim clock 10 ms per loop
+        iteration and then sleeps 10 ms (``sil_bridge_server.c:288,451``), so a
+        host that cannot hold that rate runs its sim clock slower than real time
+        in proportion to how far behind it falls.  At a third of real time a
+        3.0 s wall window covers 1000 ms of simulated time, which is exactly one
+        period: one 0x300 on connect and nothing else.  Counting frames in wall
+        time therefore fails a Power Slab that is streaming perfectly, and it
+        blames the slab for a shortfall that is entirely the host's.
+
+        So the count is judged against the sim span actually observed, from the
+        same ``latest_outputs().sim_time_ms`` readings ``monitor_node2_depth``
+        uses, and when that span is too short to contain a period the window is
+        extended on the engine's clock rather than the check failing.  The
+        extension is bounded by the file's usual slow-host budget and stops the
+        instant a second frame lands.
+
+        Three outcomes, and no fourth:
+
+        * two or more frames, sim span at least one period -- the slab is
+          demonstrably alive and the frames are validated;
+        * fewer than two frames while the sim clock covered a full period -- a
+          genuinely starved stream, which still fails;
+        * fewer than two frames and no usable sim clock (a transport with no
+          0x7FE readback, or one that published none) -- the rate is UNMEASURED,
+          the wall window stands, and the message says so instead of inventing a
+          simulated rate.  It still fails: a check that could not be run must not
+          report success.
         """
         name = "node3_power"
-        payloads = self._collect(CAN_ID_POWER_TELEMETRY, duration_s)
+        payloads: List[bytes] = []
+        sim_ms: List[int] = []
+
+        def on_frame(frame_id: int, payload: bytes) -> None:
+            if frame_id == CAN_ID_POWER_TELEMETRY:
+                payloads.append(payload)
+
+        def on_output(snapshot: OutputStatus) -> None:
+            sim_ms.append(snapshot.sim_time_ms)
+
+        def sim_span() -> int:
+            return sim_ms[-1] - sim_ms[0] if len(sim_ms) >= 2 else 0
+
+        # First window: exactly what this check has always collected, so on a host
+        # whose engine keeps up the evidence gathered and the message are
+        # unchanged by this fix.
+        self._pump(time.monotonic() + duration_s, on_frame=on_frame, on_output=on_output)
+
+        span_ms = sim_span()
+        if len(payloads) < 2 and sim_ms and span_ms < POWER_TELEMETRY_SIM_PERIOD_MS:
+            # The engine's own clock has not yet covered one 0x300 period inside
+            # the caller's wall window, so the frame count carries no information
+            # about the stream. Keep pumping on the sim clock, bounded, and stop
+            # as soon as a second frame arrives.
+            self._pump(
+                time.monotonic() + self._sim_period_wall_budget_s(),
+                on_frame=on_frame,
+                on_output=on_output,
+                until=lambda _snapshot: len(payloads) >= 2,
+            )
+            span_ms = sim_span()
+
         if not payloads:
-            return CheckResult(
-                name,
-                False,
-                f"no 0x300 power telemetry within {duration_s:.1f} s; node 3 streams it at 20 Hz "
-                "(node3 app.c:78-207) and the server forwards the first frame immediately then 1 Hz "
-                f"(sil_bridge_server.c:383-389). Received nothing.",
-            )
+            if sim_ms:
+                detail = (
+                    f"no 0x300 power telemetry within {duration_s:.1f} s of wall time; node 3 "
+                    "publishes it at 20 Hz of its own clock (node3 app.c:78-207) and the server "
+                    "forwards the first frame immediately on accept and then one per "
+                    f"{POWER_TELEMETRY_SIM_PERIOD_MS} ms of SIMULATED time "
+                    "(sil_bridge_server.c:407-413). Received nothing, and the engine's clock did "
+                    f"advance {span_ms:.0f} ms of simulated time inside that window, so this is a "
+                    "dead power stream, not a slow host."
+                )
+            else:
+                detail = (
+                    f"no 0x300 power telemetry within {duration_s:.1f} s of wall time; node 3 "
+                    "publishes it at 20 Hz of its own clock (node3 app.c:78-207) and the server "
+                    "forwards the first frame immediately on accept and then one per "
+                    f"{POWER_TELEMETRY_SIM_PERIOD_MS} ms of SIMULATED time "
+                    "(sil_bridge_server.c:407-413). Received nothing, and this transport published "
+                    "no 0x7FE output-status snapshot, so the simulated rate could not be measured "
+                    "at all and the window above is wall time only."
+                )
+            return CheckResult(name, False, detail)
         if len(payloads) < 2:
-            return CheckResult(
-                name,
-                False,
-                f"only {len(payloads)} 0x300 frame(s) in {duration_s:.1f} s; the server emits the "
-                "first frame on connect and then one per second, so at least 2 are required to "
-                "distinguish a live stream from a single stale frame.",
-            )
+            if sim_ms:
+                detail = (
+                    f"only {len(payloads)} 0x300 frame(s), and the engine's own clock advanced "
+                    f"{span_ms:.0f} ms of SIMULATED time during the window, so a second frame was "
+                    f"due within the {POWER_TELEMETRY_SIM_PERIOD_MS} ms design period and did not "
+                    "arrive. At least 2 are required to distinguish a live stream from a single "
+                    "stale frame. This is measured on the simulated clock on purpose: the server "
+                    "gates the repeat on "
+                    f"`now_ms - s_last_tx_pwr >= {POWER_TELEMETRY_SIM_PERIOD_MS}` where `now_ms` is "
+                    "time_get_ms() (sil_bridge_server.c:407-413), so a host whose engine runs "
+                    "slower than real time still gets a full period of engine time before this is "
+                    "called."
+                )
+            else:
+                detail = (
+                    f"only {len(payloads)} 0x300 frame(s) in {duration_s:.1f} s of WALL time, so "
+                    "at least 2 are required to distinguish a live stream from a single stale "
+                    "frame. The simulated rate is UNMEASURED because no 0x7FE output-status "
+                    "snapshot carried the engine's clock, so the wall figure is all there is; on "
+                    "the real SIL engine the repeat is gated on "
+                    f"{POWER_TELEMETRY_SIM_PERIOD_MS} ms of simulated time "
+                    "(sil_bridge_server.c:407-413) and a slow host would have been given the extra "
+                    "time it needs before this was called."
+                )
+            return CheckResult(name, False, detail)
         try:
             records = [PowerTelemetry.unpack(payload) for payload in payloads]
         except ValueError as exc:
@@ -1896,10 +2014,23 @@ class VehicleStimulusTester:
                     "(node2 app.c:121-126).",
                 )
         last = records[-1]
+        if sim_ms:
+            clock_text = (
+                f"{len(records)} frame(s) over {span_ms:.0f} ms of SIMULATED time, the engine's "
+                f"own clock, against the {POWER_TELEMETRY_SIM_PERIOD_MS} ms design period"
+            )
+        else:
+            # No 0x7FE, so the only span available is the caller's wall window. Say
+            # that rather than letting "decoded in 3.0 s" read as a cadence claim.
+            clock_text = (
+                f"{len(records)} frame(s) within {duration_s:.1f} s of WALL time; the simulated "
+                "rate is UNMEASURED because no 0x7FE output-status snapshot carried the engine's "
+                "clock"
+            )
         return CheckResult(
             name,
             True,
-            f"{len(records)} frame(s) decoded in {duration_s:.1f} s: tether="
+            f"{clock_text}: tether="
             f"{last.tether_voltage_mv / 1000.0:.1f} V @ {last.tether_current_ma / 1000.0:.2f} A, "
             f"5 V rail={last.v5_voltage_mv / 1000.0:.2f} V @ {last.v5_current_ma / 1000.0:.2f} A, "
             f"12 V bricks={last.v12_current_ma} mA, pcb={last.pcb_temp_c_tenths / 10.0:.1f} C, "
