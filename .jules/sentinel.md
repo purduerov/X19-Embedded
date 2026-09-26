@@ -31,3 +31,7 @@
 **Vulnerability:** The SIL bridge server (`tests/sil_bridge_server.c`) silently clamped incoming CAN frame payloads that exceeded 64 bytes instead of rejecting them.
 **Learning:** Clamping length variables during stream parsing causes data desynchronization. If a corrupted header reports a length greater than the maximum, reading only the clamped amount leaves the remainder of the invalid payload in the stream, which is then incorrectly parsed as the next packet's header.
 **Prevention:** When parsing stream-based network protocols, validate length headers strictly. If a length exceeds protocol bounds, explicitly drop the malformed packet by advancing the stream buffer and continuing to properly resynchronize the stream.
+## 2026-09-24 - Python Stream Desynchronization from Lack of Magic Validation
+**Vulnerability:** The `sil_dashboard_client.py` stream parsing did not validate the `SIL_MAGIC_HEADER` before consuming a packet window, directly exposing the application to crashes via `struct.error` upon desynchronization.
+**Learning:** Python stream parsing must rigorously validate protocol synchronization markers before advancing windows.
+**Prevention:** Always validate magic headers in continuous streams; if invalid, slide the buffer by one byte to resynchronize, and wrap unpacking logic in a `try...except` block.
