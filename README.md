@@ -61,9 +61,9 @@ When the embedded repository is opened from a separate worktree, the bridge test
 
 The `build_and_lint.yml` workflow runs the Python SIL surface as a **blocking** step. After the native build it points `X19_SIL_SERVER` at the freshly built `sil_bridge_server` and runs the dashboard, stimulus-CLI, protocol round-trip, and per-node integration suites under `tests/sil_stimulus/`, preceded by a syntax gate over the dashboard, companion-bridge, and stimulus sources. `streamlit` is the only third-party package those suites need. The companion-bridge test needs `pyzmq`, `protobuf`, and the sibling `X19-Core`/`X19-Surface` checkouts, so it is executed from the multi-repository workspace instead.
 
-Every server-backed test skips cleanly when the native engine is missing, and `python -m unittest` still exits 0 on a skip, so the CI step prints its `ok` and `skipped` counts rather than trusting the exit code alone.
+Every server-backed test skips cleanly when the native engine is missing, and `python -m unittest` still exits 0 on a skip, so the CI step does not trust the exit code alone: it counts the results and fails when fewer than 250 tests reported `ok` or when anything skipped at all.
 
-Host SIL results and target readiness are different things. A green run above is evidence about application logic, CAN protocol serialization, the 20 Hz deadman contract, and the dashboard and stimulus tooling, all against mocked peripherals. It is not evidence about STM32 startup, vendor HAL integration, peripheral timing, pin configuration, FDCAN, or electrical behavior, and no physical hardware has been validated. Target readiness is the separate `continue-on-error` step, where five of the six acceptance contracts fail today on the missing CubeMX startup and peripheral-init calls, the missing per-solenoid GPIO outputs, and the missing hardware emergency-brake latch.
+Host SIL results and target readiness are different things. A green run above is evidence about application logic, CAN protocol serialization, the 20 Hz deadman contract, and the dashboard and stimulus tooling, all against mocked peripherals. It is not evidence about STM32 startup, vendor HAL integration, peripheral timing, pin configuration, FDCAN, or electrical behavior, and no physical hardware has been validated. Target readiness is the separate `continue-on-error` step, where five of the six acceptance contracts fail today, each for its own reason: nodes 1 and 3 for the missing CubeMX startup and peripheral-init calls, node 1's BSP for its leak-probe inputs and emergency-cutoff output, node 2's for the solenoid outputs and the emergency-brake cutoff and latch, and node 3's for INA237 and TMP1075 sourcing, the converter enable pins, and the ideal-diode status pin.
 
 [`docs/sil_simulation_guide.md`](docs/sil_simulation_guide.md) documents the working commands, the deadman and arming semantics, the exit-status contract, and how to tell a real pass from a silent skip.
 
@@ -115,7 +115,7 @@ Target-only startup, pin, FDCAN, and hardware sensor integration blockers are tr
 | `test_sil_fuzz` | SIL Fault Injection | Deterministic malformed-frame input and Control Board bus-off failsafe/recovery. |
 | `test_sil_burnin` | SIL Stability | 100,000 neutral cycles and 10,000 alternating command/ramp cycles. |
 
-These 25 native executables are registered with CTest. The Python bridge integration test runs separately in CI and can be run locally with `python tests/sil_companion_bridge/test_full_system_sil.py`. It covers ZMQ/Protobuf, simulated pilot commands, telemetry, emergency stop, and solenoid output through the host bridge server.
+These 25 native executables are registered with CTest. The Python bridge integration test runs separately from CTest, from the multi-repository workspace rather than from this repository's CI, and can be run locally with `python tests/sil_companion_bridge/test_full_system_sil.py`. It covers ZMQ/Protobuf, simulated pilot commands, telemetry, emergency stop, and solenoid output through the host bridge server.
 
 ---
 
