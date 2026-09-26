@@ -16,6 +16,7 @@ Enables live hardware-free testing and end-to-end verification strictly within X
 import os
 import sys
 import time
+import weakref
 
 import streamlit as st
 
@@ -28,9 +29,364 @@ from sil_dashboard_client import (
     CAN_ID_ENV_TELEMETRY,
     CAN_ID_POWER_TELEMETRY,
     CAN_ID_SIL_OUTPUT_STATUS,
+    ControlState,
     SilDashboardClient,
     stream_age_label,
 )
+
+# --- Control-surface handlers ------------------------------------------------
+# Every action that can put a command on the wire, or decide that the command
+# path is live, lives in a module-level function rather than inline in main().
+# main() is Streamlit code: it cannot be imported and called without a running
+# Streamlit server, so inlining these would make the safety wiring untestable.
+# tests/sil_stimulus/test_dashboard_app.py drives them directly.
+#
+# None of these helpers hold a Streamlit reference and none of them may transmit
+# on their own except through the client: the 20 Hz control worker owns the
+# command cadence, and the UI only decides *what* is held.
+
+# Colour, label, and operator-facing explanation for each deadman state.
+# RUNNING and ESTOP are visually separated from the two safe idle states
+# (ARMED, STOPPED) because they are the states in which the vehicle can move.
+_CONTROL_STATE_PRESENTATION = {
+    ControlState.RUNNING: (
+        "RUNNING",
+        "green",
+        "20 Hz control worker is transmitting. Node 2's heartbeat is being "
+        "refreshed, so the board is out of its failsafe.",
+    ),
+    ControlState.ARMED: (
+        "ARMED",
+        "blue",
+        "Transport up, no command held. Outputs are neutral and the heartbeat "
+        "is deliberately not refreshed, so the firmware watchdog can lapse and "
+        "release the solenoids.",
+    ),
+    ControlState.STOPPED: (
+        "STOPPED",
+        "orange",
+        "Explicit operator stop. Outputs are neutral and no command is being "
+        "transmitted.",
+    ),
+    ControlState.ESTOP: (
+        "ESTOP",
+        "red",
+        "Emergency break latched. Every command is refused until the SIL engine "
+        "is explicitly restarted.",
+    ),
+    ControlState.DISCONNECTED: (
+        "DISCONNECTED",
+        "gray",
+        "No SIL transport. Nothing is transmitted and the control path is dead.",
+    ),
+}
+
+_UNKNOWN_STATE_PRESENTATION = (
+    "UNKNOWN",
+    "red",
+    "The client reported a control state this dashboard does not recognise. "
+    "Treat the control path as unsafe.",
+)
+
+
+def all_stop(client) -> bool:
+    """
+    Operator STOP: cancel the held command and drive the outputs neutral.
+
+    This must be ``request_stop()`` and not a neutral PWM command.  A neutral
+    command goes to ARMED and stops the worker, which is safe, but it leaves the
+    operator in the same state as merely releasing the stick.  ``request_stop()``
+    is also the transition that keeps the dashboard's slider diffs quiet: it
+    leaves the client's record of the operator's commanded values alone, so the
+    next render finds nothing to re-send.
+    """
+    return bool(client.request_stop())
+
+
+def stop_engine(client) -> None:
+    """
+    Operator "Stop Engine": shut the SIL engine down.
+
+    Intentionally does *not* clear a latched E-stop -- see :func:`ensure_transport`.
+    Shutting the engine down is the operator asking for less, never for the
+    emergency break to be disarmed.
+    """
+    client.stop_server_process()
+
+
+def restart_engine(client, settle_s: float = 0.3) -> bool:
+    """
+    Operator "Restart Engine": the explicit action that clears a latched E-stop.
+
+    ``start_server_process()`` is one of exactly two ways out of a latched ESTOP
+    (the other is a fresh transport via ``connect()``), and the dashboard offers
+    this as the only one.  ``settle_s`` is the pause that lets the old engine
+    release the port; it is a parameter so tests need not wait for it.
+    """
+    client.stop_server_process()
+    time.sleep(settle_s)
+    started = client.start_server_process()
+    connected = client.connect()
+    return bool(started and connected)
+
+
+def trip_emergency_break(client) -> bool:
+    """
+    Trip the authorized emergency break and latch ESTOP.
+
+    Uses the canonical ``request_emergency_break()``.  ``trigger_emergency_break``
+    is a zero-argument alias for the same method in sil_dashboard_client, so
+    either name sends the identical 0xAA 0x55 0x01 frame and latches the same
+    way; the canonical name is preferred because the alias exists only for
+    backwards compatibility.
+    """
+    return bool(client.request_emergency_break())
+
+
+def auto_refresh_due(client, auto_refresh: bool, refresh_rate: float) -> bool:
+    """
+    True when the render loop should sleep and re-run.
+
+    Deliberately transmits nothing.  The 20 Hz control worker owns the command
+    cadence; a second sender here would emit an extra command frame at whatever
+    rate the operator's browser happened to poll.
+    """
+    return bool(auto_refresh) and bool(client.connected)
+
+
+# --- Display targets ---------------------------------------------------------
+# The DISPLAY TARGET is what a control panel shows; the DIFF BASELINE (above) is
+# what it compares against to decide the operator moved something. They are
+# separate records on purpose, and confusing them is how the panel came to read
+# 0.0 while four thrusters were held forward.
+#
+# A preset button publishes a command and holds it, but it does not drag a
+# slider, and Streamlit seeds a keyed widget once and then owns it. So the panel
+# kept showing the pre-preset axes for as long as the command was held. Writing
+# the display target the preset just commanded fixes that without touching the
+# baseline: the veto still sees "the axes already show the command" and stays
+# quiet, and the operator finally sees what the vehicle is doing.
+PILOT_SLIDER_KEYS = ("slider_surge", "slider_sway", "slider_heave", "slider_yaw")
+
+
+def THRUSTER_SLIDER_KEY(channel: int) -> str:
+    """The session-state key of one thruster slider; shared by the tab and the presets."""
+    return f"thruster_slider_tab2_{channel}"
+
+
+def write_display_targets(state, keys, values) -> None:
+    """
+    Publish ``values`` as what the widgets named by ``keys`` should display.
+
+    Assigning to a widget's session-state key before that widget is created is
+    Streamlit's supported way to set it programmatically, and it is the only one:
+    the same assignment after the widget has been instantiated in this run raises
+    ``StreamlitWidgetAlreadyInstantiatedError``.  That is why each preset block in
+    ``main()`` is rendered BEFORE the sliders it moves, and why ``main()``'s pilot
+    column is filled before its slider column.  The two column blocks are
+    independent containers, so the order they are written in does not change the
+    layout.
+
+    Read and write only: this is the display target, never the diff baseline.
+    """
+    for key, value in zip(keys, values):
+        state[key] = value
+
+
+def pilot_preset(client, surge: float, sway: float, heave: float, yaw: float, state=None) -> bool:
+    """
+    Operator flight preset: publish the axes, then show them.
+
+    The command is the client's, and it is held at 20 Hz until the operator stops
+    the vehicle or moves an axis.  The display target is written only when the
+    client ACCEPTED the command: ``send_surface_pilot_command`` returns False when
+    the E-stop is latched or the transport is down, and showing a target the board
+    was never told is the same stale display pointing the other way.
+    """
+    if not client.send_surface_pilot_command(surge, sway, heave, yaw):
+        return False
+    write_display_targets(
+        st.session_state if state is None else state,
+        PILOT_SLIDER_KEYS,
+        (surge, sway, heave, yaw),
+    )
+    return True
+
+
+def thruster_preset(client, pwms, state=None) -> bool:
+    """Operator thruster preset: publish the eight targets, then show them."""
+    targets = [int(value) for value in pwms]
+    if not client.send_pwms(targets):
+        return False
+    write_display_targets(
+        st.session_state if state is None else state,
+        [THRUSTER_SLIDER_KEY(channel) for channel in range(len(targets))],
+        targets,
+    )
+    return True
+
+
+# --- Per-tab diff baselines -------------------------------------------------
+# Streamlit renders every tab on every run, and each control tab diffs its
+# slider widgets against a baseline to decide "did the operator move something?".
+#
+# The baseline must be owned by the tab that published it.  A shared client field
+# cannot do that job: ``send_surface_pilot_command()`` ends in ``send_pwms()``,
+# which writes the shared ``client.pwms``, so the thruster tab's diff would read
+# the pilot's allocation as a slider move and re-send the thruster tab's stale
+# target -- with no operator action on that tab, at 20 Hz, vertical bank
+# included.  Symmetrically, a thruster command must not make the pilot tab
+# re-send.  One baseline per tab closes both directions.
+#
+# One baseline per *client* is not enough on its own: ``st.cache_resource`` hands
+# every browser session the same client, so a second session inherits the first
+# session's baseline while its own sliders are seeded from the client's current
+# command.  Comparing those two values re-arms thrust on the new session's very
+# first render.  :func:`publish_tab_baseline` therefore seeds a tab's first
+# baseline from :func:`tab_seed_value` -- the same source its widgets seed from --
+# and the predicates additionally treat "the sliders already show the command" as
+# nothing to send.  The baseline is deliberately NOT keyed on the browser session:
+# ``st.session_state`` is not reliably readable outside a script run, and these
+# predicates must stay callable (and testable) without a Streamlit runtime.
+#
+# Keyed weakly by client so a replaced client cannot leak baselines, and held in
+# the UI rather than the client because these are dashboard-owned records of
+# what the operator last dialled in, not protocol state.
+
+_TAB_BASELINES = weakref.WeakKeyDictionary()
+
+#: Stable identifiers for the two slider-diff baselines.
+TAB_PILOT = "pilot"
+TAB_THRUSTER = "thruster"
+
+
+def tab_baseline(client, tab: str):
+    """
+    Return the last value *this tab* published, or None if it never has.
+    """
+    return _TAB_BASELINES.get(client, {}).get(tab)
+
+
+def tab_seed_value(client, tab: str):
+    """
+    The value a tab's sliders are seeded from on a render with no widget state.
+
+    Must stay identical to the ``value=`` / ``float(...)`` source of the matching
+    ``st.slider`` in main(), because that equality is what makes a fresh session's
+    first render a no-op.  Pilot sliders read ``client.pipeline_surface_cmd``;
+    thruster sliders read ``client.pwms``.
+    """
+    if tab == TAB_PILOT:
+        command = client.pipeline_surface_cmd
+        return (command["surge"], command["sway"], command["heave"], command["yaw"])
+    if tab == TAB_THRUSTER:
+        return tuple(int(value) for value in client.pwms)
+    raise ValueError(f"unknown control tab: {tab!r}")
+
+
+def publish_tab_baseline(client, tab: str, values) -> None:
+    """
+    Record what a tab is now showing, so its next diff finds no change.
+
+    Called once per tab per render, after the send decision: it records the
+    transmitted value when a send happened and the unchanged widget value when it
+    did not, which are the same thing in both cases.
+
+    The FIRST publish for a client adopts :func:`tab_seed_value` instead of the
+    widget value -- the same source the sliders were seeded from -- so a fresh
+    session's baseline and its seeded slider values agree by construction.  Without
+    that, a second session sharing the cached client would hold the *previous*
+    session's widget values as its baseline while its own sliders were seeded from
+    the client's current command, see a difference that no operator caused, and
+    re-arm thrust on its first render.
+    """
+    stored = _TAB_BASELINES.get(client, {}).get(tab)
+    _TAB_BASELINES.setdefault(client, {})[tab] = (
+        tuple(values) if stored is not None else tab_seed_value(client, tab)
+    )
+
+
+def forget_tab_baselines(client) -> None:
+    """Drop a client's per-tab baselines, e.g. when a session's controls reset."""
+    _TAB_BASELINES.pop(client, None)
+
+
+def pilot_axes_changed(client, surge: float, sway: float, heave: float, yaw: float) -> bool:
+    """
+    True when the 6-DOF sliders differ from the last axes *this tab* published
+    *and* differ from the command the client is already holding.
+
+    Both conditions are needed.  The first is the operator's intent, and reading
+    only its own baseline is what keeps the two tabs from fighting.  The second
+    covers a session whose baseline predates the current command: a fresh session's
+    sliders are seeded from the client's command, so "the sliders already show the
+    command" means there is nothing to send, however stale the baseline is.
+
+    Read-only.  It never reads a field the thruster tab writes.
+    """
+    axes = (surge, sway, heave, yaw)
+    baseline = tab_baseline(client, TAB_PILOT)
+    if baseline is None:
+        return False
+    if axes == tuple(baseline):
+        return False
+    return axes != tab_seed_value(client, TAB_PILOT)
+
+
+def thruster_targets_changed(client, pwms) -> bool:
+    """
+    True when the 8 per-channel sliders differ from the last targets *this tab*
+    published *and* differ from the command the client is already holding.
+
+    Deliberately does not treat "differs from ``client.pwms``" as the whole test:
+    every sender writes that field, including the pilot tab, and
+    ``request_stop()`` deliberately leaves it stale.  Comparing a fresh session's
+    seeded sliders against a previous session's baseline -- or against a stale
+    ``pwms`` -- is exactly the cross-session re-arm this replaces.
+    """
+    targets = tuple(pwms)
+    baseline = tab_baseline(client, TAB_THRUSTER)
+    if baseline is None:
+        return False
+    if targets == tuple(baseline):
+        return False
+    return targets != tab_seed_value(client, TAB_THRUSTER)
+
+
+
+def control_state_presentation(client):
+    """
+    Return ``(label, color, help_text)`` for the client's current control state.
+
+    The operator has to be able to tell at a glance whether the control path is
+    transmitting, because ARMED and STOPPED are both safe but mean different
+    things and neither is what RUNNING or ESTOP is.
+    """
+    return _CONTROL_STATE_PRESENTATION.get(
+        client.control_state, _UNKNOWN_STATE_PRESENTATION
+    )
+
+
+def ensure_transport(client) -> bool:
+    """
+    Bring up the SIL engine and connect, unless an E-stop is latched.
+
+    Gates on ``client.estop_latched`` and NOT on ``client.control_state``:
+    ``disconnect()`` overwrites the state with ``DISCONNECTED`` while leaving the
+    latch set, so a state check lets "Stop Engine" -- whose whole intent is to
+    shut the engine *down* -- clear a tripped emergency break on the very next
+    render, because ``start_server_process()`` and ``connect()`` both clear the
+    latch.
+
+    Clearing it therefore requires the explicit "Restart Engine" button, which
+    calls :func:`restart_engine`.
+    """
+    if client.connected:
+        return True
+    if client.estop_latched:
+        return False
+    client.start_server_process()
+    return bool(client.connect())
 
 # Global client cache
 @st.cache_resource
@@ -52,25 +408,51 @@ def main():
         st.markdown("**Subsea Node Firmware Simulation**")
 
         st.subheader("SIL Server State")
-        if not client.connected:
-            client.start_server_process()
-            client.connect()
+        # A latched E-stop deliberately blocks the automatic reconnect.
+        if not ensure_transport(client):
+            if client.estop_latched:
+                st.error(
+                    "Emergency break latched on the dashboard. Automatic reconnect "
+                    "is disabled so neither a transport hiccup nor Stop Engine can "
+                    "clear the latch. Click **Restart Engine** to start a new SIL "
+                    "engine and re-arm the control path."
+                )
+            else:
+                st.error(
+                    "SIL engine unreachable on 127.0.0.1:8765. Use **Restart "
+                    "Engine** in this panel to start it."
+                )
 
         col_srv1, col_srv2 = st.columns(2)
         with col_srv1:
             if st.button("Restart Engine", width="stretch"):
-                client.stop_server_process()
-                time.sleep(0.3)
-                client.start_server_process()
-                client.connect()
-                st.rerun()
+                if restart_engine(client):
+                    st.rerun()
+                else:
+                    # No rerun: a Streamlit error does not survive one, and the
+                    # operator needs to read why the engine did not come back.
+                    st.error(
+                        "Restart Engine failed: the SIL engine did not start, or "
+                        "did not accept a connection on 127.0.0.1:8765. Check that "
+                        "sil_bridge_server is built and runnable, then try again."
+                    )
         with col_srv2:
             if st.button("Stop Engine", width="stretch"):
-                client.stop_server_process()
+                stop_engine(client)
                 st.rerun()
 
         status_color = "green" if client.connected else "red"
         st.markdown(f"**Connection Status:** :{status_color}[{'ONLINE (127.0.0.1:8765)' if client.connected else 'OFFLINE'}]")
+
+        # Deadman readout. The two safe idle states (ARMED, STOPPED) are shown
+        # differently from each other and from the two states in which the
+        # vehicle can move (RUNNING, ESTOP), so the operator never has to guess
+        # whether the control path is live.
+        state_label, state_color, state_help = control_state_presentation(client)
+        st.metric("Control State", client.control_state.value)
+        st.markdown(f"**Control State:** :{state_color}[{state_label}]")
+        st.caption(state_help)
+
         st.metric("SIL Virtual Time", f"{client.sim_time_ms / 1000.0:.2f} s")
         frame_cols = st.columns(2)
         frame_cols[0].metric("Received Frames", client.frame_count)
@@ -93,7 +475,7 @@ def main():
         st.divider()
         st.subheader("Fault & Safety Injection")
         if st.button("TRIP EMERGENCY BREAK (0x001)", type="primary", width="stretch", disabled=not client.connected):
-            client.trigger_emergency_break()
+            trip_emergency_break(client)
             st.warning("Emergency-break command sent. Waiting for the simulated board readback to confirm the latch.")
 
         if client.emergency_break_tripped:
@@ -152,48 +534,60 @@ UPLINK (mock sensors to dashboard views):
         st.markdown("### 1. Topside Pilot Flight Deck")
         col_ctrl1, col_ctrl2 = st.columns([1, 1])
 
-        with col_ctrl1:
-            st.markdown("**6-DOF Flight Axes** (Drag to pilot vehicle)")
-            surge = st.slider("Surge (Forward / Reverse)", -1.0, 1.0, float(client.pipeline_surface_cmd["surge"]), 0.05, key="slider_surge")
-            sway = st.slider("Sway (Strafe Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["sway"]), 0.05, key="slider_sway")
-            heave = st.slider("Heave (Dive / Ascend)", -1.0, 1.0, float(client.pipeline_surface_cmd["heave"]), 0.05, key="slider_heave")
-            yaw = st.slider("Yaw (Turn Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["yaw"]), 0.05, key="slider_yaw")
-
+        # The preset column is written FIRST, before the sliders it moves.
+        # st.columns() hands back independent containers, so this does not change
+        # the layout - axes on the left, presets on the right.  The ORDER is what
+        # is load bearing: a preset writes the display target into st.session_state,
+        # and Streamlit refuses that assignment for a widget already instantiated
+        # in the same run, so reversing these two blocks raises instead of taking
+        # effect.  TestPresetDisplayTarget pins the order.
         with col_ctrl2:
             st.markdown("**Flight Presets**")
+
             preset_cols = st.columns(3)
             with preset_cols[0]:
                 if st.button("All Stop (Hover)", width="stretch"):
-                    client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.0)
+                    all_stop(client)
                     st.rerun()
             with preset_cols[1]:
                 if st.button("Forward (+0.5 Surge)", width="stretch"):
-                    client.send_surface_pilot_command(0.5, 0.0, 0.0, 0.0)
+                    pilot_preset(client, 0.5, 0.0, 0.0, 0.0)
                     st.rerun()
             with preset_cols[2]:
                 if st.button("Reverse (-0.5 Surge)", width="stretch"):
-                    client.send_surface_pilot_command(-0.5, 0.0, 0.0, 0.0)
+                    pilot_preset(client, -0.5, 0.0, 0.0, 0.0)
                     st.rerun()
 
             preset_cols2 = st.columns(3)
             with preset_cols2[0]:
                 if st.button("Strafe Right (+0.5 Sway)", width="stretch"):
-                    client.send_surface_pilot_command(0.0, 0.5, 0.0, 0.0)
+                    pilot_preset(client, 0.0, 0.5, 0.0, 0.0)
                     st.rerun()
             with preset_cols2[1]:
                 if st.button("Dive (+0.5 Heave)", width="stretch"):
-                    client.send_surface_pilot_command(0.0, 0.0, 0.5, 0.0)
+                    pilot_preset(client, 0.0, 0.0, 0.5, 0.0)
                     st.rerun()
             with preset_cols2[2]:
                 if st.button("Yaw Right (+0.5 Yaw)", width="stretch"):
-                    client.send_surface_pilot_command(0.0, 0.0, 0.0, 0.5)
+                    pilot_preset(client, 0.0, 0.0, 0.0, 0.5)
                     st.rerun()
 
-            if (surge != client.pipeline_surface_cmd["surge"] or
-                sway != client.pipeline_surface_cmd["sway"] or
-                heave != client.pipeline_surface_cmd["heave"] or
-                yaw != client.pipeline_surface_cmd["yaw"]):
-                client.send_surface_pilot_command(surge, sway, heave, yaw)
+        with col_ctrl1:
+            st.markdown("**6-DOF Flight Axes** (Drag to pilot vehicle)")
+            surge = st.slider("Surge (Forward / Reverse)", -1.0, 1.0, float(client.pipeline_surface_cmd["surge"]), 0.05, key=PILOT_SLIDER_KEYS[0])
+            sway = st.slider("Sway (Strafe Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["sway"]), 0.05, key=PILOT_SLIDER_KEYS[1])
+            heave = st.slider("Heave (Dive / Ascend)", -1.0, 1.0, float(client.pipeline_surface_cmd["heave"]), 0.05, key=PILOT_SLIDER_KEYS[2])
+            yaw = st.slider("Yaw (Turn Right / Left)", -1.0, 1.0, float(client.pipeline_surface_cmd["yaw"]), 0.05, key=PILOT_SLIDER_KEYS[3])
+
+        # Diff against the pilot tab's OWN baseline, then record what the tab is
+        # showing.  The thruster tab's sliders keep their own baseline, so a command
+        # published by either tab cannot be read as a slider move on the other.
+        # Deliberately outside both column blocks: it needs the slider values, which
+        # is the other half of why the preset column above is written first.
+        pilot_axes = (surge, sway, heave, yaw)
+        if pilot_axes_changed(client, *pilot_axes):
+            client.send_surface_pilot_command(*pilot_axes)
+        publish_tab_baseline(client, TAB_PILOT, pilot_axes)
 
         st.divider()
         st.markdown("### 2. Live End-to-End Message Flow Inspector")
@@ -371,16 +765,16 @@ UPLINK (mock sensors to dashboard views):
         col_all1, col_all2, col_all3 = st.columns([1, 1, 2])
         with col_all1:
             if st.button("All Stop (1500 us)", width="stretch", key="btn_all_stop_tab2"):
-                client.send_pwms([1500] * 8)
+                all_stop(client)
                 st.rerun()
         with col_all2:
             if st.button("All Forward (1650 us)", width="stretch", key="btn_all_fwd_tab2"):
-                client.send_pwms([1650] * 8)
+                thruster_preset(client, [1650] * 8)
                 st.rerun()
         with col_all3:
             global_slider = st.slider("Master Sync Throttle", 1000, 2000, 1500, step=10, key="sync_throttle_tab2")
             if st.button("Apply Sync Throttle", key="btn_apply_sync_tab2"):
-                client.send_pwms([global_slider] * 8)
+                thruster_preset(client, [global_slider] * 8)
                 st.rerun()
 
         pwm_cols = st.columns(4)
@@ -401,15 +795,16 @@ UPLINK (mock sensors to dashboard views):
                     max_value=2000,
                     value=int(client.pwms[i]),
                     step=5,
-                    key=f"thruster_slider_tab2_{i}",
+                    key=THRUSTER_SLIDER_KEY(i),
                 )
                 new_pwms[i] = val
                 delta = val - 1500
                 st.progress((val - 1000) / 1000.0)
                 st.caption(f"Effort: {delta:+d} us ({'Forward' if delta > 0 else 'Reverse' if delta < 0 else 'Neutral'})")
 
-        if new_pwms != client.pwms:
+        if thruster_targets_changed(client, new_pwms):
             client.send_pwms(new_pwms)
+        publish_tab_baseline(client, TAB_THRUSTER, new_pwms)
 
         st.divider()
         st.subheader("10-Channel Pneumatic Solenoid Drivers (AO3400A)")
@@ -428,11 +823,20 @@ UPLINK (mock sensors to dashboard views):
                     new_mask |= (1 << (valve * 2 + 1))
 
         if new_mask != client.solenoid_mask:
+            # send_solenoids refuses a mask that energises both coils of any valve
+            # (rov_can_protocol.c:120-126 zeroes the whole mask for one) and leaves
+            # the recorded target alone, so this diff keeps proposing the same mask
+            # on the next render until the operator clears a coil.  The reason is
+            # shown below rather than swallowed: a silently ignored toggle is the
+            # same "the UI says one thing and the board does another" failure.
             client.send_solenoids(new_mask)
         st.caption(
             f"Command target 0x{client.solenoid_mask:03X} · mock readback 0x{client.actual_solenoid_mask:03X} · "
             f"{stream_age_label(client, CAN_ID_SIL_OUTPUT_STATUS)}"
         )
+        refusal = getattr(client, "last_solenoid_refusal", None)
+        if refusal:
+            st.warning(f"CAN 0x110 not sent — {refusal}")
 
     # =========================================================================
     # TAB 3: NAVIGATION & ATTITUDE (100 Hz)
@@ -600,8 +1004,10 @@ UPLINK (mock sensors to dashboard views):
             """
         )
 
-    # Controlled auto-refresh loop
-    if client.connected and auto_refresh:
+    # Controlled auto-refresh loop. This sends nothing: the 20 Hz control worker
+    # owns the command cadence, and a second sender here would emit an extra
+    # command frame at whatever rate the operator's browser happened to poll.
+    if auto_refresh_due(client, auto_refresh, refresh_rate):
         time.sleep(refresh_rate)
         st.rerun()
 
