@@ -478,7 +478,12 @@ class _FailureAnnotatingMethod:
             return self._method()
         except AssertionError as exc:
             context = self._diagnostics()
-            if context:
+            # Skip when the assertion already quoted the report.  A test is
+            # allowed to inline ``failure_report()`` in its own message so the
+            # text survives even if this base class is ever dropped, and
+            # appending it a second time would print the same seven lines twice
+            # and bury whatever the assertion actually had to say.
+            if context and context.splitlines()[0] not in str(exc):
                 raise AssertionError(f"{exc}\n{context}") from None
             raise
 

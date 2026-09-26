@@ -40,6 +40,7 @@ typedef SOCKET socket_t;
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 typedef int socket_t;
@@ -172,6 +173,29 @@ int main(int argc, char **argv) {
         fprintf(stderr, "SIL Bridge: WSAStartup failed.\n");
         return 1;
     }
+#else
+    /* A departing client must not take the simulator down with it.
+     *
+     * The observable failure this prevents: the engine streams 0x7FE and 0x200
+     * at 100 Hz, so any client that stops reading accumulates a backlog in its
+     * receive buffer.  If such a client then goes away, the kernel sends RST
+     * rather than FIN, and on Linux the next send() to that peer fails *and*
+     * raises SIGPIPE, whose default action is to terminate this process.  The
+     * engine therefore died on an ordinary client disconnect -- a browser tab
+     * closed mid-session, or a dashboard hitting "Restart Engine" -- and because
+     * the listener went with it, the client's next connect() was refused with
+     * ECONNREFUSED.  The disconnect handling further down (a send() returning
+     * <= 0 closes client_fd and keeps serving) is already correct; it simply
+     * never got to run.
+     *
+     * Ignoring the signal process-wide is preferred over MSG_NOSIGNAL on the two
+     * send() calls because those are not the only descriptors at risk: if stdout
+     * is ever a pipe whose reader has gone, a plain printf() would kill the
+     * engine the same way.  Windows has no SIGPIPE at all -- send() there just
+     * returns SOCKET_ERROR/WSAECONNRESET -- which is why this defect only ever
+     * appeared on the Linux CI runner.
+     */
+    signal(SIGPIPE, SIG_IGN);
 #endif
 
     socket_t server_fd = socket(AF_INET, SOCK_STREAM, 0);
