@@ -102,6 +102,51 @@ Dashboard features:
 - **Emergency Break Injection**: Priority 0 `0x001` trigger to test instant motor shutdown and hardware latch.
 - **Live Graphs & Telemetry**: 100 Hz depth and quaternion attitude tracking, BME280 leak detection, and 4x PMBus converter metrics.
 
+### Per-Node and Whole-Vehicle Stimulus Checks
+
+[`tools/can_stimulus.py`](../tools/can_stimulus.py) is the **canonical** stimulus tool. It injects stimulus at the CAN boundary and verifies the result against the board's own `0x7FE` output-status readback, which exists only inside the SIL engine. When nothing is listening on the target port it launches an engine of its own and reaps it on exit.
+
+```powershell
+# Build the native engine the checks drive
+cmake -B build-native -G Ninja
+cmake --build build-native --target sil_bridge_server
+
+# Whole-vehicle smoke sequence: all eight checks, in the only order that is meaningful
+python tools/can_stimulus.py --mode sil --auto
+
+# One check at a time (--help lists the rest)
+python tools/can_stimulus.py --mode sil --node2-arm
+```
+
+`--auto` runs the arming gate first, because nothing may send a thruster command before it and the 3000 ms window cannot be observed retroactively. It runs the emergency break **last**, because that latch holds for the life of the engine and every check after it would only be observing a permanently disarmed board.
+
+| Flag | Asserts |
+|---|---|
+| `--node1-env` | `0x210` enclosure telemetry decodes, with leak flags clear |
+| `--node2-arm` | outputs held neutral for the first 3000 ms of sim time against a resent 1700 us command, then took effect and released |
+| `--node2-thruster N US` | channel `N` held `US` past the 100 ms watchdog with the other seven neutral, then released |
+| `--node2-all US` | all eight channels held `US` past the watchdog, then released |
+| `--node2-solenoid MASK` | the mask energises one coil per valve, the board reports that mask back, then releases to `0x0000` |
+| `--node2-depth S` | `0x200` depth telemetry decodes at the design rate |
+| `--node3-power` | `0x300` power telemetry decodes, with status flags clear |
+| `--emergency-break` | the authorized `AA 55 01` frame latches the brake, an unauthorized `AA 56 01` is ignored, and a later 1800 us command does not resume thrust |
+| `--raw-send ID:HEX` | the write reached the transport; asserts nothing about the vehicle |
+| `--sniff S` | decodes every non-`0x7FE` frame for `S` seconds |
+
+### Node 2 Legacy Flags
+
+[`tools/node2_stimulus.py`](../tools/node2_stimulus.py) is a **compatibility wrapper**, not a second implementation. It translates the legacy Node 2 flag names and then delegates every check, every verdict, and the exit status to `can_stimulus.py`. New work belongs in the canonical tool.
+
+```powershell
+# --test-depth 2 is translated to --node2-depth 2, then delegated
+python tools/node2_stimulus.py --mode sil --test-depth 2
+
+# The wrapper's help prints the whole legacy-to-canonical table
+python tools/node2_stimulus.py --help
+```
+
+A legacy invocation also prints a one-line `[COMPAT]` notice on stderr naming the canonical flag and whether it actuates. Three legacy flags (`--bitrate`, `--data-bitrate`, `--channel`) have no canonical counterpart and are refused with exit 2 rather than silently dropped.
+
 ---
 
 ## 4. 6-DOF Hydrodynamic & Electrical Plant Simulation
@@ -154,3 +199,127 @@ The SIL test suite comprises 25 suites testing hardware drivers, communications,
 | 23 | `test_sil_power` | Full thruster load current modeling, eFuse protection, and telemetry continuity |
 | 24 | `test_sil_fuzz` | 1,000 randomized malformed CAN FD frames and Bus-Off fault recovery |
 | 25 | `test_sil_burnin` | 100,000-cycle (16.7 min virtual time) continuous stability and ramp alternating |
+
+---
+
+## 7. Control Contract, Exit Status, and Test Discovery
+
+### 7.1 The dashboard deadman
+
+The dashboard control worker ([`tests/sil_dashboard/sil_dashboard_client.py`](../tests/sil_dashboard/sil_dashboard_client.py)) resends the last accepted thruster command every **50 ms (20 Hz)**. The firmware heartbeat window is **100 ms** (`ROV_HEARTBEAT_TIMEOUT_MS` in [`shared/include/rov_parameters.h`](../shared/include/rov_parameters.h)), so a stalled worker, a dropped socket, or a closed browser tab takes the board below neutral **within 100 ms** — two missed resends.
+
+| Operator action | Control state | 20 Hz worker |
+| :--- | :--- | :--- |
+| Non-neutral thruster or pilot command | `RUNNING` | running; the heartbeat stays refreshed |
+| All-neutral command, `send_pwms([1500] * 8)` | `ARMED` | **stopped** |
+| **All Stop** button | `STOPPED` | stopped, after one confirming neutral frame |
+| **E-Stop** button | `ESTOP`, latched until reconnect | stopped; the authorized `0x001` `AA 55 01` frame is the next thing on the wire |
+
+**Holding neutral does not keep the link alive, and that is deliberate.** The firmware watchdog is what actually releases the pneumatics: `node2_force_neutral()` puts `bsp_solenoid_set(0)` inside itself ([`nodes/node2_control_board/Core/Src/app.c`](../nodes/node2_control_board/Core/Src/app.c) lines 49-52) and is called when `heartbeat_lost` goes true (lines 187-189). An operator who expected "hold neutral" to keep the heartbeat alive would be wrong in the dangerous direction: a continuously refreshed neutral heartbeat prevents the watchdog from ever firing, so the solenoid mask would stay energized indefinitely behind a dashboard that still claims to be running. So an all-neutral command lands in `ARMED` with **no** worker, the heartbeat lapses within 100 ms, and Node 2 zeroes the mask itself. The dashboard also gives each browser tab its own command baseline rather than reading a shared one, so opening a second tab cannot silently re-arm a held thrust.
+
+### 7.2 Exit status of the stimulus tools
+
+`tools/can_stimulus.py`, and therefore `tools/node2_stimulus.py`, exits:
+
+| Status | Meaning |
+| --- | --- |
+| `0` | every selected check **observed** what it required |
+| `1` | at least one check failed, or the engine could not be reached |
+| `2` | usage error: no action selected, an unusable value, or a refused legacy flag |
+
+A nonzero exit means a required SIL observation was **missing, malformed, stale, or incorrect**. It never means a crash was swallowed: each check turns its own observation failures into a failed result, a guard converts anything that still escapes into a failed result, and the CLI turns a failure to reach the transport into a nonzero status. The tool cannot report success while a check did not actually run. Every result is also streamed as it completes, so a run killed part way through still leaves per-check evidence in its output.
+
+`--mode can` and `--mode uart` are receive-only. The `0x7FE` output-status readback is a SIL-only mock-BSP channel, so on real hardware the checks that would need to actuate refuse **before** sending a frame, rather than actuating blind and failing afterwards.
+
+### 7.3 The emergency check actuates
+
+**`--emergency-break` drives all eight thrusters to 1800 us and ramps them back** before it sends the authorized `AA 55 01` frame, because a latch claim is only worth something if the board was demonstrably accepting thrust beforehand. It then latches the brake for the life of that engine. Measured cost on a developer machine: about 1.5 s against an engine that is already armed, and about 7 s when the tool has to launch an engine of its own and wait out the 3000 ms arming window first. The legacy `--test-emergency` does the same thing. Know this before running either.
+
+### 7.4 The arming check needs a fresh engine
+
+`--node2-arm` (and `--test-arm`) proves the mandatory 3000 ms ESC arming gate held neutral while a 1700 us command was resent, then took effect once the gate closed. The window is measured on the engine's virtual clock and cannot be observed retroactively, so against an engine already past 3000 ms the check **legitimately fails**:
+
+```
+[FAIL] node2_arming: the arming gate was already open when the first snapshot arrived
+(sim_time_ms=4090 >= 3000), so the mandatory 3000 ms window could not be observed.
+Restart the engine (or let this tool launch one) and run the arming check first.
+```
+
+Run it first, against a fresh engine. That is why `--auto` puts it first, and why every per-node integration test starts an engine of its own.
+
+### 7.5 Pointing the tools at a build tree: `X19_SIL_SERVER`
+
+Both the stimulus tools and the SIL test suites look for the native engine in `build-native/tests/`, then `build/`, `build-test/`, and `build-host/`. Set `X19_SIL_SERVER` to select a binary explicitly whenever it lives anywhere else:
+
+```powershell
+$env:X19_SIL_SERVER = (Resolve-Path "build-native/tests/sil_bridge_server.exe").Path
+# ... run the checks ...
+Remove-Item Env:X19_SIL_SERVER
+```
+
+The tools read the same variable when they launch an engine of their own, so one setting covers both the checks and the suites.
+
+### 7.6 Running the Python SIL suites
+
+```powershell
+# The native engine first: the server-backed tests drive it
+cmake -B build-native -G Ninja
+cmake --build build-native
+
+# Dashboard control, stimulus CLI, protocol round-trip, and per-node integration
+$env:X19_SIL_SERVER = (Resolve-Path "build-native/tests/sil_bridge_server.exe").Path
+python -m unittest discover -s tests/sil_stimulus -p "test_*.py" -v
+
+# The X19-Core ZeroMQ/Protobuf companion bridge, from the multi-repository workspace
+python tests/sil_companion_bridge/test_full_system_sil.py
+
+# Syntax gate for everything the suites import or shell out to. PowerShell does
+# not expand a glob for a native command, so expand it explicitly.
+python -m py_compile (Get-ChildItem tests/sil_dashboard/*.py, tests/sil_companion_bridge/*.py).FullName tools/can_stimulus.py tools/node2_stimulus.py
+
+Remove-Item Env:X19_SIL_SERVER
+```
+
+The same gate under bash, which is what CI runs, can use the glob directly:
+
+```bash
+python -m py_compile tests/sil_dashboard/*.py tests/sil_companion_bridge/*.py tools/can_stimulus.py tools/node2_stimulus.py
+```
+
+The `tests/sil_stimulus/` suites import only the Python standard library, this repository's own modules, and `streamlit` (which `tests/sil_dashboard/dashboard_app.py` imports at module scope). `streamlit` is therefore required, not optional: `test_dashboard_app.py` raises `SkipTest` from `setUpModule` when `dashboard_app.py` cannot be imported, which costs all 55 of its tests at once. Install it before running the discovery:
+
+```powershell
+python -m pip install "streamlit>=1.40,<2"
+```
+
+The 26 tests in `test_dashboard_control.py` cover the 20 Hz deadman in the client itself and need no Streamlit at all, so a missing install degrades to 229 passing plus 55 skipped rather than to a total loss.
+
+`tests/sil_companion_bridge/` additionally needs `pyzmq`, `protobuf`, and sibling `X19-Core` and `X19-Surface` checkouts, so run it from the multi-repository workspace rather than from this repository alone.
+
+Continuous integration runs the same discovery with `streamlit` installed, and that step is **blocking**: it is the only automated path over these suites, and it runs on every push and pull request. The suite takes roughly 3.5 minutes on a developer machine, most of it the unavoidable 3000 ms simulated arming gate that several tests must pay against a fresh engine of their own. That cost is acceptable here — the same job already cross-compiles every node and runs CTest — and no subset is carved out, because a maintained allowlist would silently drop checks from CI, which is the failure class this flow exists to prevent.
+
+### 7.7 A pass and a skip are not the same thing
+
+Every server-backed test skips cleanly, per test, when the native engine cannot be found — and **`python -m unittest` still exits 0 on a skip**, so an all-skipped run is indistinguishable from green by exit code alone. A skip means "this was not verified here", never "this passed".
+
+To tell a real pass from a silent skip:
+
+- Run with `-v`. Each skip prints its reason, so the log names exactly what was not verified.
+- Read the trailing summary. A bare `OK` means everything ran; `OK (skipped=N)` means N checks were not verified.
+- Check that the count is non-trivial. A real run is 284 `ok` lines; a run where every line says `skipped` is a skip, not a pass.
+- Remember that one missing dependency can cost a whole module. `test_dashboard_app.py` skips all 55 of its tests at once when `streamlit` is absent, and reports that as a single skip, so `OK (skipped=1)` does not mean one test was skipped.
+- Confirm the engine was found. Point `X19_SIL_SERVER` at the binary (7.5) instead of relying on the default search, so a renamed or relocated build tree cannot silently convert the suite into skips.
+
+Continuous integration applies the same rule: the CI step prints its `ok` and `skipped` counts next to the exit status for exactly this reason.
+
+### 7.8 Host SIL results are not target readiness
+
+These suites verify the **host** simulation: application logic, CAN protocol serialization, the deadman contract, and the dashboard and stimulus tooling, all against mocked peripherals. They do not build or validate STM32 startup code, vendor HAL integration, peripheral timing, pin configuration, FDCAN, or electrical behavior.
+
+Target readiness is a separate, currently **red** CTest group:
+
+```powershell
+ctest --test-dir build-native -R "^target_" --output-on-failure
+```
+
+Those acceptance contracts compile each node's real `main.c` and `bsp.c` against a strict fake HAL. Five of the six fail today: `target_startup_node1` and `target_startup_node3` report that `HAL_Init`, `SystemClock_Config`, `MX_GPIO_Init`, `MX_FDCAN1_Init`, and `MX_I2C1_Init` never run before `app_main`, and the three `target_bsp_node*` tests report that no solenoid bit drives its own GPIO output and that the emergency brake neither asserts the hardware cutoff nor exposes the hardware latch. `target_startup_node2` passes. In CI that whole step is deliberately `continue-on-error`. A green host SIL run is not evidence that any of the failing contracts work, and **no physical hardware has been validated**. The remaining blockers are tracked in [`target-integration-blockers.md`](target-integration-blockers.md).

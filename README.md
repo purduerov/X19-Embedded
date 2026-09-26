@@ -57,6 +57,16 @@ python tests/sil_companion_bridge/test_full_system_sil.py
 
 When the embedded repository is opened from a separate worktree, the bridge test locates the sibling repositories automatically. Set `X19_WORKSPACE_ROOT` to the multi-repository workspace root, or set `X19_CORE_DIR` and `X19_SURFACE_DIR` explicitly if the repositories use another layout.
 
+### Python SIL Verification in CI
+
+The `build_and_lint.yml` workflow runs the Python SIL surface as a **blocking** step. After the native build it points `X19_SIL_SERVER` at the freshly built `sil_bridge_server` and runs the dashboard, stimulus-CLI, protocol round-trip, and per-node integration suites under `tests/sil_stimulus/`, preceded by a syntax gate over the dashboard, companion-bridge, and stimulus sources. `streamlit` is the only third-party package those suites need. The companion-bridge test needs `pyzmq`, `protobuf`, and the sibling `X19-Core`/`X19-Surface` checkouts, so it is executed from the multi-repository workspace instead.
+
+Every server-backed test skips cleanly when the native engine is missing, and `python -m unittest` still exits 0 on a skip, so the CI step prints its `ok` and `skipped` counts rather than trusting the exit code alone.
+
+Host SIL results and target readiness are different things. A green run above is evidence about application logic, CAN protocol serialization, the 20 Hz deadman contract, and the dashboard and stimulus tooling, all against mocked peripherals. It is not evidence about STM32 startup, vendor HAL integration, peripheral timing, pin configuration, FDCAN, or electrical behavior, and no physical hardware has been validated. Target readiness is the separate `continue-on-error` step, where five of the six acceptance contracts fail today on the missing CubeMX startup and peripheral-init calls, the missing per-solenoid GPIO outputs, and the missing hardware emergency-brake latch.
+
+[`docs/sil_simulation_guide.md`](docs/sil_simulation_guide.md) documents the working commands, the deadman and arming semantics, the exit-status contract, and how to tell a real pass from a silent skip.
+
 Target-only startup, pin, FDCAN, and hardware sensor integration blockers are tracked in [`docs/target-integration-blockers.md`](docs/target-integration-blockers.md).
 
 ### Simulation Architecture (`tests/mocks/`)

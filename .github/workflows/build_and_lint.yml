@@ -59,6 +59,54 @@ jobs:
           # Strict core unit tests: must pass 100% (failure blocks CI)
           ctest --test-dir build-native -E "target_" --output-on-failure
 
+      - name: Set Up Python for SIL Checks
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Python SIL and Dashboard Checks
+        shell: bash
+        run: |
+          # The host SIL surface is a blocking contract, exactly like the CTest step
+          # above. Target readiness stays non-blocking in the next step, because 5 of
+          # its 6 acceptance contracts are red on the missing CubeMX startup and
+          # peripheral-init calls, the missing per-solenoid GPIO outputs, and the
+          # missing hardware emergency-brake latch. A green run here is evidence about
+          # the host simulation, never about hardware.
+          #
+          # streamlit is the only third-party package the suites need, and it is
+          # required rather than optional: tests/sil_stimulus/test_dashboard_app.py
+          # raises SkipTest from setUpModule when dashboard_app.py cannot be
+          # imported, which costs all 55 of its tests. Relying on that clean skip
+          # would drop the whole UI safety layer - the button-to-handler bindings,
+          # the per-tab re-arm veto, and the E-stop latch gate - out of CI while
+          # still reporting success. Bounded rather than exact-pinned so the pin
+          # cannot rot; the ok/skipped counts printed below are the tripwire if a
+          # future release ever renames streamlit.testing.v1 and that layer starts
+          # skipping.
+          #
+          # pyzmq and protobuf are deliberately NOT installed. Only
+          # tests/sil_companion_bridge/ needs them, and it also needs the sibling
+          # X19-Core / X19-Surface checkouts that are not part of this repository, so
+          # it is syntax-checked here and executed from the multi-repository
+          # workspace instead.
+          python -m pip install --disable-pip-version-check "streamlit>=1.40,<2"
+          python -m py_compile tests/sil_dashboard/*.py tests/sil_companion_bridge/*.py tools/can_stimulus.py tools/node2_stimulus.py
+
+          # Runs after the native build so the engine exists. X19_SIL_SERVER is passed
+          # explicitly rather than relying on the build-native/tests default, so a
+          # renamed or relocated build tree cannot turn the whole suite into skips.
+          X19_SIL_SERVER="$PWD/build-native/tests/sil_bridge_server" \
+            python -m unittest discover -s tests/sil_stimulus -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/sil-unittest.log"
+
+          # unittest exits 0 when every test skipped, so a silent all-skip run is
+          # indistinguishable from green by exit code alone. Print both counts: a real
+          # run is a large "ok" count beside few or no named skips. An application
+          # that logs to stdout can split a "ok" token onto its own line, so accept
+          # either shape rather than under-counting the run.
+          echo "python SIL checks: ok=$(grep -cE '^ok$|\.\.\. ok$' "$RUNNER_TEMP/sil-unittest.log" || true) skipped=$(grep -c '\.\.\. skipped' "$RUNNER_TEMP/sil-unittest.log" || true)"
+          tail -n 3 "$RUNNER_TEMP/sil-unittest.log"
+
       - name: Check Target Hardware Readiness (Acceptance Contracts)
         continue-on-error: true
         run: |
