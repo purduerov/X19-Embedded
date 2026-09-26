@@ -119,6 +119,7 @@ __all__ = [
     "CAN_ID_TIME_SYNC_RESP",
     "CAN_ID_USB_HUB_TELEMETRY",
     "ESC_ARMING_SIM_MS",
+    "MIN_ARMING_SAMPLES",
     "NEUTRAL_PWMS",
     "NEUTRAL_US",
     "PWM_MAX_US",
@@ -134,10 +135,14 @@ __all__ = [
     "build_backend",
     "build_parser",
     "conflicting_solenoid_valve",
+    "describe_can_id",
+    "energised_coils",
+    "format_result",
     "main",
     "pack_sil_can_frame",
     "print_report",
     "run_selected_action",
+    "selected_action_flags",
     "unpack_sil_can_frame",
     "unpack_sil_output_status",
     "validate_can_id",
@@ -166,6 +171,10 @@ HEARTBEAT_TIMEOUT_S = 0.100
 COMMAND_PERIOD_S = HEARTBEAT_TIMEOUT_S / 2.0
 # nodes/node2_control_board/Core/Src/app.c:24  ESC_ARMING_TIME_MS (3000)
 ESC_ARMING_SIM_MS = 3000
+# The arming gate must be observed repeatedly while it is closed. One snapshot
+# at or after the boundary would leave the intruder list empty and make an
+# unwatched window look verified; a real run produces ~150 inside it.
+MIN_ARMING_SAMPLES = 3
 # The C engine advances 10 ms of virtual time per 10 ms wall tick
 # (tests/sil_bridge_server.c:264,427). 0.8 is a deliberately generous lower bound
 # on that rate, so a slow host widens a wall-clock budget instead of tripping a
@@ -189,7 +198,8 @@ UNAUTHORIZED_FRAME = b"\xAA\x56\x01"
 # automatic eFuse check: tripping that path force-neutrals the board and latches
 # a 0x005 alert for the life of the engine, exactly like the emergency break, so
 # it belongs in the operator's hands via --raw-send. raw_send() still refuses an
-# unsigned 0x005 so a mis-typed frame cannot masquerade as a real alert.
+# unsigned 0x005 so a mis-typed frame cannot masquerade as a real alert, and the
+# eFuse's *effect* is asserted for real by monitor_node3_power's fault-bit check.
 EFUSE_SIGNATURE = b"\xEF\x01"
 # Safety-critical IDs the firmware only acts on when the payload carries the
 # authorization signature. Enforced at the point of injection.
@@ -202,11 +212,6 @@ SAFETY_SIGNATURES = {
 PWM_SLEW_RATE_US_PER_MS = 2
 # sil_protocol.SIL_PACKET_FMT carries a 64-byte data field.
 MAX_SIL_PAYLOAD = 64
-# 0x7FE is a SIL-only mock-BSP channel, not a vehicle CAN message
-# (sil_protocol.py:22, tests/sil_bridge_server.c:62), so a real bus can never
-# provide it. That is why the hardware adapters report no readback and why the
-# readback-dependent checks cannot pass on hardware.
-SIL_ONLY_OUTPUT_STATUS = CAN_ID_SIL_OUTPUT_STATUS
 
 DEFAULT_SIL_HOST = "127.0.0.1"
 DEFAULT_SIL_PORT = 8765  # tests/sil_bridge_server.c:61
@@ -310,16 +315,20 @@ class StimulusReport:
     def passed(self) -> List[CheckResult]:
         return [result for result in self.results if result.passed]
 
-    def format(self) -> str:
+    def format(self, include_checks: bool = True) -> str:
         """
         Render the report. The failure block repeats the failed checks by name
         with their detail on purpose: the per-check lines are chronological and a
         long run buries them, and the operator reading only the tail must still
         see which check failed and why.
+
+        ``include_checks=False`` omits the per-check lines, for a caller that has
+        already streamed them as they completed.
         """
         lines = []
-        for result in self.results:
-            lines.append(f"[{'PASS' if result.passed else 'FAIL'}] {result.name}: {result.detail}")
+        if include_checks:
+            for result in self.results:
+                lines.append(format_result(result))
         lines.append(
             f"Summary: {len(self.results)} check(s), {len(self.passed)} passed, "
             f"{len(self.failures)} failed"
@@ -333,6 +342,11 @@ class StimulusReport:
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"StimulusReport({self.results!r}, ok={self.ok!r})"
+
+
+def format_result(result: CheckResult) -> str:
+    """One line per check. Used both by the live stream and by the final report."""
+    return f"[{'PASS' if result.passed else 'FAIL'}] {result.name}: {result.detail}"
 
 
 def conflicting_solenoid_valve(mask: int) -> Optional[int]:
@@ -352,6 +366,21 @@ def conflicting_solenoid_valve(mask: int) -> Optional[int]:
         if (mask & pair_mask) == pair_mask:
             return valve
     return None
+
+
+def energised_coils(mask: int) -> List[str]:
+    """
+    Name every coil a mask energises, e.g. 0x0001 -> ``['valve 0 coil A']``.
+
+    Used to make a solenoid pass message describe the mask that was actually
+    sent instead of asserting something generic about it.
+    """
+    return [
+        f"valve {valve} coil {'AB'[coil]}"
+        for valve in range(SOLENOID_VALVES)
+        for coil in (0, 1)
+        if mask & (1 << (2 * valve + coil))
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -381,8 +410,25 @@ def validate_can_id(can_id: int) -> int:
     return can_id
 
 
+def describe_can_id(can_id: int) -> str:
+    """Render an arbitration id the way every message in this tool does."""
+    return f"CAN 0x{can_id:03X}"
+
+
 class _BaseBackend:
-    """Shared payload validation for every transport."""
+    """
+    Shared payload validation and capability declaration for every transport.
+
+    ``provides_output_readback`` is False by default on purpose.  0x7FE is a
+    SIL-only mock-BSP channel (``sil_protocol.py:22``,
+    ``tests/sil_bridge_server.c:62``), so a transport that cannot supply it must
+    not be asked to verify an actuation.  A check consults this *before* it
+    writes anything, which is what stops a blind actuation leaving the bus.
+
+    A transport that forgets to declare the capability therefore fails safe.
+    """
+
+    provides_output_readback = False
 
     def latest_outputs(self) -> Optional[OutputStatus]:
         raise NotImplementedError
@@ -396,8 +442,9 @@ class _BaseBackend:
     def recv_frame(self, timeout_s: float = DEFAULT_RECV_TIMEOUT_S):
         raise NotImplementedError
 
-    def close(self) -> None:
-        raise NotImplementedError
+    def describe_destination(self, can_id: int) -> str:
+        """How a frame addressed to ``can_id`` actually leaves this transport."""
+        return describe_can_id(can_id)
 
     def __enter__(self):
         self.connect()
@@ -429,7 +476,12 @@ class SilSocketBackend(_BaseBackend):
     is no longer known.  The failure is reported as a check failure; recovery
     requires closing and reconnecting, which is exactly what a fresh engine
     connection does.
+
+    This is the only transport that can supply the 0x7FE readback, so it is the
+    only one on which an actuation command can be verified.
     """
+
+    provides_output_readback = True
 
     def __init__(
         self,
@@ -657,11 +709,19 @@ class PythonCanBackend(_BaseBackend):
     """
     Adapter for a real CAN FD bus, driven by python-can.
 
-    There is no 0x7FE readback on a real bus: that channel exists only in the SIL
-    mock (sil_protocol.py:22), so ``latest_outputs()`` is always None and the
-    readback-dependent checks fail here.  That is the honest outcome - these
-    checks are statements about the SIL engine, and a hardware run should assert
-    against real telemetry instead.
+    What this transport is honestly for: **observing a real bus, not driving
+    one.**  There is no 0x7FE readback on real hardware - that channel exists
+    only in the SIL mock (``sil_protocol.py:22``) - so a command sent here could
+    never be verified, and the checks that require a readback refuse before they
+    write anything.  That refusal is the point: a thruster or valve command that
+    moves something on a real vehicle and cannot be read back is exactly the
+    blind actuation this tool must not perform.  The receive-only checks
+    (``monitor_node1_env``, ``monitor_node3_power``, ``monitor_node2_depth``,
+    ``sniff``) are meaningful here and are the supported use of this mode.
+
+    ``raw_send`` is the one exception and is deliberate: the operator named the
+    exact frame and bytes, and the tool is a pipe for it.  Its pass text says so
+    and claims no vehicle response.
     """
 
     def __init__(self, interface: str = "can0", channel: Optional[str] = None) -> None:
@@ -714,6 +774,9 @@ class PythonCanBackend(_BaseBackend):
     def latest_outputs(self) -> Optional[OutputStatus]:
         return None
 
+    def describe_destination(self, can_id: int) -> str:
+        return f"{describe_can_id(can_id)} on {self.interface}"
+
     def close(self) -> None:
         bus, self._bus = self._bus, None
         if bus is not None:
@@ -731,9 +794,12 @@ class UartBackend(_BaseBackend):
     """
     Adapter for a raw serial link, driven by pyserial.
 
+    Same honest contract as :class:`PythonCanBackend`: **observe, do not drive.**
     Writes the payload verbatim and reads whatever bytes arrive; there is no CAN
-    framing on a UART, so ``recv_frame`` reports :data:`UART_UNDECODED_ID`.
-    Like ``PythonCanBackend`` it has no 0x7FE readback.
+    framing on a UART, so ``recv_frame`` reports :data:`UART_UNDECODED_ID` and
+    ``describe_destination`` says plainly that the arbitration id was not
+    addressed by this link.  With no 0x7FE readback and no CAN ids, only the
+    frame counter in ``sniff`` means anything here.
     """
 
     def __init__(self, port: str = "/dev/ttyUSB0", baudrate: int = 115200) -> None:
@@ -776,6 +842,12 @@ class UartBackend(_BaseBackend):
 
     def latest_outputs(self) -> Optional[OutputStatus]:
         return None
+
+    def describe_destination(self, can_id: int) -> str:
+        return (
+            f"the unaddressed byte stream on {self.port} at {self.baudrate} baud - this link "
+            f"carries no arbitration id, so CAN 0x{can_id:03X} was NOT addressed by it"
+        )
 
     def close(self) -> None:
         handle, self._serial = self._serial, None
@@ -821,12 +893,55 @@ class VehicleStimulusTester:
     evidence in ``detail``; they are never raised.  Argument errors *are* raised,
     because a caller bug is not an observation and must not be reported as a
     vehicle failure.
+
+    Two invariants are enforced here rather than left to each check:
+
+    * a check that needs the 0x7FE readback refuses **before it writes anything**
+      on a transport that cannot supply one, so a non-SIL mode never puts an
+      unverifiable actuation on a bus (:meth:`_require_output_readback`);
+    * a check that claims a precondition it did not observe fails instead of
+      quietly dropping the claim (:meth:`test_emergency_break`).
     """
 
-    def __init__(self, backend: _BaseBackend) -> None:
+    def __init__(self, backend: _BaseBackend, on_result: Optional[Callable[[CheckResult], None]] = None) -> None:
         self.backend = backend
+        # Called with each result as it completes, so a long run leaves evidence
+        # behind even if the process is killed part way through.
+        self.on_result = on_result
 
     # -- plumbing ----------------------------------------------------------
+    def _require_output_readback(self, name: str) -> Optional[CheckResult]:
+        """
+        Refuse a readback-dependent check on a transport that has no 0x7FE.
+
+        Returns a FAILED ``CheckResult`` to return instead of running, or None to
+        proceed.  This is checked before the first ``send_frame`` on purpose: a
+        refusal that arrives after the actuation is a refusal that is too late.
+        """
+        if getattr(self.backend, "provides_output_readback", False):
+            return None
+        return CheckResult(
+            name,
+            False,
+            f"refused before sending any frame: the {describe_can_id(CAN_ID_SIL_OUTPUT_STATUS)} "
+            "output-status readback is a SIL-only mock-BSP channel (sil_protocol.py:22) and this "
+            "transport cannot supply it, so no actuation sent over "
+            f"{self.backend.describe_destination(0)} could be verified. A thruster or valve "
+            "command that moves something and cannot be read back is a blind actuation, so this "
+            "check is SIL-only. Use --mode sil, or select the receive-only checks "
+            "(--node1-env, --node3-power, --node2-depth, --sniff).",
+        )
+
+    def run_plan(self, plan: Sequence[Tuple[str, Callable[[], CheckResult]]]) -> StimulusReport:
+        """Run a name/action plan, streaming each result as it completes."""
+        results: List[CheckResult] = []
+        for name, action in plan:
+            result = self.guard(name, action)
+            results.append(result)
+            if self.on_result is not None:
+                self.on_result(result)
+        return StimulusReport(results)
+
     def guard(self, name: str, action: Callable[[], CheckResult]) -> CheckResult:
         """
         Run a check and convert any exception into a FAILED ``CheckResult``.
@@ -877,7 +992,11 @@ class VehicleStimulusTester:
                 before = self.backend.latest_outputs()
                 if hasattr(self.backend, "drain_frames"):
                     self.backend.drain_frames(slice_s)
-                else:  # pragma: no cover - every shipped backend drains
+                else:
+                    # PythonCanBackend and UartBackend have no drain_frames: they
+                    # hand back one frame at a time and no 0x7FE readback, so the
+                    # readback-dependent checks have already refused. The
+                    # receive-only checks still run here, one frame per slice.
                     self.backend.recv_frame(timeout_s=slice_s)
                 current = self.backend.latest_outputs()
                 if current is not None and current is not before:
@@ -941,6 +1060,17 @@ class VehicleStimulusTester:
             lambda snapshot: tuple(snapshot.pwms) == NEUTRAL_PWMS, timeout_s, send=send_neutral
         )
         return released is not None
+
+    def _ramp_budget_s(self, pulse_us: int, sim_rate: float, slack_s: float) -> float:
+        """
+        Wall-clock budget for a slew ramp to ``pulse_us`` and back.
+
+        The 2 us/ms ramp is charged in *simulated* milliseconds
+        (``rov_parameters.h:45``) and converted at ``sim_rate``, so a test can
+        raise the rate instead of waiting out half a second of virtual time.
+        """
+        travel_ms = abs(pulse_us - NEUTRAL_US) / PWM_SLEW_RATE_US_PER_MS
+        return travel_ms / 1000.0 / max(1e-6, sim_rate) + slack_s
 
     # -- node 1: Pi shield -------------------------------------------------
     def monitor_node1_env(self, duration_s: float = 3.0) -> CheckResult:
@@ -1019,7 +1149,12 @@ class VehicleStimulusTester:
         )
 
     # -- node 2: control board --------------------------------------------
-    def test_node2_arming(self) -> CheckResult:
+    def test_node2_arming(
+        self,
+        sim_rate: float = SIM_MS_PER_WALL_S,
+        slack_s: float = SIM_WALL_SLACK_S,
+        first_output_timeout_s: float = FIRST_OUTPUT_TIMEOUT_S,
+    ) -> CheckResult:
         """
         Prove the mandatory ESC arming gate, in both directions.
 
@@ -1034,11 +1169,22 @@ class VehicleStimulusTester:
         an absence of traffic, is what holds neutral); that the same command takes
         effect once the window closes; and that releasing it returns the outputs
         to neutral.
+
+        The neutral run is required to cover the window with
+        :data:`MIN_ARMING_SAMPLES` observations *strictly inside* it.  Without
+        that floor a single post-3000 snapshot would make the intruder list empty
+        and the gate would look verified having never been watched.
+
+        ``sim_rate`` and ``slack_s`` let the tests drive these branches without
+        waiting out 3000 ms of virtual time; production callers use the defaults.
         """
         name = "node2_arming"
-        first = self._first_output(FIRST_OUTPUT_TIMEOUT_S)
+        refused = self._require_output_readback(name)
+        if refused is not None:
+            return refused
+        first = self._first_output(first_output_timeout_s)
         if first is None:
-            return self._no_readback_failure(name, FIRST_OUTPUT_TIMEOUT_S)
+            return self._no_readback_failure(name, first_output_timeout_s)
         if first.sim_time_ms >= ESC_ARMING_SIM_MS:
             return CheckResult(
                 name,
@@ -1064,7 +1210,7 @@ class VehicleStimulusTester:
             self.backend.send_frame(CAN_ID_THRUSTER_CMD, command)
 
         remaining_sim_ms = ESC_ARMING_SIM_MS - first.sim_time_ms
-        window_budget_s = remaining_sim_ms / 1000.0 / SIM_MS_PER_WALL_S + SIM_WALL_SLACK_S
+        window_budget_s = remaining_sim_ms / 1000.0 / max(1e-6, sim_rate) + slack_s
         during = self._pump(
             time.monotonic() + window_budget_s,
             send=send_command,
@@ -1079,10 +1225,18 @@ class VehicleStimulusTester:
                 f"s of wall time (sim clock reached {reached} ms). The engine's virtual clock is "
                 "not advancing, so no arming verdict is possible.",
             )
+        inside = [snapshot for snapshot in during if snapshot.sim_time_ms < ESC_ARMING_SIM_MS]
+        if len(inside) < MIN_ARMING_SAMPLES:
+            return CheckResult(
+                name,
+                False,
+                f"only {len(inside)} observation(s) landed strictly inside the {ESC_ARMING_SIM_MS} ms "
+                f"window, below the {MIN_ARMING_SAMPLES} required. A single snapshot at or after the "
+                "boundary would make the window look observed when it was not, so the gate holding "
+                "neutral is unverified.",
+            )
         intruders = [
-            snapshot
-            for snapshot in during
-            if snapshot.sim_time_ms < ESC_ARMING_SIM_MS and tuple(snapshot.pwms) != NEUTRAL_PWMS
+            snapshot for snapshot in inside if tuple(snapshot.pwms) != NEUTRAL_PWMS
         ]
         if intruders:
             return CheckResult(
@@ -1097,7 +1251,7 @@ class VehicleStimulusTester:
         opened = self._await_output(
             lambda snapshot: snapshot.sim_time_ms >= ESC_ARMING_SIM_MS
             and any(pulse != NEUTRAL_US for pulse in snapshot.pwms),
-            RAMP_TIMEOUT_S,
+            self._ramp_budget_s(SMOKE_SINGLE_PWM_US, sim_rate, slack_s),
             send=send_command,
         )
         if opened is None:
@@ -1110,7 +1264,7 @@ class VehicleStimulusTester:
                 f"neutral afterwards, so the gate never opened ({seen}). Either the command is not "
                 "reaching node 2 or the board stays disarmed.",
             )
-        if not self._release_to_neutral():
+        if not self._release_to_neutral(self._ramp_budget_s(SMOKE_SINGLE_PWM_US, sim_rate, slack_s)):
             return CheckResult(
                 name,
                 False,
@@ -1120,12 +1274,21 @@ class VehicleStimulusTester:
         return CheckResult(
             name,
             True,
-            f"gate held neutral for the first {ESC_ARMING_SIM_MS} ms of sim time against a resent "
-            f"{SMOKE_SINGLE_PWM_US} us command, then took effect at sim_time_ms={opened.sim_time_ms} "
-            f"({list(opened.pwms)}) and released back to neutral",
+            f"gate held neutral across {len(inside)} observation(s) inside the first "
+            f"{ESC_ARMING_SIM_MS} ms of sim time against a resent {SMOKE_SINGLE_PWM_US} us command, "
+            f"then took effect at sim_time_ms={opened.sim_time_ms} ({list(opened.pwms)}) and "
+            "released back to neutral",
         )
 
-    def test_node2_pwm(self, channel: int, pulse_us: int, duration_s: float = 1.0) -> CheckResult:
+    def test_node2_pwm(
+        self,
+        channel: int,
+        pulse_us: int,
+        duration_s: float = 1.0,
+        timeout_s: float = RAMP_TIMEOUT_S,
+        sim_rate: float = SIM_MS_PER_WALL_S,
+        slack_s: float = SIM_WALL_SLACK_S,
+    ) -> CheckResult:
         """
         Drive one thruster channel and require it to hold.
 
@@ -1135,10 +1298,16 @@ class VehicleStimulusTester:
         evidence of anything.  The command is resent at 20 Hz and every snapshot
         inside the observation window must hold the commanded value, and the other
         seven channels must stay at neutral throughout.
+
+        ``sim_rate``/``slack_s``/``timeout_s`` exist so the failure branches are
+        testable without waiting out a slew ramp of half a second of virtual time.
         """
         channel = _validate_channel(channel)
         pulse_us = _validate_pulse_us(pulse_us)
         name = f"node2_pwm_ch{channel}"
+        refused = self._require_output_readback(name)
+        if refused is not None:
+            return refused
         pwms = [NEUTRAL_US] * NUM_THRUSTERS
         pwms[channel] = pulse_us
         command = ThrusterCommand(pwm_us=pwms).pack()
@@ -1147,7 +1316,7 @@ class VehicleStimulusTester:
             self.backend.send_frame(CAN_ID_THRUSTER_CMD, command)
 
         reached = self._await_output(
-            lambda snapshot: snapshot.pwms[channel] == pulse_us, RAMP_TIMEOUT_S, send=send_command
+            lambda snapshot: snapshot.pwms[channel] == pulse_us, timeout_s, send=send_command
         )
         if reached is None:
             last = self.backend.latest_outputs()
@@ -1155,7 +1324,7 @@ class VehicleStimulusTester:
             return CheckResult(
                 name,
                 False,
-                f"channel {channel} never reached {pulse_us} us within {RAMP_TIMEOUT_S:.1f} s "
+                f"channel {channel} never reached {pulse_us} us within {timeout_s:.1f} s "
                 f"({seen}). The 2 us/ms slew ramp (rov_parameters.h:45) needs "
                 f"{abs(pulse_us - NEUTRAL_US) // PWM_SLEW_RATE_US_PER_MS} ms of sim time, and the "
                 "command is only accepted once the ESC gate is open (app.c:127-129).",
@@ -1190,7 +1359,7 @@ class VehicleStimulusTester:
                 f"channel(s) {polluted} moved off {NEUTRAL_US} us while only channel {channel} was "
                 "commanded; the board must apply an 8-channel frame per channel",
             )
-        if not self._release_to_neutral():
+        if not self._release_to_neutral(self._ramp_budget_s(pulse_us, sim_rate, slack_s)):
             return CheckResult(
                 name,
                 False,
@@ -1205,7 +1374,14 @@ class VehicleStimulusTester:
             "7 channels at neutral, then released to neutral",
         )
 
-    def test_node2_all(self, pulse_us: int, duration_s: float = 1.0) -> CheckResult:
+    def test_node2_all(
+        self,
+        pulse_us: int,
+        duration_s: float = 1.0,
+        timeout_s: float = RAMP_TIMEOUT_S,
+        sim_rate: float = SIM_MS_PER_WALL_S,
+        slack_s: float = SIM_WALL_SLACK_S,
+    ) -> CheckResult:
         """
         Drive all eight channels and require the whole vector to hold.
 
@@ -1215,6 +1391,9 @@ class VehicleStimulusTester:
         """
         pulse_us = _validate_pulse_us(pulse_us)
         name = "node2_all"
+        refused = self._require_output_readback(name)
+        if refused is not None:
+            return refused
         command = ThrusterCommand(pwm_us=[pulse_us] * NUM_THRUSTERS).pack()
 
         def send_command() -> None:
@@ -1222,7 +1401,7 @@ class VehicleStimulusTester:
 
         target = (pulse_us,) * NUM_THRUSTERS
         reached = self._await_output(
-            lambda snapshot: tuple(snapshot.pwms) == target, RAMP_TIMEOUT_S, send=send_command
+            lambda snapshot: tuple(snapshot.pwms) == target, timeout_s, send=send_command
         )
         if reached is None:
             last = self.backend.latest_outputs()
@@ -1231,7 +1410,7 @@ class VehicleStimulusTester:
                 name,
                 False,
                 f"the board never reached {pulse_us} us on all {NUM_THRUSTERS} channels within "
-                f"{RAMP_TIMEOUT_S:.1f} s ({seen}). The 2 us/ms slew ramp (rov_parameters.h:45) needs "
+                f"{timeout_s:.1f} s ({seen}). The 2 us/ms slew ramp (rov_parameters.h:45) needs "
                 f"{abs(pulse_us - NEUTRAL_US) // PWM_SLEW_RATE_US_PER_MS} ms of sim time.",
             )
         samples = self._pump(time.monotonic() + max(0.0, duration_s), send=send_command)
@@ -1253,7 +1432,7 @@ class VehicleStimulusTester:
                 f"{len(drifted)}/{len(samples)} snapshot(s) disagreed, channel(s) {channels} at "
                 f"sim_time_ms={first_bad.sim_time_ms} showing {list(first_bad.pwms)}",
             )
-        if not self._release_to_neutral():
+        if not self._release_to_neutral(self._ramp_budget_s(pulse_us, sim_rate, slack_s)):
             return CheckResult(
                 name,
                 False,
@@ -1294,6 +1473,21 @@ class VehicleStimulusTester:
             raise ValueError(
                 f"solenoid mask 0x{mask:X} is outside the 10-bit field (rov_parameters.h:54)"
             )
+        if mask == 0:
+            # 0x0000 is the released state the board already holds
+            # (app.c:72 zeroes it at init), so commanding it produces no state
+            # change to observe: the readback would satisfy any predicate on the
+            # first snapshot from a board that never received the frame. It is
+            # refused here rather than reported as a successful actuation.
+            raise ValueError(
+                "solenoid mask 0x0000 is refused: it commands the released state the board "
+                "already holds (app.c:72), so it cannot be evidenced by a readback - a de-energised "
+                "mask and an ignored frame look identical. Pass a mask that energises at least one "
+                f"coil, such as 0x{SMOKE_SOLENOID_MASK:04X} (valve 0 coil A)."
+            )
+        refused = self._require_output_readback(name)
+        if refused is not None:
+            return refused
         conflict = conflicting_solenoid_valve(mask)
         if conflict is not None:
             pair_mask = 0x3 << (2 * conflict)
@@ -1309,11 +1503,29 @@ class VehicleStimulusTester:
                 f"0x{SMOKE_SOLENOID_MASK:04X} (valve 0 coil A).",
             )
 
+        coils = energised_coils(mask)
         neutral = ThrusterCommand(pwm_us=list(NEUTRAL_PWMS)).pack()
 
         def send_neutral() -> None:
             self.backend.send_frame(CAN_ID_THRUSTER_CMD, neutral)
 
+        # Read the pre-command state before writing, so the pass can require an
+        # observed transition rather than merely a value that was already true.
+        # Bounded, because a missing readback is a failed check, not a hang.
+        pre_existing = self._await_output(lambda snapshot: True, min(timeout_s, 0.5))
+        if pre_existing is None:
+            return self._no_readback_failure(name, min(timeout_s, 0.5))
+        previous_mask = pre_existing.solenoids
+        if previous_mask == mask:
+            return CheckResult(
+                name,
+                False,
+                f"the board already reports solenoid mask 0x{mask:04X} at sim_time_ms="
+                f"{pre_existing.sim_time_ms}, before this check sent anything. Commanding the state "
+                "the board is already in produces an identical readback, so the frame cannot be "
+                "distinguished from one that was ignored. Pick a mask the board is not holding, or "
+                "restart the engine to clear the latched mask.",
+            )
         self.backend.send_frame(CAN_ID_SOLENOID_CMD, SolenoidCommand(solenoid_mask=mask).pack())
         actuated = self._await_output(
             lambda snapshot: snapshot.solenoids == mask, timeout_s, send=send_neutral
@@ -1343,10 +1555,11 @@ class VehicleStimulusTester:
         return CheckResult(
             name,
             True,
-            f"0x110 mask 0x{mask:04X} was reported back by the board at sim_time_ms="
-            f"{actuated.sim_time_ms} and released back to 0x0000 at sim_time_ms="
-            f"{released.sim_time_ms}; the mask energises one coil per valve so the "
-            "rov_can_unpack_solenoid_cmd interlock accepts it",
+            f"0x110 mask 0x{mask:04X} energised {', '.join(coils)} and the board reported that mask "
+            f"back at sim_time_ms={actuated.sim_time_ms}, a change from the pre-command "
+            f"0x{previous_mask:04X} observed at sim_time_ms={pre_existing.sim_time_ms}. The mask "
+            "energises one coil per valve, so rov_can_unpack_solenoid_cmd accepts it, and it was "
+            f"released back to 0x0000 at sim_time_ms={released.sim_time_ms}.",
         )
 
     def monitor_node2_depth(self, duration_s: float = 2.0) -> CheckResult:
@@ -1535,24 +1748,56 @@ class VehicleStimulusTester:
         )
 
     # -- vehicle-wide safety ----------------------------------------------
-    def test_emergency_break(self, timeout_s: float = EMERGENCY_TIMEOUT_S) -> CheckResult:
+    def test_emergency_break(
+        self,
+        timeout_s: float = EMERGENCY_TIMEOUT_S,
+        sim_rate: float = SIM_MS_PER_WALL_S,
+        slack_s: float = SIM_WALL_SLACK_S,
+        unauthorized_window_s: float = UNAUTHORIZED_FRAME_WINDOW_S,
+        estop_window_s: float = ESTOP_LATCH_WINDOW_S,
+        first_output_timeout_s: float = FIRST_OUTPUT_TIMEOUT_S,
+    ) -> CheckResult:
         """
         Trip the emergency break with the authorized frame and require a latch.
 
         ``nodes/node2_control_board/Core/Src/app.c:110-119`` only reacts to 0x001
         when the payload begins ``0xAA 0x55``; it then trips the hardware brake,
-        sets ``ESC_STATE_DISARMED``, and forces neutral.  Asserts, in order:
+        sets ``ESC_STATE_DISARMED``, and forces neutral.
 
-        1. the brake is not already latched, so a later trip can be attributed to
-           this frame rather than to whatever tripped it earlier;
+        The post-ESTOP sub-claim is the whole reason this check is hard, and it is
+        worthless without a precondition.  ``app.c:127-129`` refuses thruster
+        commands whenever ``g_esc_state != ESC_STATE_ACTIVE`` - not only while the
+        break is active - and ``app.c:192-193`` forces neutral for the whole
+        arming period.  So "a 1800 us command afterwards did not resume thrust"
+        proves the latch *only* if the board was demonstrably ACTIVE and accepting
+        thrust immediately before the trip.  Against a board that never went
+        ACTIVE the same observation is what a disarmed board always looks like.
+
+        This check therefore arranges its own precondition and fails rather than
+        dropping the claim:
+
+        1. the brake is not already latched, so a later trip is attributable to
+           this frame;
         2. an *unauthorized* payload (``0xAA 0x56``) does NOT trip it - this is
            what makes the trip meaningful instead of coincidental;
-        3. exactly ``b"\\xAA\\x55\\x01"`` latches the brake with all eight channels
+        3. the board is driven to a **non-neutral readback**, which is the proof
+           that it was ACTIVE and accepting thrust.  If that cannot be observed
+           within its own bounded budget the check FAILS and says the post-ESTOP
+           claim is unobservable; it does not report a partial pass;
+        4. exactly ``b"\\xAA\\x55\\x01"`` latches the brake with all eight channels
            at neutral;
-        4. a full-thrust command sent afterwards does not resume thrust, proving
-           the latch rather than a momentary clamp.
+        5. a full-thrust command sent afterwards does not resume thrust - now a
+           statement about the latch, because step 3 established the board would
+           otherwise have moved.
+
+        ``sim_rate``, ``slack_s``, ``unauthorized_window_s`` and ``estop_window_s``
+        exist so the tests can drive these branches without waiting out 3000 ms of
+        virtual time; production callers use the module defaults.
         """
         name = "emergency_break"
+        refused = self._require_output_readback(name)
+        if refused is not None:
+            return refused
         initial = self._first_output(timeout_s)
         if initial is None:
             return self._no_readback_failure(name, timeout_s)
@@ -1568,7 +1813,7 @@ class VehicleStimulusTester:
         self.backend.send_frame(CAN_ID_EMERGENCY_BREAK, UNAUTHORIZED_FRAME)
         false_trips: List[OutputStatus] = []
         self._pump(
-            time.monotonic() + UNAUTHORIZED_FRAME_WINDOW_S,
+            time.monotonic() + unauthorized_window_s,
             on_output=lambda snapshot: false_trips.append(snapshot)
             if snapshot.brake_active
             else None,
@@ -1580,6 +1825,18 @@ class VehicleStimulusTester:
                 f"an unauthorized 0xAA 0x56 frame tripped the brake at sim_time_ms="
                 f"{false_trips[0].sim_time_ms}; app.c:112 requires the 0xAA 0x55 signature, so the "
                 "authorization check is not holding.",
+            )
+
+        armed = self._arm_before_trip(sim_rate, slack_s, first_output_timeout_s)
+        if not isinstance(armed, OutputStatus):
+            return armed
+        if not self._release_to_neutral(self._ramp_budget_s(POST_ESTOP_PROBE_PWM_US, sim_rate, slack_s)):
+            return CheckResult(
+                name,
+                False,
+                f"the board accepted thrust ({list(armed.pwms)} at sim_time_ms={armed.sim_time_ms}) "
+                f"but did not return to {NEUTRAL_US} us before the emergency frame, so the trip "
+                "would be observed from an unknown starting state",
             )
 
         self.backend.send_frame(CAN_ID_EMERGENCY_BREAK, EMERGENCY_FRAME)
@@ -1605,7 +1862,7 @@ class VehicleStimulusTester:
         resumed: List[OutputStatus] = []
         probe = ThrusterCommand(pwm_us=[POST_ESTOP_PROBE_PWM_US] * NUM_THRUSTERS).pack()
         self._pump(
-            time.monotonic() + ESTOP_LATCH_WINDOW_S,
+            time.monotonic() + estop_window_s,
             send=lambda: self.backend.send_frame(CAN_ID_THRUSTER_CMD, probe),
             on_output=lambda snapshot: resumed.append(snapshot)
             if tuple(snapshot.pwms) != NEUTRAL_PWMS
@@ -1624,34 +1881,96 @@ class VehicleStimulusTester:
             name,
             True,
             f"{EMERGENCY_FRAME.hex(' ').upper()} latched the brake at sim_time_ms="
-            f"{latched.sim_time_ms} with all channels at {NEUTRAL_US} us; the unauthorized "
-            f"{UNAUTHORIZED_FRAME.hex(' ').upper()} frame was correctly ignored, and a "
-            f"{POST_ESTOP_PROBE_PWM_US} us command afterwards did not resume thrust",
+            f"{latched.sim_time_ms} with all channels at {NEUTRAL_US} us. The unauthorized "
+            f"{UNAUTHORIZED_FRAME.hex(' ').upper()} frame was correctly ignored. The latch claim is "
+            f"earned: the board was observed at {list(armed.pwms)} (ESC ACTIVE, accepting thrust) "
+            f"at sim_time_ms={armed.sim_time_ms}, immediately before the trip, and a "
+            f"{POST_ESTOP_PROBE_PWM_US} us command afterwards did not resume thrust.",
         )
+
+    def _arm_before_trip(
+        self, sim_rate: float, slack_s: float, first_output_timeout_s: float
+    ) -> object:
+        """
+        Drive the board to a non-neutral readback, or explain why that is impossible.
+
+        This is the precondition the post-ESTOP sub-claim needs, and this check
+        establishes it for itself rather than assuming it.  Returns the
+        ``OutputStatus`` that proves the board was ACTIVE, or a FAILED
+        ``CheckResult`` - never a silent skip, because a skipped precondition
+        would turn the latch claim into an unearned one.
+        """
+        name = "emergency_break_precondition"
+        probe = ThrusterCommand(pwm_us=[POST_ESTOP_PROBE_PWM_US] * NUM_THRUSTERS).pack()
+        first = self._first_output(first_output_timeout_s)
+        if first is None:
+            return self._no_readback_failure(name, first_output_timeout_s)
+        if first.brake_active:
+            return CheckResult(
+                name,
+                False,
+                f"the brake is tripped at sim_time_ms={first.sim_time_ms}, so the board is "
+                "permanently DISARMED (app.c:116) and can never accept thrust again. Restart the "
+                "engine to clear the latch.",
+            )
+        remaining_sim_ms = max(0, ESC_ARMING_SIM_MS - first.sim_time_ms)
+        # Budget covers the rest of the arming window plus the slew ramp, both
+        # converted from virtual time to wall time.
+        budget_s = (
+            remaining_sim_ms / 1000.0
+            + abs(POST_ESTOP_PROBE_PWM_US - NEUTRAL_US) / PWM_SLEW_RATE_US_PER_MS
+        ) / max(1e-6, sim_rate) + slack_s
+        armed = self._await_output(
+            lambda snapshot: any(pulse != NEUTRAL_US for pulse in snapshot.pwms),
+            budget_s,
+            send=lambda: self.backend.send_frame(CAN_ID_THRUSTER_CMD, probe),
+        )
+        if armed is None:
+            last = self.backend.latest_outputs()
+            seen = "no 0x7FE readback" if last is None else last.describe()
+            return CheckResult(
+                name,
+                False,
+                f"the board never accepted a {POST_ESTOP_PROBE_PWM_US} us command within "
+                f"{budget_s:.1f} s of wall time, starting from sim_time_ms={first.sim_time_ms} "
+                f"({seen}). The post-ESTOP latch claim is therefore UNOBSERVABLE against a board "
+                "that never reached ESC_STATE_ACTIVE: app.c:127-129 refuses thruster commands "
+                "whenever the ESC state is not ACTIVE and app.c:192-193 holds neutral throughout "
+                "arming, so a 1800 us frame after the trip proves nothing here. This check is "
+                "reported as FAILED rather than as a partial pass.",
+            )
+        return armed
 
     # -- ad hoc ------------------------------------------------------------
     def raw_send(self, can_id: int, payload: bytes) -> CheckResult:
         """
-        Write one raw frame and report only that the write happened.
+        Write one operator-supplied raw frame and report only that it was written.
 
-        No readback is claimed: a stimulus tool asserting "the frame went out" is
-        a statement about the transport, so that is exactly what is asserted.
-        Anything stronger would need a check written against the real firmware.
+        No readback is claimed: asserting "the frame went out" is a statement
+        about the transport, so that is exactly what is asserted, and the text
+        names the real destination - a UART port, which carries no arbitration id,
+        is described as such rather than being reported as "CAN 0xNNN".
+
+        ``raw_send`` is the one place a non-SIL transport may still write.  That
+        is deliberate: the operator typed the exact id and bytes, and the tool is a
+        pipe for them.  Every *check* refuses to actuate without a readback; this
+        does not second-guess an explicit frame, it just refuses to misdescribe it.
 
         The two safety-critical IDs are gated on their authorization signature,
         because the firmware silently ignores an unsigned frame
         (``node2 app.c:112`` and ``:121``).  Writing one and reporting success
         would be the same defect as a check that reports a pass it did not earn.
         """
-        name = f"raw_send_0x{can_id:03X}"
+        name = f"raw_send_0x{can_id:03X}" if isinstance(can_id, int) and can_id >= 0 else f"raw_send_{can_id}"
         payload = validate_payload(payload)
+        can_id = validate_can_id(can_id)
         shown = payload.hex(" ").upper() or "<empty>"
         required = SAFETY_SIGNATURES.get(can_id)
         if required is not None and not payload.startswith(required):
             return CheckResult(
                 name,
                 False,
-                f"CAN 0x{can_id:03X} is only acted on when the payload starts with the "
+                f"{describe_can_id(can_id)} is only acted on when the payload starts with the "
                 f"authorization signature {required.hex(' ').upper()} (node2 app.c:112/:121), so "
                 f"the {len(payload)}-byte payload {shown} would have been ignored. Nothing was "
                 "written; add the signature or pick a different CAN id.",
@@ -1660,8 +1979,8 @@ class VehicleStimulusTester:
         return CheckResult(
             name,
             True,
-            f"wrote {len(payload)} byte(s) {shown} to CAN 0x{can_id:03X} with no transport error; "
-            "this asserts the write only, not any vehicle response",
+            f"wrote {len(payload)} byte(s) {shown} to {self.backend.describe_destination(can_id)} "
+            "with no transport error; this asserts the write only, not any vehicle response",
         )
 
     def sniff(self, duration_s: float = 1.0) -> CheckResult:
@@ -1720,7 +2039,7 @@ class VehicleStimulusTester:
             ("node2_solenoid", lambda: self.test_node2_solenoid(solenoid_mask)),
             ("emergency_break", self.test_emergency_break),
         ]
-        return StimulusReport([self.guard(name, action) for name, action in sequence])
+        return self.run_plan(sequence)
 
 
 # --------------------------------------------------------------------------
@@ -1775,7 +2094,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=("sil", "can", "uart"),
         default="sil",
-        help="sil drives the native SIL engine over TCP (default); can and uart need optional hardware packages",
+        help=(
+            "sil drives the native SIL engine over TCP and is the only mode that can verify an "
+            "actuation, because the CAN 0x7FE output-status readback exists only there. can and "
+            "uart are RECEIVE-ONLY: they observe a real link, and every check that would need to "
+            "actuate a thruster or a valve refuses before sending a frame. Both need optional "
+            "hardware packages (python-can, pyserial)."
+        ),
     )
     parser.add_argument("--host", default=DEFAULT_SIL_HOST, help="SIL engine host")
     parser.add_argument("--port", type=int, default=DEFAULT_SIL_PORT, help="SIL engine TCP port")
@@ -1875,32 +2200,71 @@ def run_selected_action(tester: VehicleStimulusTester, args: argparse.Namespace)
         )
     if getattr(args, "sniff", None) is not None:
         plan.append(("sniff", lambda: tester.sniff(float(args.sniff))))
-    return StimulusReport([tester.guard(name, action) for name, action in plan])
+    return tester.run_plan(plan)
 
 
-def print_report(report: StimulusReport) -> None:
-    print(report.format())
+def print_report(report: StimulusReport, include_checks: bool = True) -> None:
+    print(report.format(include_checks=include_checks))
+
+
+def selected_action_flags(args: argparse.Namespace) -> List[str]:
+    """
+    Which action flags were supplied.
+
+    A flag counts as selected unless it is absent or a bare ``False``.  Truthiness
+    is the wrong test: ``--sniff 0``, ``--node2-depth 0`` and ``--node2-all 0`` are
+    real requests, and reporting them as "no action was selected" would hide the
+    operator's intent behind a usage error.  ``run_selected_action`` already uses
+    ``is not None``, and the two must agree.
+    """
+    selected = []
+    for flag in ACTION_FLAGS:
+        value = getattr(args, flag.lstrip("-").replace("-", "_"), None)
+        if value is None or value is False:
+            continue
+        selected.append(flag)
+    return selected
 
 
 def main(argv: Optional[Sequence[str]] = None, backend_factory=None) -> int:
     """
     Canonical CLI entry point. Returns 0 only when every requested check passed.
 
-    Three independent layers guarantee a crashed or timed-out check can never
-    look like a success: each check converts its own observation failures into
-    failed results, ``tester.guard`` converts anything that still escapes into a
-    failed result, and the ``except`` clauses here turn a failure to even reach
-    the transport, or to run the sequence at all, into a nonzero exit.
+    Four independent layers guarantee a crashed or timed-out check can never look
+    like a success: each check converts its own observation failures into failed
+    results, ``tester.guard`` converts anything that still escapes into a failed
+    result, and the ``except`` clauses here turn a failure to reach the transport,
+    or to run the sequence at all, into a nonzero exit.  On top of that, every
+    result is streamed as it completes, so a run that is killed part way through
+    still leaves per-check evidence behind.
 
     ``backend_factory`` is resolved from the module global on every call rather
     than captured as a default argument, so a test can substitute a transport.
     """
     backend_factory = backend_factory or build_backend
     args = build_parser().parse_args(argv)
-    if not args.auto and not any(getattr(args, flag.lstrip("-").replace("-", "_"), None) for flag in ACTION_FLAGS):
+    selected = selected_action_flags(args)
+    if args.auto and selected:
+        # --auto runs the whole sequence; a flag alongside it would be dropped in
+        # silence, which is how an operator ends up believing a check ran.
+        print(
+            f"[WARN] --auto runs the full sequence, so these flags are ignored: "
+            f"{', '.join(selected)}. Drop --auto to run only the flags you listed."
+        )
+        selected = []
+    if not args.auto and not selected:
         print(
             "[FAIL] no action was selected, so nothing was verified. Pass --auto for the whole "
             f"vehicle, or one of: {', '.join(ACTION_FLAGS)}."
+        )
+        return 2
+    if args.auto and args.mode != "sil":
+        print(
+            f"[FAIL] --auto needs the {describe_can_id(CAN_ID_SIL_OUTPUT_STATUS)} output-status "
+            f"readback, which is a SIL-only channel, so it cannot run in --mode {args.mode}. "
+            "--auto drives thrusters and a pneumatic valve; running it where the result cannot be "
+            "read back would be a blind actuation. Use --mode sil, or select the receive-only "
+            "checks individually."
         )
         return 2
 
@@ -1923,7 +2287,9 @@ def main(argv: Optional[Sequence[str]] = None, backend_factory=None) -> int:
                 backend.close()
         return 1
 
-    tester = VehicleStimulusTester(backend)
+    # Streamed as each check completes: a 30 s run must not print nothing until
+    # the end, or a killed process leaves no evidence of what had already run.
+    tester = VehicleStimulusTester(backend, on_result=lambda result: print(format_result(result)))
     try:
         if args.auto:
             report = tester.run_full_smoke()
@@ -1936,7 +2302,13 @@ def main(argv: Optional[Sequence[str]] = None, backend_factory=None) -> int:
         with contextlib.suppress(Exception):
             backend.close()
 
-    print_report(report)
+    print(f"Summary: {len(report.results)} check(s), {len(report.passed)} passed, "
+          f"{len(report.failures)} failed")
+    if report.failures:
+        names = ", ".join(failure.name for failure in report.failures)
+        print(f"[FAIL] {len(report.failures)} check(s) failed: {names}")
+        for failure in report.failures:
+            print(f"[FAIL] {failure.name} failed: {failure.detail}")
     return 0 if report.ok else 1
 
 
