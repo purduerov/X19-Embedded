@@ -220,11 +220,43 @@ void node2_app_step(void) {
     delay_ms(1);
 }
 
-#ifndef ROV_UNIT_TEST
+/* #ifndef ROV_UNIT_TEST
 void app_main(void) {
     node2_app_init();
     while (1) {
         node2_app_step();
+    }
+}
+#endif */
+
+#ifndef ROV_UNIT_TEST
+void app_main(void) {
+    bsp_init();
+
+    while (1) {
+        /* Neutral: allow ESC to initialize */
+        bsp_pwm_set_us(0, 1500);
+        delay_ms(5000);
+
+        /* Ramp from neutral to max forward */
+        for (uint16_t pwm = 1500; pwm <= 1900; pwm += 5) {
+            bsp_pwm_set_us(0, pwm);
+            delay_ms(50);
+        }
+
+        /* Hold max forward briefly */
+        bsp_pwm_set_us(0, 1900);
+        delay_ms(5000);
+
+        /* Ramp back down to neutral */
+        for (int pwm = 1900; pwm >= 1500; pwm -= 5) {
+            bsp_pwm_set_us(0, (uint16_t)pwm);
+            delay_ms(50);
+        }
+
+        /* Stay stopped before repeating */
+        bsp_pwm_set_us(0, 1500);
+        delay_ms(5000);
     }
 }
 #endif

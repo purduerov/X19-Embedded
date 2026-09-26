@@ -61,11 +61,11 @@ void bsp_init(void) {
 }
 
 uint32_t time_get_ms(void) {
-#if defined(HAL_GetTick) || defined(STM32C5) || defined(STM32G4)
+// #if defined(HAL_GetTick) || defined(STM32C5) || defined(STM32G4) */
     return HAL_GetTick();
-#else
-    return 0;
-#endif
+// #else
+    // return 0;
+// #endif
 }
 
 uint64_t time_get_us(void) {
@@ -73,11 +73,11 @@ uint64_t time_get_us(void) {
 }
 
 void delay_ms(uint32_t ms) {
-#if defined(HAL_Delay) || defined(STM32C5) || defined(STM32G4)
+// #if defined(HAL_Delay) || defined(STM32C5) || defined(STM32G4)
     HAL_Delay(ms);
-#else
-    (void)ms;
-#endif
+// #else
+    // (void)ms;
+// #endif
 }
 
 bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {
