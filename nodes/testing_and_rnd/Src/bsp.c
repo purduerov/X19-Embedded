@@ -4,10 +4,10 @@
  * Encapsulates STM32 HAL peripheral calls away from application logic.
  */
 
-#include "stm32f4xx_hal.h"
 #include "bsp.h"
 #include "can_interface.h"
 #include "main.h"
+#include "stm32f4xx_hal.h"
 #include <stdio.h>
 
 void bsp_init(void) {
@@ -146,7 +146,8 @@ uint8_t bsp_i2c_scan(void) {
 }
 
 bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {
-    if (!data && len > 0) return false;
+    if (!data && len > 0)
+        return false;
 
     /* START */
     i2c_sda(true);
@@ -199,7 +200,8 @@ bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {
 }
 
 bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
-    if (!data && len > 0) return false;
+    if (!data && len > 0)
+        return false;
 
     /* START */
     i2c_sda(true);
@@ -240,7 +242,7 @@ bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
         if (b + 1 < len) {
             i2c_sda(false); /* ACK */
         } else {
-            i2c_sda(true);  /* NACK on last */
+            i2c_sda(true); /* NACK on last */
         }
         i2c_scl(true);
         i2c_scl(false);
@@ -315,4 +317,3 @@ bool bsp_lm74700_status_ok(void) {
 float bsp_get_pcb_temperature_c(void) {
     return 24.5f;
 }
-
