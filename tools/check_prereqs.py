@@ -17,6 +17,7 @@ gate their own onboarding on it.
 
 from __future__ import annotations
 
+import glob
 import os
 import shutil
 import subprocess
@@ -25,22 +26,67 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# STM32CubeProgrammer's CLI is normally not on PATH. On Windows it installs to a
-# fixed location, so look there too before declaring it missing.
-CUBE_PROGRAMMER_PATHS = {
+
+def platform_key() -> str:
+    """Canonical platform name.
+
+    ``sys.platform`` is "win32" on Windows, "darwin" on macOS and "linux" on
+    Linux -- NOT the capitalised names used as the keys below. Keying the tables
+    off sys.platform directly silently matches nothing on every platform, which
+    would make the CubeProgrammer default-path probe never run and report a
+    correctly installed programmer as missing.
+    """
+    if sys.platform.startswith("win"):
+        return "Windows"
+    if sys.platform == "darwin":
+        return "Darwin"
+    return "Linux"
+
+# Standard search paths and patterns for tools that may be installed but not yet on active PATH.
+ARM_GCC_SEARCH_PATTERNS = {
+    "Windows": [
+        r"C:\Program Files (x86)\Arm GNU Toolchain arm-none-eabi\*\bin\arm-none-eabi-gcc.exe",
+        r"C:\Program Files\Arm GNU Toolchain arm-none-eabi\*\bin\arm-none-eabi-gcc.exe",
+        r"C:\Program Files (x86)\GNU Arm Embedded Toolchain\*\bin\arm-none-eabi-gcc.exe",
+        r"C:\Program Files\GNU Arm Embedded Toolchain\*\bin\arm-none-eabi-gcc.exe",
+        r"C:\ST\STM32CubeCLT*\GNU-tools-for-STM32\bin\arm-none-eabi-gcc.exe",
+        r"C:\ST\STM32CubeCLT*\GNU-tools-arm-embedded\bin\arm-none-eabi-gcc.exe",
+        r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeCLT*\GNU-tools-for-STM32\bin\arm-none-eabi-gcc.exe",
+        r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeCLT*\GNU-tools-for-STM32\bin\arm-none-eabi-gcc.exe",
+    ],
+    "Darwin": [
+        "/Applications/ArmGNUToolchain/*/arm-none-eabi/bin/arm-none-eabi-gcc",
+        "/opt/ST/STM32CubeCLT*/GNU-tools-for-STM32/bin/arm-none-eabi-gcc",
+        "/opt/ST/STM32CubeCLT*/GNU-tools-arm-embedded/bin/arm-none-eabi-gcc",
+    ],
+    "Linux": [
+        "/opt/arm-none-eabi/bin/arm-none-eabi-gcc",
+        "/opt/st/stm32cubeclt*/GNU-tools-for-STM32/bin/arm-none-eabi-gcc",
+        "/opt/st/stm32cubeclt*/GNU-tools-arm-embedded/bin/arm-none-eabi-gcc",
+        "/usr/bin/arm-none-eabi-gcc",
+    ],
+}
+
+CUBE_PROGRAMMER_PATTERNS = {
     "Windows": [
         Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
         / "STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI.exe",
         Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
         / "STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI.exe",
+        r"C:\ST\STM32CubeCLT*\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+        r"C:\ST\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+        r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeCLT*\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+        r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeCLT*\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
     ],
     "Darwin": [
         Path("/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
         Path.home() / "Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI",
+        "/opt/ST/STM32CubeCLT*/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
     ],
     "Linux": [
         Path("/opt/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
         Path("/usr/local/bin/STM32_Programmer_CLI"),
+        "/opt/st/stm32cubeclt*/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
     ],
 }
 
@@ -54,15 +100,18 @@ INSTALL_HINTS = {
         "           brew install ninja | apt install ninja-build | winget install Ninja-build.Ninja"
     ),
     "arm-none-eabi-gcc": (
-        "REQUIRED to build node firmware. GNU Arm Embedded toolchain 13.x, on PATH:\n"
+        "REQUIRED to build node firmware. GNU Arm Embedded toolchain 13.x+, on PATH:\n"
         "           brew install --cask gcc-arm-embedded | apt install gcc-arm-none-eabi\n"
-        "           winget install Arm.GnuArmEmbeddedToolchain"
+        "           winget install Arm.GnuArmEmbeddedToolchain\n"
+        "           (Note: restart terminal or VS Code after winget install)"
     ),
     "STM32_Programmer_CLI": (
-        "REQUIRED to flash. Install STM32CubeProgrammer as a system application:\n"
-        "           winget install STMicroelectronics.STM32CubeProgrammer, or st.com\n"
-        "           The ST VS Code extension does NOT bundle it. If you install it\n"
-        "           somewhere else, update .vscode/tasks.json to match."
+        "REQUIRED to flash. Install STM32CubeCLT (Command Line Toolset) or STM32CubeProgrammer:\n"
+        "           Download from st.com:\n"
+        "           https://www.st.com/en/development-tools/stm32cubeclt.html\n"
+        "           or https://www.st.com/en/development-tools/stm32cubeprog.html\n"
+        "           The ST VS Code extension does NOT bundle it. If installed in a custom location,\n"
+        "           update .vscode/tasks.json to match."
     ),
     "python": "REQUIRED for the host SIL suites and the stimulus tool",
     "streamlit": (
@@ -84,13 +133,29 @@ def tool_version(argv: list[str]) -> str:
     return (out.stdout or out.stderr).strip().splitlines()[0] if (out.stdout or out.stderr) else ""
 
 
+def find_arm_gcc() -> tuple[Path | None, bool]:
+    on_path = shutil.which("arm-none-eabi-gcc")
+    if on_path:
+        return Path(on_path), True
+    for pattern in ARM_GCC_SEARCH_PATTERNS.get(platform_key(), []):
+        matches = glob.glob(str(pattern))
+        if matches:
+            matches.sort(reverse=True)
+            return Path(matches[0]), False
+    return None, False
+
+
 def find_cube_programmer() -> Path | None:
     on_path = shutil.which("STM32_Programmer_CLI")
     if on_path:
         return Path(on_path)
-    for candidate in CUBE_PROGRAMMER_PATHS.get(sys.platform, []):
-        if candidate.exists():
-            return candidate
+    for entry in CUBE_PROGRAMMER_PATTERNS.get(platform_key(), []):
+        if isinstance(entry, Path) and entry.exists():
+            return entry
+        matches = glob.glob(str(entry))
+        if matches:
+            matches.sort(reverse=True)
+            return Path(matches[0])
     return None
 
 
@@ -115,13 +180,13 @@ def main() -> int:
 
     rows.append(("cmake", tool_version(["cmake", "--version"]), bool(shutil.which("cmake"))))
     rows.append(("ninja", tool_version(["ninja", "--version"]), bool(shutil.which("ninja"))))
-    rows.append(
-        (
-            "arm-none-eabi-gcc",
-            tool_version(["arm-none-eabi-gcc", "--version"]),
-            bool(shutil.which("arm-none-eabi-gcc")),
-        )
-    )
+    arm_path, arm_on_path = find_arm_gcc()
+    if arm_path:
+        arm_ver = tool_version([str(arm_path), "--version"])
+        arm_detail = arm_ver if arm_on_path else f"{arm_ver} (at {arm_path}; restart terminal for PATH)"
+        rows.append(("arm-none-eabi-gcc", arm_detail, True))
+    else:
+        rows.append(("arm-none-eabi-gcc", "", False))
 
     programmer = find_cube_programmer()
     rows.append(

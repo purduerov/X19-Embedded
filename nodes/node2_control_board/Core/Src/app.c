@@ -268,7 +268,7 @@ void node2_app_step(void) {
 }
 
 #ifndef ROV_UNIT_TEST
-void app_main(void) {
+__attribute__((weak)) void app_main(void) {
     node2_app_init();
     while (1) {
         node2_app_step();

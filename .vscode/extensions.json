@@ -1,6 +1,20 @@
 {
+  "_comment": [
+    "marus25.cortex-debug is the one extension that is genuinely required for the",
+    "hardware debug configurations in launch.json. The STM32Cube extension is",
+    "deliberately NOT recommended: it contributes no settings of its own, so its",
+    "project auto-discovery cannot be configured off, and it treats every",
+    "CMakeLists.txt in the tree -- including the add_subdirectory fragments in",
+    "shared/, drivers/, tests/ and each nodes/*/ -- as a standalone project. Those",
+    "fragments have no project() call, so configuring them fails with",
+    "'No project() command is present'. Use the task palette and CMakePresets",
+    "instead; that is what the tasks in tasks.json drive.",
+    "",
+    "If you install the STM32Cube extension anyway, do not use its build view.",
+    "It will try to configure the fragments."
+  ],
   "recommendations": [
-    "stmicroelectronics.stm32-vscode-extension",
+    "marus25.cortex-debug",
     "ms-vscode.cmake-tools",
     "ms-vscode.cpptools",
     "twxs.cmake"

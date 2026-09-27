@@ -20,7 +20,31 @@ For the recommended VS Code build, SIL, and per-node USB DFU flashing workflow, 
 
 ---
 
-## 2. Software-in-the-Loop (SIL) Host Testing (Zero-Hardware Simulation)
+## 2. Declarative Developer CLI (`rov.toml` & `rov`)
+
+The embedded workspace includes a unified declarative CLI (`tools/rov.py`, wrapped via `.\rov.bat` on Windows or `python tools/rov.py`) backed by [`rov.toml`](rov.toml) to streamline switching between dev boards (NUCLEO-F411, NUCLEO-G474) and production vehicle targets (STM32C542):
+
+```powershell
+# Build target (defaults to active node & board configured in rov.toml)
+.\rov build
+
+# Switch nodes or boards on the fly
+.\rov build -n control_board -b f411
+.\rov build -n pi_shield -b stm32c5
+
+# Build, flash to connected ST-Link with hardware reset, and auto-open live serial monitor:
+.\rov run
+
+# Auto-detect connected ST-Link Virtual COM Port and stream serial output:
+.\rov monitor
+
+# Run all 25 Host SIL CTest unit test suites:
+.\rov test
+```
+
+---
+
+## 3. Software-in-the-Loop (SIL) Host Testing (Zero-Hardware Simulation)
 
 Developers can compile and execute the shared application logic, protocol code, and host-testable drivers natively on Linux, Windows, or macOS. SIL substitutes mock CAN, BSP, and sensor interfaces for the target peripherals. It does not build or validate STM32 startup code, vendor HAL integration, peripheral timing, or electrical behavior; use the cross-compile and hardware bench checks for those layers.
 

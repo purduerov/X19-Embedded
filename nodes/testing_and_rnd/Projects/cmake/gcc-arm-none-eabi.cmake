@@ -4,16 +4,54 @@ set(CMAKE_SYSTEM_PROCESSOR          arm)
 set(CMAKE_C_COMPILER_ID GNU)
 set(CMAKE_CXX_COMPILER_ID GNU)
 
-# Some default GCC settings
-# arm-none-eabi- must be part of path environment
-set(TOOLCHAIN_PREFIX                arm-none-eabi-)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 
-set(CMAKE_C_COMPILER                ${TOOLCHAIN_PREFIX}gcc)
-set(CMAKE_ASM_COMPILER              ${CMAKE_C_COMPILER})
-set(CMAKE_CXX_COMPILER              ${TOOLCHAIN_PREFIX}g++)
-set(CMAKE_LINKER                    ${TOOLCHAIN_PREFIX}g++)
-set(CMAKE_OBJCOPY                   ${TOOLCHAIN_PREFIX}objcopy)
-set(CMAKE_SIZE                      ${TOOLCHAIN_PREFIX}size)
+# Auto-detect arm-none-eabi-gcc from PATH or standard install paths
+find_program(ARM_GCC_EXECUTABLE arm-none-eabi-gcc
+    PATHS
+        "C:/ST/STM32CubeCLT_1.22.0/GNU-tools-for-STM32/bin"
+        "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.2 rel1/bin"
+        "C:/ST/STM32CubeCLT/GNU-tools-for-STM32/bin"
+        "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/*/bin"
+        "C:/Program Files/Arm GNU Toolchain arm-none-eabi/*/bin"
+        "C:/Program Files (x86)/GNU Arm Embedded Toolchain/*/bin"
+        "C:/Program Files/GNU Arm Embedded Toolchain/*/bin"
+        "/Applications/ArmGNUToolchain/*/arm-none-eabi/bin"
+        "/opt/st/stm32cubeclt*/GNU-tools-for-STM32/bin"
+        "/opt/arm-none-eabi/bin"
+        "/usr/bin"
+)
+
+if(ARM_GCC_EXECUTABLE)
+    get_filename_component(ARM_TOOLCHAIN_BIN_DIR "${ARM_GCC_EXECUTABLE}" DIRECTORY)
+    find_program(ARM_GXX_EXECUTABLE arm-none-eabi-g++ HINTS "${ARM_TOOLCHAIN_BIN_DIR}")
+    find_program(ARM_OBJCOPY arm-none-eabi-objcopy HINTS "${ARM_TOOLCHAIN_BIN_DIR}")
+    find_program(ARM_SIZE arm-none-eabi-size HINTS "${ARM_TOOLCHAIN_BIN_DIR}")
+
+    set(CMAKE_C_COMPILER "${ARM_GCC_EXECUTABLE}")
+    set(CMAKE_ASM_COMPILER "${ARM_GCC_EXECUTABLE}")
+    if(ARM_GXX_EXECUTABLE)
+        set(CMAKE_CXX_COMPILER "${ARM_GXX_EXECUTABLE}")
+        set(CMAKE_LINKER "${ARM_GXX_EXECUTABLE}")
+    else()
+        set(CMAKE_CXX_COMPILER arm-none-eabi-g++)
+        set(CMAKE_LINKER arm-none-eabi-g++)
+    endif()
+    if(ARM_OBJCOPY)
+        set(CMAKE_OBJCOPY "${ARM_OBJCOPY}")
+    endif()
+    if(ARM_SIZE)
+        set(CMAKE_SIZE "${ARM_SIZE}")
+    endif()
+else()
+    set(TOOLCHAIN_PREFIX                arm-none-eabi-)
+    set(CMAKE_C_COMPILER                ${TOOLCHAIN_PREFIX}gcc)
+    set(CMAKE_ASM_COMPILER              ${CMAKE_C_COMPILER})
+    set(CMAKE_CXX_COMPILER              ${TOOLCHAIN_PREFIX}g++)
+    set(CMAKE_LINKER                    ${TOOLCHAIN_PREFIX}g++)
+    set(CMAKE_OBJCOPY                   ${TOOLCHAIN_PREFIX}objcopy)
+    set(CMAKE_SIZE                      ${TOOLCHAIN_PREFIX}size)
+endif()
 
 set(CMAKE_EXECUTABLE_SUFFIX_ASM     ".elf")
 set(CMAKE_EXECUTABLE_SUFFIX_C       ".elf")

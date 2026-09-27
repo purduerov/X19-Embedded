@@ -4,8 +4,8 @@
  * @organization Purdue ROV
  */
 
-#ifndef APP_H
-#define APP_H
+#ifndef X19_NODE3_APP_H
+#define X19_NODE3_APP_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,4 +19,4 @@ void app_main(void);
 }
 #endif
 
-#endif /* APP_H */
+#endif /* X19_NODE3_APP_H */

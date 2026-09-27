@@ -53,6 +53,10 @@ bool can_send(uint32_t id, const uint8_t *data, uint8_t len) {
     return true;
 }
 
+bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len) {
+    return can_send(id, data, len);
+}
+
 bool can_receive(uint32_t *id, uint8_t *data, uint8_t *len) {
     if (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) == 0) {
         return false;

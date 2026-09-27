@@ -2,6 +2,71 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "ROV: Run (Build, Flash, & Monitor)",
+      "detail": "Builds active node in rov.toml, flashes to connected dev board, and opens live serial monitor.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/rov.py", "run"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "group": {"kind": "build", "isDefault": true},
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "ROV: Build Default Target",
+      "detail": "Compiles the active node and board configured in rov.toml.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/rov.py", "build"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "ROV: Flash Target",
+      "detail": "Builds and flashes the active node to the connected ST-Link dev board.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/rov.py", "flash"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "ROV: Open Serial Monitor",
+      "detail": "Auto-detects connected ST-Link COM port and opens live serial stream at 115200 baud.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/rov.py", "monitor"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
+      "label": "ROV: List Devices & COM Ports",
+      "detail": "Enumerates all connected ST-Link hardware probes and USB COM ports.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/rov.py", "devices"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
+      "label": "ROV: Run SIL Simulation Tests",
+      "detail": "Builds and executes all 25 native CTest suites on the host.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/rov.py", "test"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "group": {"kind": "test", "isDefault": true},
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Setup: Developer Environment",
+      "detail": "One-command setup: installs recommended extensions, installs Arm toolchain via package manager, and verifies prerequisites.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/setup_dev_env.py"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
       "label": "Check: Prerequisites",
       "detail": "Reports which of CMake, Ninja, arm-none-eabi-gcc, STM32_Programmer_CLI and Python are reachable, and what to install if not. Exits nonzero if a required tool is missing.",
       "type": "process",
@@ -37,6 +102,23 @@
       "problemMatcher": "$gcc"
     },
     {
+      "label": "Configure: ARM Nodes (C542)",
+      "detail": "Cross-compiles Node 1 Pi Shield and Node 3 Power Slab using arm-none-eabi toolchain.",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--preset", "arm-c542-debug"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Build: ARM Nodes (C542)",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "arm-c542-debug"],
+      "dependsOn": "Configure: ARM Nodes (C542)",
+      "dependsOrder": "sequence",
+      "problemMatcher": "$gcc"
+    },
+    {
       "label": "Configure: Node 2 Nucleo G474 (Debug)",
       "type": "process",
       "command": "cmake",
@@ -55,96 +137,106 @@
       "problemMatcher": "$gcc"
     },
     {
+      "label": "Build: Testing & R&D F446 Dev Board",
+      "detail": "Builds the STM32F446 dev board image (nodes/testing_and_rnd).",
+      "type": "process",
+      "command": "cmake",
+      "args": ["--build", "--preset", "arm-c542-debug", "--target", "testing_and_rnd"],
+      "dependsOn": "Configure: ARM Nodes (C542)",
+      "dependsOrder": "sequence",
+      "problemMatcher": "$gcc"
+    },
+    {
       "label": "Flash: Node 1 Pi Shield (STM32C542 USB DFU)",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=USB1", "-w", "${input:node1Firmware}", "-v", "-rst"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "USB1", "--file", "${input:node1Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
       "label": "Flash: Node 1 Pi Shield (ST-Link SWD)",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=SWD", "-w", "${input:node1Firmware}", "-v", "-rst"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "SWD", "--file", "${input:node1Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
       "label": "Flash: Node 2 Vehicle Control Board (STM32C542 USB DFU)",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=USB1", "-w", "${input:node2Firmware}", "-v", "-rst"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "USB1", "--file", "${input:node2Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
       "label": "Flash: Node 2 Vehicle Control Board (ST-Link SWD)",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=SWD", "-w", "${input:node2Firmware}", "-v", "-rst"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "SWD", "--file", "${input:node2Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
       "label": "Flash: Node 3 Power Slab (STM32C542 USB DFU)",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=USB1", "-w", "${input:node3Firmware}", "-v", "-rst"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "USB1", "--file", "${input:node3Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
       "label": "Flash: Node 3 Power Slab (ST-Link SWD)",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=SWD", "-w", "${input:node3Firmware}", "-v", "-rst"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "SWD", "--file", "${input:node3Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
       "label": "Flash: Node 2 Nucleo G474 Bench (ST-Link)",
       "detail": "The separate bench board, NOT the vehicle C542. Uses the Nucleo's onboard ST-LINK over SWD. Build it first with 'Build: Node 2 Nucleo G474 (Debug)'.",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=SWD", "-w", "${input:g474Firmware}", "-v", "-rst"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "SWD", "--file", "${input:g474Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash: Testing & R&D F446 Dev Board (ST-Link)",
+      "detail": "Flash the STM32F446 dev board image built from nodes/testing_and_rnd.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "SWD", "--file", "${input:f446Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash: Nucleo F411RE Dev Board (ST-Link)",
+      "detail": "Flash test firmware image to connected NUCLEO-F411RE via ST-Link.",
+      "type": "process",
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "SWD", "--file", "${input:f446Firmware}"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
       "label": "Flash: Any Firmware File (choose path and port)",
       "detail": "Flash ANY .elf/.hex/.bin: a built output, a test image, or a colleague's build. Type or paste the path. This is the task to reach for when you are not flashing a canonical node build.",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=${input:flashPort}", "-w", "${input:flashFile}", "-v", "-rst"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "${input:flashPort}", "--file", "${input:flashFile}"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
       "label": "Flash: Read back and verify (no write)",
       "detail": "READ ONLY. Reports the connected device and the first words of flash without programming anything. Run this before any flash if you are unsure what is attached.",
       "type": "process",
-      "command": "STM32_Programmer_CLI",
-      "windows": {
-        "command": "${env:ProgramFiles}\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe"
-      },
-      "args": ["-c", "port=${input:flashPort}", "-r32", "0x08000000", "16"],
+      "command": "python",
+      "args": ["tools/flash_firmware.py", "--port", "${input:flashPort}", "--read-only"],
+      "options": {"cwd": "${workspaceFolder}"},
       "problemMatcher": []
     },
     {
@@ -160,7 +252,7 @@
       "id": "flashFile",
       "type": "promptString",
       "description": "Path to ANY firmware image to flash (.elf, .hex or .bin)",
-      "default": "${workspaceFolder}/build/nodes/node1_pi_shield/node1_pi_shield.elf"
+      "default": "${workspaceFolder}/build/arm-c542-debug/nodes/node1_pi_shield/node1_pi_shield.elf"
     },
     {
       "id": "flashPort",
@@ -176,22 +268,28 @@
       "default": "${workspaceFolder}/nodes/node2_control_board/build/Debug/node2_control_board.elf"
     },
     {
+      "id": "f446Firmware",
+      "type": "promptString",
+      "description": "Path to the F446 testing & R&D image",
+      "default": "${workspaceFolder}/build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf"
+    },
+    {
       "id": "node1Firmware",
       "type": "promptString",
       "description": "Path to a built STM32C542 Node 1 ELF or HEX image",
-      "default": "${workspaceFolder}/build/nodes/node1_pi_shield/node1_pi_shield.elf"
+      "default": "${workspaceFolder}/build/arm-c542-debug/nodes/node1_pi_shield/node1_pi_shield.elf"
     },
     {
       "id": "node2Firmware",
       "type": "promptString",
       "description": "Path to a built STM32C542 vehicle Node 2 ELF or HEX image (not the G474 Nucleo bench image)",
-      "default": "${workspaceFolder}/build/nodes/node2_control_board/node2_control_board.elf"
+      "default": "${workspaceFolder}/build/arm-c542-debug/nodes/node2_control_board/node2_control_board.elf"
     },
     {
       "id": "node3Firmware",
       "type": "promptString",
       "description": "Path to a built STM32C542 Node 3 ELF or HEX image",
-      "default": "${workspaceFolder}/build/nodes/node3_power_slab/node3_power_slab.elf"
+      "default": "${workspaceFolder}/build/arm-c542-debug/nodes/node3_power_slab/node3_power_slab.elf"
     }
   ]
 }

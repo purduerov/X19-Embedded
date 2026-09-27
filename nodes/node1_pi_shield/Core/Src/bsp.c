@@ -102,4 +102,38 @@ bool bsp_is_emergency_brake_tripped(void) {
 #endif
 }
 
+bool bsp_i2c_probe(uint8_t addr) {
+#if defined(HAL_I2C_MODULE_ENABLED)
+    extern I2C_HandleTypeDef hi2c1;
+    return (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(addr << 1), 2, 5) == HAL_OK);
+#else
+    (void)addr;
+    return false;
+#endif
+}
+
+bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {
+#if defined(HAL_I2C_MODULE_ENABLED)
+    extern I2C_HandleTypeDef hi2c1;
+    return (HAL_I2C_Master_Transmit(&hi2c1, (uint16_t)(addr << 1), (uint8_t *)data, len, 50) == HAL_OK);
+#else
+    (void)addr;
+    (void)data;
+    (void)len;
+    return false;
+#endif
+}
+
+bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
+#if defined(HAL_I2C_MODULE_ENABLED)
+    extern I2C_HandleTypeDef hi2c1;
+    return (HAL_I2C_Master_Receive(&hi2c1, (uint16_t)(addr << 1), data, len, 50) == HAL_OK);
+#else
+    (void)addr;
+    (void)data;
+    (void)len;
+    return false;
+#endif
+}
+
 #endif /* ROV_UNIT_TEST */

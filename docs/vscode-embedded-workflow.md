@@ -52,9 +52,37 @@ The checked-in generated project is a **STM32G474RE Nucleo bench project**, usef
 
 Install `arm-none-eabi-gcc` and Ninja, connect the Nucleo to the PC, then choose **Terminal > Run Task > Build: Node 2 Nucleo G474 (Debug)**. The Nucleo's onboard ST-LINK can program that bench board. This is separate from the C542 USB DFU tasks for vehicle nodes.
 
+## Declarative Multi-Target CLI (`rov.toml` & `rov`)
+
+To switch rapidly between development boards (e.g. NUCLEO-F411, NUCLEO-F446, NUCLEO-G474) and production vehicle targets (STM32C542), use the declarative `rov` CLI tool (`rov.bat` on Windows or `python tools/rov.py`):
+
+```powershell
+# Build target configured in rov.toml
+.\rov build
+
+# Switch nodes or boards on the fly
+.\rov build -n pi_shield -b f411
+.\rov build -n control_board -b f411
+.\rov build -n pi_shield -b stm32c5
+
+# Build, flash via ST-Link with reset, and auto-open live serial monitor:
+.\rov run
+
+# Auto-detect connected ST-Link COM port and stream serial output:
+.\rov monitor
+
+# Run host SIL simulation test suite:
+.\rov test
+
+# Enumerate connected ST-Link probes and serial COM ports:
+.\rov devices
+```
+
+In VS Code, pressing `Ctrl+Shift+B` executes `ROV: Run (Build, Flash, & Monitor)` by default.
+
 ## Why this workflow
 
-ST's current VS Code extension supports CMake, project discovery, CMake target selection, ST-LINK support, and multi-folder workspaces. Shared libraries do not require moving to desktop CubeIDE. Desktop STM32CubeIDE remains an optional fallback.
+CMake and `rov.toml` remain the single source of truth for all builds across host SIL simulation and cross-compiled ARM hardware targets. Desktop STM32CubeIDE remains an optional fallback.
 
 References:
 

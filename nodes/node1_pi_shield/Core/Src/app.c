@@ -18,6 +18,7 @@
 #include "rov_parameters.h"
 #include "rov_safety.h"
 #include <math.h>
+#include <stdio.h>
 
 static rov_safety_state_t g_safety_state;
 static rov_env_telemetry_t g_env_telemetry;
@@ -119,9 +120,55 @@ void node1_leak_irq_handler(void) {
     }
 }
 
+uint8_t node1_i2c_scan(void) {
+    uint8_t count = 0;
+    printf("\r\n========================================\r\n");
+    printf("   Node 1 Pi Shield I2C Bus Scanner\r\n");
+    printf("========================================\r\n");
+    printf("     0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\r\n");
+
+    for (uint8_t row = 0; row < 128; row += 16) {
+        printf("%02X: ", row);
+        for (uint8_t col = 0; col < 16; col++) {
+            uint8_t addr = row + col;
+            if (addr < 0x08 || addr > 0x77) {
+                printf("   ");
+            } else if (bsp_i2c_probe(addr)) {
+                printf("%02X ", addr);
+                count++;
+            } else {
+                printf("-- ");
+            }
+        }
+        printf("\r\n");
+    }
+
+    printf("----------------------------------------\r\n");
+    printf("Scan complete: found %u device(s).\r\n", count);
+
+    for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+        if (bsp_i2c_probe(addr)) {
+            const char *desc = "Unknown device";
+            if (addr == 0x76 || addr == 0x77) {
+                desc = "Bosch BME280 (Pressure / Humidity / Temp)";
+            } else if (addr >= 0x40 && addr <= 0x47) {
+                desc = "TI INA237 / INA226 (Current / Voltage / Power Monitor)";
+            } else if (addr >= 0x48 && addr <= 0x4F) {
+                desc = "TI TMP1075 / BNO086 (Temperature / IMU Sensor)";
+            }
+            printf("  -> [0x%02X] %s\r\n", addr, desc);
+        }
+    }
+    printf("========================================\r\n\r\n");
+    return count;
+}
+
 void node1_app_init(void) {
     bsp_init();
     rov_safety_init(&g_safety_state);
+
+    /* Run I2C bus scan at startup to verify all sensors are reachable */
+    node1_i2c_scan();
 
     g_can_ready = can_init();
     if (!g_can_ready) {
@@ -239,7 +286,7 @@ void node1_app_step(void) {
 }
 
 #ifndef ROV_UNIT_TEST
-void app_main(void) {
+__attribute__((weak)) void app_main(void) {
     node1_app_init();
 
     while (1) {

@@ -24,6 +24,7 @@ __pycache__/
 !.vscode/launch.json
 !.vscode/extensions.json
 !.vscode/c_cpp_properties.json
+nodes/*/.vscode/
 .cache/
 .DS_Store
 

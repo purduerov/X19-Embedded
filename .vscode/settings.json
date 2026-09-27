@@ -24,9 +24,10 @@
     "cmake.useCMakePresets": "always",
     "cmake.sourceDirectory": "${workspaceFolder}",
     "cmake.configureOnOpen": false,
-    "cmake.preferredGenerators": ["Ninja"],
+    "cmake.preferredGenerators": [
+        "Ninja"
+    ],
     "cmake.freshKit": false,
-
     "C_Cpp.default.cStandard": "c11",
     "C_Cpp.default.cppStandard": "c++17",
     "C_Cpp.default.intelliSenseMode": "gcc-arm",
@@ -39,5 +40,14 @@
         "*.h": "c",
         "*.c": "c",
         "*.ioc": "xml"
-    }
+    },
+    "cortex-debug.armToolchainPath.windows": "C:/ST/STM32CubeCLT_1.22.0/GNU-tools-for-STM32/bin",
+    "cortex-debug.stlinkPath.windows": "C:/ST/STM32CubeCLT_1.22.0/STLink-gdb-server/bin/ST-LINK_gdbserver.exe",
+    "cortex-debug.stm32cubeprogrammer": "C:/ST/STM32CubeCLT_1.22.0/STM32CubeProgrammer/bin",
+    "cortex-debug.stm32cubeprogrammer.windows": "C:/ST/STM32CubeCLT_1.22.0/STM32CubeProgrammer/bin",
+    "cortex-debug.armToolchainPath.linux": "/opt/st/stm32cubeclt/GNU-tools-for-STM32/bin",
+    "cortex-debug.stlinkPath.linux": "/opt/st/stm32cubeclt/STLink-gdb-server/bin/ST-LINK_gdbserver",
+    "cortex-debug.stm32cubeprogrammer.linux": "/opt/st/stm32cubeclt/STM32CubeProgrammer/bin",
+    "cortex-debug.armToolchainPath.osx": "/Applications/ArmGNUToolchain/bin",
+    "cortex-debug.stm32cubeprogrammer.osx": "/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin"
 }

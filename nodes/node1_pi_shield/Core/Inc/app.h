@@ -4,8 +4,10 @@
  * @organization Purdue ROV
  */
 
-#ifndef APP_H
-#define APP_H
+#ifndef X19_NODE1_APP_H
+#define X19_NODE1_APP_H
+
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,6 +17,12 @@ extern "C" {
  * @brief Initialize the Node 1 application and hardware abstraction layer.
  */
 void node1_app_init(void);
+
+/**
+ * @brief Scan the I2C bus (addresses 0x08 to 0x77) and log detected devices.
+ * @return Number of detected devices on the bus.
+ */
+uint8_t node1_i2c_scan(void);
 
 /**
  * @brief Execute one iteration of the Node 1 application.
@@ -41,4 +49,4 @@ void app_main(void);
 }
 #endif
 
-#endif /* APP_H */
+#endif /* X19_NODE1_APP_H */
