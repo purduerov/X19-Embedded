@@ -54,28 +54,30 @@ Install `arm-none-eabi-gcc` and Ninja, connect the Nucleo to the PC, then choose
 
 ## Declarative Multi-Target CLI (`rov.toml` & `rov`)
 
-To switch rapidly between development boards (e.g. NUCLEO-F411, NUCLEO-F446, NUCLEO-G474) and production vehicle targets (STM32C542), use the declarative `rov` CLI tool (`rov.bat` on Windows or `python tools/rov.py`):
+To switch rapidly between development boards (e.g. NUCLEO-F411, NUCLEO-F446, NUCLEO-G474) and production vehicle targets (STM32C542), use the platform-agnostic `rov` CLI tool written in pure Python:
 
-```powershell
-# Build target configured in rov.toml
-.\rov build
-
-# Switch nodes or boards on the fly
-.\rov build -n pi_shield -b f411
-.\rov build -n control_board -b f411
-.\rov build -n pi_shield -b stm32c5
+```bash
+# Platform-agnostic (Windows, Linux, macOS):
+python rov.py build
+python rov.py build -n pi_shield -b f411
+python rov.py build -n control_board -b f411
+python rov.py build -n pi_shield -b stm32c5
 
 # Build, flash via ST-Link with reset, and auto-open live serial monitor:
-.\rov run
+python rov.py run
 
 # Auto-detect connected ST-Link COM port and stream serial output:
-.\rov monitor
+python rov.py monitor
 
 # Run host SIL simulation test suite:
-.\rov test
+python rov.py test
 
 # Enumerate connected ST-Link probes and serial COM ports:
-.\rov devices
+python rov.py devices
+
+# Optional: Install as an editable package to use 'rov' directly in any shell:
+pip install -e .
+rov build
 ```
 
 In VS Code, pressing `Ctrl+Shift+B` executes `ROV: Run (Build, Flash, & Monitor)` by default.
