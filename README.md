@@ -22,24 +22,25 @@ For the recommended VS Code build, SIL, and per-node USB DFU flashing workflow, 
 
 ## 2. Declarative Developer CLI (`rov.toml` & `rov`)
 
-The embedded workspace includes a unified declarative CLI (`tools/rov.py`, wrapped via `.\rov.bat` on Windows or `python tools/rov.py`) backed by [`rov.toml`](rov.toml) to streamline switching between dev boards (NUCLEO-F411, NUCLEO-G474) and production vehicle targets (STM32C542):
+The embedded workspace includes a unified declarative CLI implemented in pure Python (`rov.py` / `tools/rov.py`, backed by [`rov.toml`](rov.toml)). It works natively across Windows, Linux, and macOS without requiring any platform-specific shell:
 
-```powershell
-# Build target (defaults to active node & board configured in rov.toml)
-.\rov build
+```bash
+# Platform-agnostic (works identically on Windows, Linux, and macOS):
+python rov.py build
+python rov.py build -n pi_shield -b f411
+python rov.py build -n control_board -b f411
+python rov.py run
+python rov.py monitor
+python rov.py test
+python rov.py devices
 
-# Switch nodes or boards on the fly
-.\rov build -n control_board -b f411
-.\rov build -n pi_shield -b stm32c5
+# Or install as an editable global/venv command (enables typing 'rov' anywhere):
+pip install -e .
+rov build
 
-# Build, flash to connected ST-Link with hardware reset, and auto-open live serial monitor:
-.\rov run
-
-# Auto-detect connected ST-Link Virtual COM Port and stream serial output:
-.\rov monitor
-
-# Run all 25 Host SIL CTest unit test suites:
-.\rov test
+# Convenience wrappers are also provided:
+# Windows PowerShell / CMD:  .\rov build
+# Linux / macOS Bash:         ./rov build
 ```
 
 ---

@@ -85,28 +85,29 @@ Compiles the standalone Nucleo bench project:
 Provides a declarative, PlatformIO-like developer workflow across heterogeneous development boards (NUCLEO-F411, NUCLEO-G474) and production STM32C542 targets:
 
 - **Configuration File**: [`rov.toml`](rov.toml) defines active nodes, default dev boards, and hardware mappings.
-- **Unified Commands (run from `Embedded/X19-Embedded/` via `.\rov` or `python tools/rov.py`)**:
-  ```powershell
+- **Unified Platform-Agnostic Commands (run from `Embedded/X19-Embedded/` via `python rov.py <command>` or `.\rov` / `./rov`)**:
+  ```bash
   # Build target binary (defaults to active node/board in rov.toml)
-  .\rov build
-  .\rov build -n pi_shield -b f411
-  .\rov build -n control_board -b f411
-  .\rov build -n pi_shield -b stm32c5
+  python rov.py build
+  python rov.py build -n pi_shield -b f411
+  python rov.py build -n control_board -b f411
+  python rov.py build -n pi_shield -b stm32c5
 
   # Build, flash with hardware reset, auto-detect ST-Link COM port, and open live serial monitor:
-  .\rov run
-  .\rov run -n pi_shield -b f411
+  python rov.py run
+  python rov.py run -n pi_shield -b f411
 
   # Auto-detect connected ST-Link COM port and open serial monitor:
-  .\rov monitor
+  python rov.py monitor
 
   # List connected ST-Link hardware probes and COM ports:
-  .\rov devices
+  python rov.py devices
 
   # Build and run all 25 Host SIL CTest test suites:
-  .\rov test
-  .\rov test -R "safety"
+  python rov.py test
+  python rov.py test -R "safety"
   ```
+- **Optional CLI Install**: Run `pip install -e .` to install `rov` directly into your Python environment.
 - **VS Code One-Key Execution**: Press `Ctrl+Shift+B` to trigger task `ROV: Run (Build, Flash, & Monitor)`.
 
 ## Flashing Targets

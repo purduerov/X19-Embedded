@@ -26,6 +26,10 @@ try:
 except ImportError:
     serial = None
 
+# Enable ANSI escape processing on Windows console
+if sys.platform == "win32":
+    os.system("")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPO_ROOT / "rov.toml"
 
@@ -49,6 +53,9 @@ def find_stm32programmer_cli() -> str:
         Path(r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
         Path(r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
         Path("/opt/st/stm32cubeclt/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
+        Path("/opt/ST/STM32CubeCLT/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
+        Path("/opt/st/stm32cubeprogrammer/bin/STM32_Programmer_CLI"),
+        Path("/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
         Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
     ]
     for c in candidates:
