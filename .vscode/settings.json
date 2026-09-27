@@ -1,8 +1,33 @@
 {
+    // ---------------------------------------------------------------------------
+    // Portable VS Code setup. Nothing here may assume a particular machine.
+    //
+    // In particular we deliberately do NOT set "cmake.cmakePath" or
+    // "cmake.configureArgs" to cube-cmake. That binary ships with STM32CubeIDE
+    // and is absent on a plain VS Code + Homebrew/apt install, which is how a
+    // teammate on macOS ended up with CMake Tools silently falling back to a
+    // different CMake than the tasks were written against.
+    //
+    // Configuration is driven by the root CMakePresets.json via
+    // "cmake.useCMakePresets", so the binary directory is defined in exactly one
+    // place. Do not also set "cmake.buildDirectory" -- that is what made the
+    // sidebar and the tasks disagree about where the build tree lives.
+    //
+    // Only the workspace root is a real CMake project. shared/, drivers/,
+    // tests/ and each nodes/*/CMakeLists.txt are fragments with no project() call,
+    // intended to be pulled in with add_subdirectory(). Configuring any of them
+    // standalone fails with "No project() command is present" and
+    // "No cmake_minimum_required command is present". If you ever see those
+    // errors, the source directory has been pointed at a subfolder -- reset it
+    // to ${workspaceFolder} (it is set below) and re-run "Configure: Host SIL".
+    // ---------------------------------------------------------------------------
+    "cmake.useCMakePresets": "always",
     "cmake.sourceDirectory": "${workspaceFolder}",
-    "cmake.buildDirectory": "${workspaceFolder}/build",
-    "cmake.generator": "Ninja",
-    "cmake.configureOnOpen": true,
+    "cmake.configureOnOpen": false,
+    "cmake.preferredGenerators": [
+        "Ninja"
+    ],
+    "cmake.freshKit": false,
     "C_Cpp.default.cStandard": "c11",
     "C_Cpp.default.cppStandard": "c++17",
     "C_Cpp.default.intelliSenseMode": "gcc-arm",
@@ -16,11 +41,13 @@
         "*.c": "c",
         "*.ioc": "xml"
     },
-    "cmake.cmakePath": "cube-cmake",
-    "cmake.configureArgs": [
-        "-DCMAKE_COMMAND=cube-cmake"
-    ],
-    "cmake.preferredGenerators": [
-        "Ninja"
-    ]
+    "cortex-debug.armToolchainPath.windows": "C:/ST/STM32CubeCLT_1.22.0/GNU-tools-for-STM32/bin",
+    "cortex-debug.stlinkPath.windows": "C:/ST/STM32CubeCLT_1.22.0/STLink-gdb-server/bin/ST-LINK_gdbserver.exe",
+    "cortex-debug.stm32cubeprogrammer": "C:/ST/STM32CubeCLT_1.22.0/STM32CubeProgrammer/bin",
+    "cortex-debug.stm32cubeprogrammer.windows": "C:/ST/STM32CubeCLT_1.22.0/STM32CubeProgrammer/bin",
+    "cortex-debug.armToolchainPath.linux": "/opt/st/stm32cubeclt/GNU-tools-for-STM32/bin",
+    "cortex-debug.stlinkPath.linux": "/opt/st/stm32cubeclt/STLink-gdb-server/bin/ST-LINK_gdbserver",
+    "cortex-debug.stm32cubeprogrammer.linux": "/opt/st/stm32cubeclt/STM32CubeProgrammer/bin",
+    "cortex-debug.armToolchainPath.osx": "/Applications/ArmGNUToolchain/bin",
+    "cortex-debug.stm32cubeprogrammer.osx": "/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin"
 }

@@ -33,6 +33,7 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
+set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES SUFFIX ".elf")
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -47,12 +48,19 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/bsp.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/can_f4.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node1_pi_shield/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node2_control_board/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Src/app.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node1_pi_shield/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node2_control_board/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Inc
 )
 
 # Add project symbols (macros)
@@ -72,6 +80,93 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
-
-    # Add user defined libraries
+    rov_shared
+    rov_drivers
+    m
 )
+
+# ==============================================================================
+# Dedicated Bench Targets (Method B - Selectable directly from IDE status bar)
+# ==============================================================================
+
+# 1. Node 1 Pi Shield Bench Target
+add_executable(bench_node1_pi_shield.elf)
+target_sources(bench_node1_pi_shield.elf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Src/bsp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Src/can_f4.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node1_pi_shield/Core/Src/app.c
+    ${MX_Application_Src}
+)
+target_include_directories(bench_node1_pi_shield.elf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node1_pi_shield/Core/Inc
+)
+target_link_options(bench_node1_pi_shield.elf PRIVATE
+    -T "${CMAKE_CURRENT_SOURCE_DIR}/STM32F446xx_FLASH.ld"
+    -Wl,-Map=bench_node1_pi_shield.map
+    -Wl,--gc-sections
+)
+target_link_libraries(bench_node1_pi_shield.elf
+    STM32_Drivers
+    stm32cubemx
+    rov_shared
+    rov_drivers
+    m
+)
+
+# 2. Node 2 Control Board Bench Target
+add_executable(bench_node2_control_board.elf)
+target_sources(bench_node2_control_board.elf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Src/bsp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Src/can_f4.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node2_control_board/Core/Src/app.c
+    ${MX_Application_Src}
+)
+target_include_directories(bench_node2_control_board.elf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node2_control_board/Core/Inc
+)
+target_link_options(bench_node2_control_board.elf PRIVATE
+    -T "${CMAKE_CURRENT_SOURCE_DIR}/STM32F446xx_FLASH.ld"
+    -Wl,-Map=bench_node2_control_board.map
+    -Wl,--gc-sections
+)
+target_link_libraries(bench_node2_control_board.elf
+    STM32_Drivers
+    stm32cubemx
+    rov_shared
+    rov_drivers
+    m
+)
+
+# 3. Node 3 Power Slab Bench Target
+add_executable(bench_node3_power_slab.elf)
+target_sources(bench_node3_power_slab.elf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Src/bsp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Src/can_f4.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Src/app.c
+    ${MX_Application_Src}
+)
+target_include_directories(bench_node3_power_slab.elf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Inc
+)
+target_link_options(bench_node3_power_slab.elf PRIVATE
+    -T "${CMAKE_CURRENT_SOURCE_DIR}/STM32F446xx_FLASH.ld"
+    -Wl,-Map=bench_node3_power_slab.map
+    -Wl,--gc-sections
+)
+target_link_libraries(bench_node3_power_slab.elf
+    STM32_Drivers
+    stm32cubemx
+    rov_shared
+    rov_drivers
+    m
+)
+

@@ -58,8 +58,15 @@ void test_efuse_overcurrent_trip(void) {
     assert(rov_can_pack_thruster_cmd(&cmd, tx_buf, sizeof(tx_buf), &tx_len) == ROV_OK);
 
     /* 60 cycles x 10 ms = 600 ms virtual time */
+    int any_brick_loaded_observed = 0;
     for (int cycle = 0; cycle < 60; cycle++) {
         mock_bsp_advance_time_ms(10);
+        const mock_physics_state_t *phys = mock_physics_get_state();
+        for (int b = 0; b < ROV_NUM_12V_BRICKS; b++) {
+            if (phys->brick_currents_a[b] > 1.0f) {
+                any_brick_loaded_observed = 1;
+            }
+        }
         mock_can_set_current_node(ROV_NODE_PI_CORE);
         can_send(ROV_CAN_ID_THRUSTER_CMD, tx_buf, (uint8_t)tx_len);
         mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
@@ -70,15 +77,9 @@ void test_efuse_overcurrent_trip(void) {
         node3_app_step();
     }
 
-    /* Verify physics detected load on at least one brick */
-    const mock_physics_state_t *phys = mock_physics_get_state();
-    int any_brick_loaded = 0;
-    for (int b = 0; b < ROV_NUM_12V_BRICKS; b++) {
-        if (phys->brick_currents_a[b] > 1.0f) {
-            any_brick_loaded = 1;
-        }
-    }
-    assert(any_brick_loaded);
+    /* The plant must observe load before the fail-safe disables the bricks. */
+    assert(any_brick_loaded_observed);
+    assert(mock_bsp_is_emergency_brake_tripped());
 
     /* Verify Node 3 transmitted at least one 0x300 frame */
     assert(mock_can_count_tx_by_id(ROV_CAN_ID_POWER_TELEMETRY) >= 1);

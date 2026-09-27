@@ -194,10 +194,15 @@ void test_invalid_arguments(void) {
     /* Negative test cases: Buffer capacity too small */
     assert(rov_can_pack_thruster_cmd(&cmd, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
 
-    rov_nav_telemetry_t nav;
+    /* Zero-initialised: the pack functions take a `const` pointer, so reading
+       through one to an uninitialised object is undefined behaviour even when
+       the buffer-size check returns before the memcpy. Clang's
+       -Wuninitialized-const-pointer (fatal under -Werror) rejects it; gcc does
+       not warn, which is why this only ever broke clang builds. */
+    rov_nav_telemetry_t nav = {0};
     assert(rov_can_pack_nav_telemetry(&nav, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
 
-    rov_env_telemetry_t env;
+    rov_env_telemetry_t env = {0};
     assert(rov_can_pack_env_telemetry(&env, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
     assert(rov_can_unpack_env_telemetry(buffer, 5, &env) == ROV_ERR_INVALID_ARG);
     assert(rov_can_unpack_env_telemetry(NULL, sizeof(buffer), &env) == ROV_ERR_INVALID_ARG);

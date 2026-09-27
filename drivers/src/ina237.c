@@ -30,5 +30,5 @@ rov_status_t ina237_read_power(ina237_dev_t *dev) {
         dev->power_w = dev->bus_voltage_v * dev->shunt_current_a;
         return ROV_OK;
     }
-    return ROV_OK;
+    return ROV_ERROR;
 }

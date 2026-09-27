@@ -51,6 +51,7 @@ void test_timesync_master_broadcast_and_slew(void) {
     /* Second sync frame 100 ms later (at 10 Hz) with a slight master clock step (e.g. +200 us jump) */
     local_rx_us += 100000; /* local = 110,000 us */
     master.master_time_us += 100200; /* master jumped +200 us extra */
+    assert(rov_timesync_process_master(&ts, &master, local_rx_us) == ROV_ERR_INVALID_ARG);
     master.sync_seq++;
 
     assert(rov_timesync_process_master(&ts, &master, local_rx_us) == ROV_OK);
@@ -121,6 +122,7 @@ void test_timesync_timeout_and_health(void) {
 
     /* 1500 ms later (> ROV_TIME_SYNC_TIMEOUT_MS = 1000 ms): dropped synchronization */
     assert(rov_timesync_is_synchronized(&ts, now_us + 1500000) == false);
+    assert(rov_timesync_get_time_us(&ts, now_us + 1500000) == now_us + 1500000);
 
     printf("[PASS] test_timesync_timeout_and_health\n");
 }

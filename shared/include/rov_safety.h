@@ -25,6 +25,7 @@ typedef struct {
     bool watchdog_expired;
     bool overtemperature_tripped;
     uint32_t last_heartbeat_timestamp_ms;
+    bool heartbeat_initialized;
 } rov_safety_state_t;
 
 void rov_safety_init(rov_safety_state_t *state);

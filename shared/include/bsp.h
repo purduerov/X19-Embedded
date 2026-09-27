@@ -43,6 +43,42 @@ uint64_t time_get_us(void);
 void delay_ms(uint32_t ms);
 
 /**
+ * @brief Write bytes to a 7-bit I2C device address.
+ * @param addr 7-bit I2C address.
+ * @param data Data buffer to transmit.
+ * @param len Number of bytes to transmit.
+ * @return true on success, false on failure.
+ */
+bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len);
+
+/**
+ * @brief Read bytes from a 7-bit I2C device address.
+ * @param addr 7-bit I2C address.
+ * @param data Destination buffer.
+ * @param len Number of bytes to read.
+ * @return true on success, false on failure.
+ */
+bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len);
+
+/**
+ * @brief Probe whether an I2C device with the specified 7-bit address responds with ACK.
+ * @param addr 7-bit I2C address (0x08 to 0x77).
+ * @return true if device acknowledges, false otherwise.
+ */
+bool bsp_i2c_probe(uint8_t addr);
+
+/**
+ * @brief Initialize low-level I2C hardware bus and pull-up GPIOs.
+ */
+void bsp_i2c_init(void);
+
+/**
+ * @brief Scan the I2C bus (0x08 to 0x77) and log detected devices over UART.
+ * @return Number of detected devices.
+ */
+uint8_t bsp_i2c_scan(void);
+
+/**
  * @brief Toggle the board heartbeat / diagnostic indicator LED.
  */
 void led_toggle(void);

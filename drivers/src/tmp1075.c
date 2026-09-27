@@ -28,5 +28,5 @@ rov_status_t tmp1075_read_temperature(tmp1075_dev_t *dev) {
     if (mock_sensors_get_tmp1075(&dev->temperature_c)) {
         return ROV_OK;
     }
-    return ROV_OK;
+    return ROV_ERROR;
 }

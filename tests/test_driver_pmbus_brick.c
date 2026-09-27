@@ -14,6 +14,8 @@ void test_pmbus_brick_driver(void) {
 
     /* Negative test: NULL pointer */
     assert(pmbus_brick_init(NULL, 0x40) == ROV_ERR_INVALID_ARG);
+    assert(pmbus_brick_init(&dev, 0x3F) == ROV_ERR_INVALID_ARG);
+    assert(pmbus_brick_init(&dev, 0x45) == ROV_ERR_INVALID_ARG);
     assert(pmbus_brick_read_telemetry(NULL) == ROV_ERR_INVALID_ARG);
 
     /* Valid initialization */

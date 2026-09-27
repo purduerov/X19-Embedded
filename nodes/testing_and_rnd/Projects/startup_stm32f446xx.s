@@ -29,6 +29,7 @@
   .fpu softvfp
   .thumb
 
+.global  Reset_Handler
 .global  g_pfnVectors
 .global  Default_Handler
 

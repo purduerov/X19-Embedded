@@ -10,7 +10,7 @@ add_library(rov_shared STATIC
 add_library(x19_shared ALIAS rov_shared)
 
 target_include_directories(rov_shared PUBLIC
-    \/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_compile_features(rov_shared PUBLIC c_std_11)

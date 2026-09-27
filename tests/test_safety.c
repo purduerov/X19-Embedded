@@ -10,6 +10,8 @@ void test_safety_initialization(void) {
     assert(state.emergency_break_active == false);
     assert(state.leak_detected == false);
     assert(state.watchdog_expired == false);
+    assert(state.heartbeat_initialized == false);
+    assert(rov_safety_is_heartbeat_lost(&state, 0) == true);
     assert(state.overtemperature_tripped == false);
     printf("[PASS] test_safety_initialization\n");
 }

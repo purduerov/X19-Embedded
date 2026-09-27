@@ -1,62 +1,172 @@
 {
+    // ---------------------------------------------------------------------------
+    // Debug configurations.
+    //
+    // The two "Host SIL" entries at the bottom are the host-side simulator and
+    // need no board. The Cortex-Debug entries are real hardware: they build the
+    // firmware first (preLaunchTask), then start an ST-Link GDB server, flash,
+    // and attach. They require the GNU Arm Embedded toolchain on PATH -- run
+    // "Check: Prerequisites" if one of them cannot find arm-none-eabi-gdb.
+    //
+    // A note on Node 2, because it is genuinely different from the others:
+    //   - "Node 2 Nucleo G474" is the BENCH board. It has its own CMake project
+    //     with presets, and builds independently of the root project.
+    //   - The vehicle Node 2 control board is an STM32C542, and there is
+    //     currently NO build for it: the root CMakeLists.txt does not
+    //     add_subdirectory() nodes/node2_control_board, so the image the
+    //     "Flash: Node 2 Vehicle Control Board" task defaults to is not produced
+    //     by anything. Until that is wired up, use the G474 bench config, or add
+    //     the subdirectory and a matching build task.
+    //
+    // No SVD is wired in because the repository contains none. Without one,
+    // peripheral registers are not browsable while debugging, but breakpoints,
+    // the call stack, watch expressions and memory all work normally. Drop an
+    // .svd into the repo and add "svdFile" to a config to enable the register view.
+    // ---------------------------------------------------------------------------
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug: Control Board (STM32G4)",
+            "name": "Debug: Node 1 Pi Shield (C542, ST-Link)",
             "type": "cortex-debug",
             "request": "launch",
-            "servertype": "openocd",
+            "servertype": "stlink",
             "cwd": "${workspaceFolder}",
-            "executable": "${workspaceFolder}/build/nodes/node2_control_board/node2_control_board.elf",
-            "device": "STM32G431CB",
-            "configFiles": [
-                "interface/stlink.cfg",
-                "target/stm32g4x.cfg"
-            ],
+            "executable": "${workspaceFolder}/build/arm-c542-debug/nodes/node1_pi_shield/node1_pi_shield.elf",
+            "preLaunchTask": "Build: ARM Nodes (C542)",
+            "device": "STM32C542xx",
             "runToEntryPoint": "main",
-            "svdFile": "${workspaceFolder}/cmake/STM32G431xx.svd"
+            "showDevDebugOutput": "none"
         },
         {
-            "name": "Debug: Power Slab (STM32G4)",
+            "name": "Debug: Node 3 Power Slab (C542, ST-Link)",
             "type": "cortex-debug",
             "request": "launch",
-            "servertype": "openocd",
+            "servertype": "stlink",
             "cwd": "${workspaceFolder}",
-            "executable": "${workspaceFolder}/build/nodes/node3_power_slab/node3_power_slab.elf",
-            "device": "STM32G431CB",
-            "configFiles": [
-                "interface/stlink.cfg",
-                "target/stm32g4x.cfg"
-            ],
-            "runToEntryPoint": "main"
+            "executable": "${workspaceFolder}/build/arm-c542-debug/nodes/node3_power_slab/node3_power_slab.elf",
+            "preLaunchTask": "Build: ARM Nodes (C542)",
+            "device": "STM32C542xx",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
         },
         {
-            "name": "Debug: Pi Shield (STM32G4)",
+            "name": "Debug: Node 2 Nucleo G474 (bench, ST-Link)",
             "type": "cortex-debug",
             "request": "launch",
-            "servertype": "openocd",
-            "cwd": "${workspaceFolder}",
-            "executable": "${workspaceFolder}/build/nodes/node1_pi_shield/node1_pi_shield.elf",
-            "device": "STM32G431CB",
-            "configFiles": [
-                "interface/stlink.cfg",
-                "target/stm32g4x.cfg"
-            ],
-            "runToEntryPoint": "main"
+            "servertype": "stlink",
+            "cwd": "${workspaceFolder}/nodes/node2_control_board",
+            "executable": "${workspaceFolder}/nodes/node2_control_board/build/Debug/node2_control_board.elf",
+            "preLaunchTask": "Build: Node 2 Nucleo G474 (Debug)",
+            "device": "STM32G474xx",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
         },
         {
-            "name": "Debug: CAN Bootloader (STM32G4)",
+            "name": "Debug: Testing & R&D F446 (dev board, ST-Link)",
             "type": "cortex-debug",
             "request": "launch",
-            "servertype": "openocd",
+            "servertype": "stlink",
             "cwd": "${workspaceFolder}",
-            "executable": "${workspaceFolder}/build/bootloader/stm32_can_bootloader/stm32_can_bootloader.elf",
-            "device": "STM32G431xx",
-            "configFiles": [
-                "interface/stlink.cfg",
-                "target/stm32g4x.cfg"
-            ],
-            "runToEntryPoint": "main"
+            "executable": "${workspaceFolder}/build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf",
+            "preLaunchTask": "Build: Testing & R&D F446 Dev Board",
+            "device": "STM32F446RE",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "Debug: Nucleo F411 - Configurable Bench (bench_config.h)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "stlink",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf",
+            "device": "STM32F411RE",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "Debug: Nucleo F411 - Node 1 Pi Shield (BME280 / Leak)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "stlink",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node1_pi_shield.elf",
+            "device": "STM32F411RE",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "Debug: Nucleo F411 - Node 2 Control Board (PWM / IMU)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "stlink",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node2_control_board.elf",
+            "device": "STM32F411RE",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "Debug: Nucleo F411 - Node 3 Power Slab (PMBus / Power)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "stlink",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node3_power_slab.elf",
+            "device": "STM32F411RE",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "Debug: Nucleo F411 - Active Target (Status Bar)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "stlink",
+            "cwd": "${workspaceFolder}",
+            "executable": "${command:cmake.launchTargetPath}",
+            "device": "STM32F411RE",
+            "runToEntryPoint": "main",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "Debug: Host SIL Test (Node 2 Control Board)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/sil-debug/tests/sil_bridge_server.exe",
+            "args": ["--port", "8765", "--cycles", "0"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "preLaunchTask": "Build: Host SIL (Debug)",
+            "MIMode": "gdb",
+            "miDebuggerPath": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "Debug: Host SIL Bridge Server",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/sil-debug/tests/sil_bridge_server.exe",
+            "args": ["--port", "8765", "--cycles", "0"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/tests/sil_companion_bridge",
+            "environment": [],
+            "preLaunchTask": "Build: Host SIL (Debug)",
+            "MIMode": "gdb",
+            "miDebuggerPath": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
         }
     ]
 }

@@ -2,7 +2,11 @@ enable_testing()
 add_definitions(-DROV_UNIT_TEST -DX19_UNIT_TEST -UNDEBUG)
 
 # Build the Software-in-the-Loop (SIL) Mock Infrastructure
-add_library(rov_mocks STATIC
+# Keep the mock BSP as an object library so its timing and I2C symbols are
+# available to driver-only test executables.  A static archive is not extracted
+# when a driver archive introduces the first reference after the mock archive
+# has already been searched.
+add_library(rov_mocks OBJECT
     mocks/mock_can.c
     mocks/mock_bsp.c
     mocks/mock_sensors.c
@@ -269,7 +273,14 @@ function(add_target_startup_contract node_id node_dir)
 endfunction()
 
 add_target_startup_contract(1 node1_pi_shield)
-add_target_startup_contract(2 node2_control_board)
+
+add_test(
+    NAME target_startup_node2
+    COMMAND ${CMAKE_COMMAND}
+        "-DMAIN_SOURCE=${PROJECT_SOURCE_DIR}/nodes/node2_control_board/Core/Src/main.c"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/hardware/check_node2_startup.cmake"
+)
+
 add_target_startup_contract(3 node3_power_slab)
 
 # Software-in-the-Loop (SIL) Bridge Server (Host Native Only)

@@ -298,3 +298,34 @@ rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, const uint8_t *data, u
 
     return ROV_OK;
 }
+
+bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {
+    (void)addr;
+    (void)data;
+    (void)len;
+    return true;
+}
+
+bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
+    (void)addr;
+    if (!data || len == 0U) {
+        return false;
+    }
+
+    for (uint16_t i = 0; i < len; i++) {
+        data[i] = 0U;
+    }
+    return true;
+}
+
+bool bsp_i2c_probe(uint8_t addr) {
+    (void)addr;
+    return false;
+}
+
+void bsp_i2c_init(void) {
+}
+
+uint8_t bsp_i2c_scan(void) {
+    return 0;
+}

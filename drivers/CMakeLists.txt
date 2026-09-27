@@ -19,3 +19,5 @@ target_include_directories(rov_drivers PUBLIC
 )
 
 target_compile_features(rov_drivers PUBLIC c_std_11)
+
+target_link_libraries(rov_drivers PUBLIC rov_shared)

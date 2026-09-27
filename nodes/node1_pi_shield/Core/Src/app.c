@@ -17,6 +17,8 @@
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
+#include <math.h>
+#include <stdio.h>
 
 static rov_safety_state_t g_safety_state;
 static rov_env_telemetry_t g_env_telemetry;
@@ -25,6 +27,9 @@ static ina237_dev_t g_ina237_dev;
 
 static uint32_t g_last_telemetry_time = 0;
 static float g_baseline_pressure_hpa = 0.0f;
+static bool g_bme280_valid = false;
+static bool g_ina237_valid = false;
+static bool g_can_ready = false;
 
 /*
  * Once an emergency has been transmitted, latch the state so that the
@@ -92,9 +97,10 @@ static void node1_trigger_emergency(uint8_t leak_bits) {
      * normal telemetry software queues and submit directly to the FDCAN
      * hardware transmit resource.
      */
-    can_send_emergency(ROV_CAN_ID_EMERGENCY_BREAK, alert_payload, sizeof(alert_payload));
-
     g_emergency_latched = true;
+    if (!can_send_emergency(ROV_CAN_ID_EMERGENCY_BREAK, alert_payload, sizeof(alert_payload))) {
+        g_emergency_latched = false;
+    }
 }
 
 /**
@@ -114,12 +120,68 @@ void node1_leak_irq_handler(void) {
     }
 }
 
+uint8_t node1_i2c_scan(void) {
+    uint8_t count = 0;
+    printf("\r\n========================================\r\n");
+    printf("   Node 1 Pi Shield I2C Bus Scanner\r\n");
+    printf("========================================\r\n");
+    printf("     0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\r\n");
+
+    for (uint8_t row = 0; row < 128; row += 16) {
+        printf("%02X: ", row);
+        for (uint8_t col = 0; col < 16; col++) {
+            uint8_t addr = row + col;
+            if (addr < 0x08 || addr > 0x77) {
+                printf("   ");
+            } else if (bsp_i2c_probe(addr)) {
+                printf("%02X ", addr);
+                count++;
+            } else {
+                printf("-- ");
+            }
+        }
+        printf("\r\n");
+    }
+
+    printf("----------------------------------------\r\n");
+    printf("Scan complete: found %u device(s).\r\n", count);
+
+    for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+        if (bsp_i2c_probe(addr)) {
+            const char *desc = "Unknown device";
+            if (addr == 0x76 || addr == 0x77) {
+                desc = "Bosch BME280 (Pressure / Humidity / Temp)";
+            } else if (addr >= 0x40 && addr <= 0x47) {
+                desc = "TI INA237 / INA226 (Current / Voltage / Power Monitor)";
+            } else if (addr >= 0x48 && addr <= 0x4F) {
+                desc = "TI TMP1075 / BNO086 (Temperature / IMU Sensor)";
+            }
+            printf("  -> [0x%02X] %s\r\n", addr, desc);
+        }
+    }
+    printf("========================================\r\n\r\n");
+    return count;
+}
+
 void node1_app_init(void) {
     bsp_init();
     rov_safety_init(&g_safety_state);
 
+    /* Run I2C bus scan at startup to verify all sensors are reachable */
+    node1_i2c_scan();
+
+    g_can_ready = can_init();
+    if (!g_can_ready) {
+        /* A node without a verified CAN transport must not report healthy. */
+        bsp_emergency_brake_trip();
+        g_safety_state.emergency_break_active = true;
+        g_emergency_latched = true;
+    }
+
     bme280_init(&g_bme280_dev);
     ina237_init(&g_ina237_dev, 0x40, 0.001f);
+    g_bme280_valid = false;
+    g_ina237_valid = false;
 
     g_last_telemetry_time = 0;
     g_baseline_pressure_hpa = 0.0f;
@@ -134,17 +196,25 @@ void node1_app_init(void) {
 void node1_app_step(void) {
     uint32_t current_time = time_get_ms();
 
+    if (!g_can_ready) {
+        bsp_emergency_brake_trip();
+        delay_ms(5);
+        return;
+    }
+
     /* Sample sensors and evaluate leak state at 10 Hz */
     if (current_time - g_last_telemetry_time >= (1000 / ROV_ENV_TELEMETRY_FREQ_HZ)) {
 
         g_last_telemetry_time = current_time;
 
-        bme280_read_all(&g_bme280_dev);
-        ina237_read_power(&g_ina237_dev);
+        g_bme280_valid = (bme280_read_all(&g_bme280_dev) == ROV_OK) && isfinite(g_bme280_dev.pressure_hpa) &&
+                         isfinite(g_bme280_dev.humidity_pct) && isfinite(g_bme280_dev.temperature_c);
+        g_ina237_valid = (ina237_read_power(&g_ina237_dev) == ROV_OK) && isfinite(g_ina237_dev.bus_voltage_v) &&
+                         isfinite(g_ina237_dev.shunt_current_a);
 
-        /* Set baseline pressure on first valid sample */
-        if (g_baseline_pressure_hpa <= 0.0f && g_bme280_dev.pressure_hpa > 0.0f) {
-
+        /* Track the lowest valid pressure so a vacuum applied after startup is detectable. */
+        if (g_bme280_valid && g_bme280_dev.pressure_hpa > 0.0f &&
+            (g_baseline_pressure_hpa <= 0.0f || g_bme280_dev.pressure_hpa < g_baseline_pressure_hpa)) {
             g_baseline_pressure_hpa = g_bme280_dev.pressure_hpa;
         }
 
@@ -155,8 +225,7 @@ void node1_app_step(void) {
          *
          * Environmental leak detection uses bit 0.
          */
-        if (g_bme280_dev.humidity_pct >= ROV_LEAK_HUMIDITY_MAX_PCT) {
-
+        if (g_bme280_valid && g_bme280_dev.humidity_pct >= ROV_LEAK_HUMIDITY_MAX_PCT) {
             leak_bits |= 0x01;
         }
 
@@ -167,9 +236,8 @@ void node1_app_step(void) {
          * more than the configured threshold, report an environmental
          * leak using bit 0.
          */
-        if (g_baseline_pressure_hpa > 0.0f &&
+        if (g_bme280_valid && g_baseline_pressure_hpa > 0.0f &&
             (g_bme280_dev.pressure_hpa - g_baseline_pressure_hpa) >= ROV_LEAK_PRESSURE_DROP_THRESHOLD_HPA) {
-
             leak_bits |= 0x01;
         }
 
@@ -182,11 +250,11 @@ void node1_app_step(void) {
          */
         leak_bits |= node1_get_floor_leak_bits();
 
-        g_env_telemetry.pressure_hpa = g_bme280_dev.pressure_hpa;
+        g_env_telemetry.pressure_hpa = g_bme280_valid ? g_bme280_dev.pressure_hpa : 0.0f;
 
-        g_env_telemetry.humidity_pct = g_bme280_dev.humidity_pct;
+        g_env_telemetry.humidity_pct = g_bme280_valid ? g_bme280_dev.humidity_pct : 0.0f;
 
-        g_env_telemetry.temperature_c = g_bme280_dev.temperature_c;
+        g_env_telemetry.temperature_c = g_bme280_valid ? g_bme280_dev.temperature_c : 0.0f;
 
         g_env_telemetry.leak_flags = leak_bits;
 
@@ -218,7 +286,7 @@ void node1_app_step(void) {
 }
 
 #ifndef ROV_UNIT_TEST
-void app_main(void) {
+__attribute__((weak)) void app_main(void) {
     node1_app_init();
 
     while (1) {

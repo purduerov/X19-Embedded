@@ -1,0 +1,89 @@
+# ==============================================================================
+# Purdue ROV (X19-ROV) Embedded Monorepo Specification (rov.toml)
+# Declarative PlatformIO-style configuration for nodes, boards, and build targets
+# ==============================================================================
+
+[workspace]
+name = "x19-embedded"
+version = "2.4.0"
+default_node = "pi_shield"
+default_board = "f411"
+default_baud = 115200
+
+# Build Profiles
+[profiles.release]
+cmake_build_type = "Release"
+c_flags = ["-O2", "-DNDEBUG", "-Wall", "-Wextra", "-Wpedantic", "-Wshadow", "-Wdouble-promotion", "-Werror"]
+
+[profiles.debug]
+cmake_build_type = "Debug"
+c_flags = ["-O0", "-g3", "-DDEBUG", "-Wall", "-Wextra", "-Wpedantic", "-Wshadow", "-Wdouble-promotion", "-Werror"]
+
+# Hardware Board Targets
+[boards.f411]
+display_name = "ST NUCLEO-F411RE (Dev Bench)"
+architecture = "arm-cortex-m4"
+mcu = "STM32F411RET6"
+preset = "arm-c542-debug"
+flash_driver = "stm32cubeprog"
+default_baud = 115200
+
+[boards.g474]
+display_name = "ST NUCLEO-G474RE (Control Bench)"
+architecture = "arm-cortex-m4"
+mcu = "STM32G474RET6"
+preset = "Debug"
+build_dir = "nodes/node2_control_board/build/Debug"
+flash_driver = "stm32cubeprog"
+default_baud = 115200
+
+[boards.stm32c5]
+display_name = "STM32C542 Custom Vehicle PCB"
+architecture = "arm-cortex-m33"
+mcu = "STM32C542CCT6"
+preset = "arm-c542-debug"
+flash_driver = "stm32cubeprog"
+default_baud = 115200
+
+[boards.host]
+display_name = "x86_64 SIL Host Simulator"
+architecture = "x86_64"
+preset = "sil-debug"
+default_baud = 0
+
+# Monorepo Subsea Nodes
+[nodes.pi_shield]
+display_name = "Node 1: Pi Shield (BME280 / Leak / INA237)"
+supported_boards = ["f411", "stm32c5", "host"]
+can_id_base = "0x100"
+# Target binary mapping per board
+target_f411 = "bench_node1_pi_shield.elf"
+binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node1_pi_shield.elf"
+target_stm32c5 = "node1_pi_shield.elf"
+binary_stm32c5 = "build/arm-c542-debug/nodes/node1_pi_shield/node1_pi_shield.elf"
+
+[nodes.control_board]
+display_name = "Node 2: Control Board (PWM / Solenoids / IMU / Depth)"
+supported_boards = ["f411", "g474", "stm32c5", "host"]
+can_id_base = "0x200"
+target_f411 = "bench_node2_control_board.elf"
+binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node2_control_board.elf"
+target_g474 = "node2_control_board.elf"
+binary_g474 = "nodes/node2_control_board/build/Debug/node2_control_board.elf"
+target_stm32c5 = "node2_control_board.elf"
+binary_stm32c5 = "build/arm-c542-debug/nodes/node2_control_board/node2_control_board.elf"
+
+[nodes.power_slab]
+display_name = "Node 3: Power Slab (PMBus / Power Telemetry)"
+supported_boards = ["f411", "stm32c5", "host"]
+can_id_base = "0x300"
+target_f411 = "bench_node3_power_slab.elf"
+binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node3_power_slab.elf"
+target_stm32c5 = "node3_power_slab.elf"
+binary_stm32c5 = "build/arm-c542-debug/nodes/node3_power_slab/node3_power_slab.elf"
+
+[nodes.rnd]
+display_name = "Testing & R&D (I2C Scanner / CAN Ping-Pong)"
+supported_boards = ["f411"]
+target_f411 = "testing_and_rnd.elf"
+binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf"
