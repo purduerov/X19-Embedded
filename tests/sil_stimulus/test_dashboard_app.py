@@ -39,6 +39,7 @@ from __future__ import annotations
 import inspect
 import re
 import socket
+import struct
 import sys
 import threading
 import time
@@ -54,6 +55,7 @@ try:
         ServerBackedTestCase,
         SilServerProcess,
         ThrusterCommand,
+        pack_sil_can_frame,
         require_server_executable,
         unpack_sil_can_frame,
     )
@@ -66,6 +68,7 @@ except ImportError:  # pragma: no cover - direct execution fallback
         ServerBackedTestCase,
         SilServerProcess,
         ThrusterCommand,
+        pack_sil_can_frame,
         require_server_executable,
         unpack_sil_can_frame,
     )
@@ -74,6 +77,16 @@ except ImportError:  # pragma: no cover - direct execution fallback
 DASHBOARD_DIR = REPO_ROOT / "tests" / "sil_dashboard"
 if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))
+
+# sil_test_support puts tests/sil_companion_bridge on sys.path, so sil_protocol
+# resolves by name once the import above has run.  These are read from the
+# protocol module rather than off sil_dashboard_client on purpose: the point of
+# the legacy-magic test is that the reader honours the protocol's accepted set,
+# so sourcing them from the reader would make the assertion circular.
+import sil_protocol  # noqa: E402  (path setup must precede it)
+
+CAN_ID_ENV_TELEMETRY = sil_protocol.CAN_ID_ENV_TELEMETRY
+SIL_MAGIC_HEADER_LEGACY = sil_protocol.SIL_MAGIC_HEADER_LEGACY
 
 from sil_dashboard_client import (  # noqa: E402  (path setup must precede it)
     CONTROL_PERIOD_S,
@@ -2105,6 +2118,199 @@ class TestDashboardHandlersAgainstRealClient(unittest.TestCase):
             len({label for _, label in observed}), 4,
             f"the readout collapsed two of {observed} into the same label",
         )
+
+
+class TestDashboardClientStreamResync(unittest.TestCase):
+    """
+    ``_rx_loop`` must survive a desynchronized stream, not only aligned frames.
+
+    The reader used to carve fixed ``SIL_PACKET_SIZE`` windows out of the TCP
+    stream and hand each one straight to ``unpack_sil_can_frame``.  A window that
+    did not start on a magic header raised ``ValueError``, and the loop's own
+    ``except Exception: break`` turned that into a dead reader: the thread
+    exited, ``connected`` went False, and the operator lost the whole telemetry
+    feed until they reconnected by hand.  One misaligned window was enough.  The
+    reader now checks the magic before consuming a window and slides a single
+    byte to resynchronize, and drops a payload it cannot decode rather than
+    letting the error reach the loop's exit handler.
+
+    The workhorse frame is ``CAN_ID_ENV_TELEMETRY``, whose payload is
+    ``struct.Struct("<3fB")`` -- three floats and a leak-flags byte, so a known
+    value is trivial to build and ``client.env_data.leak_flags`` is an exact
+    observable rather than a float comparison.
+
+    Every assertion here is "the connection survived and the next real frame
+    landed".  That is deliberate: the failure mode is a dead reader, so an
+    assertion about a return value, or about a single frame in isolation, would
+    pass against the broken code for the wrong reason.
+    """
+
+    #: The env payload the real server sends, as ``<3fB``.
+    ENV_LEAK_FLAGS = 0x03
+    ENV_PAYLOAD = struct.pack("<3fB", 1013.25, 42.0, 26.5, ENV_LEAK_FLAGS)
+
+    def setUp(self) -> None:
+        self.client = SilDashboardClient(port=1)
+        self.addCleanup(self.client.disconnect)
+
+        client_side, self.board_side = socket.socketpair()
+        self.addCleanup(self.board_side.close)
+
+        # Put the client into exactly the state connect() leaves behind, minus
+        # the reader thread, which this suite starts itself because it is the
+        # thing under test.
+        self.client.sock = client_side
+        self.client.connected = True
+        self.client.running = True
+        self.client.control_state = ControlState.ARMED
+        self.client._control_stop = threading.Event()
+        self.client._control_thread = None
+        self.client._last_command = list(NEUTRAL_PWMS)
+
+        self.rx = threading.Thread(
+            target=self.client._rx_loop, name="rx-under-test", daemon=True
+        )
+        self.rx.start()
+        self.addCleanup(self._stop_reader)
+
+    def _stop_reader(self) -> None:
+        self.client.running = False
+        self.rx.join(timeout=2.0)
+
+    def _wait_for_leak_flags(self, expected: int, what: str, timeout_s: float = 2.0) -> None:
+        """
+        Block until ``client.env_data`` reports ``expected``, or fail with why not.
+
+        A bounded wait on the property, never a sleep: the reader is
+        asynchronous, so a fixed sleep is either too short (a false failure) or
+        too long (a slow suite), and neither says anything about the reader.
+        """
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self.client.env_data is not None and self.client.env_data.leak_flags == expected:
+                return
+            time.sleep(0.005)
+        self.fail(
+            f"timed out after {timeout_s}s waiting for {what}. "
+            f"connected={self.client.connected} reader_alive={self.rx.is_alive()} "
+            f"env_data={self.client.env_data}. Two different regressions look like "
+            f"this, and reader_alive tells them apart: False means the reader thread "
+            f"exited on the bad bytes, because the loop's except handler ends the "
+            f"thread and clears connected, so nothing after them is ever decoded. "
+            f"True means the reader is running but skipped the frame as unsynchronized, "
+            f"which drops good data just as silently."
+        )
+
+    def _assert_reader_intact(self, context: str) -> None:
+        self.assertTrue(
+            self.client.connected,
+            f"{context}: the reader dropped the connection instead of skipping the bad bytes",
+        )
+        self.assertTrue(
+            self.rx.is_alive(),
+            f"{context}: the reader thread exited instead of skipping the bad bytes",
+        )
+
+    def test_a_real_frame_behind_garbage_is_still_decoded(self) -> None:
+        """
+        The resync property: alignment is recoverable, so nothing after the
+        garbage may be lost.
+        """
+        # 4 bytes chosen to look like a plausible header and then not be one,
+        # so the reader has to reject them on the magic rather than on a length.
+        self.board_side.sendall(b"\xDE\xAD\xBE\xEF" + b"\x00" * (SIL_PACKET_SIZE - 4))
+        self.board_side.sendall(pack_sil_can_frame(CAN_ID_ENV_TELEMETRY, self.ENV_PAYLOAD))
+
+        self._wait_for_leak_flags(
+            self.ENV_LEAK_FLAGS,
+            "the env frame that followed the garbage to be decoded",
+        )
+        self._assert_reader_intact("after garbage")
+
+    def test_garbage_shorter_than_one_packet_does_not_end_the_reader(self) -> None:
+        """
+        A partial window must be buffered, not treated as a frame.
+
+        This is the case a fixed-window reader cannot survive: there is not
+        enough data to decide anything yet, and the only correct move is to
+        wait for more.
+        """
+        self.board_side.sendall(b"\xDE\xAD\xBE\xEF")
+        time.sleep(QUIET_WINDOW_S)
+
+        self._assert_reader_intact("after a 4-byte partial window")
+        self.board_side.sendall(
+            b"\x00" * (SIL_PACKET_SIZE - 4)
+            + pack_sil_can_frame(CAN_ID_ENV_TELEMETRY, self.ENV_PAYLOAD)
+        )
+        self._wait_for_leak_flags(
+            self.ENV_LEAK_FLAGS,
+            "the env frame that completed the misaligned window to be decoded",
+        )
+
+    def test_several_frames_behind_garbage_are_all_decoded(self) -> None:
+        """
+        Resync is not one-shot: every frame after the garbage has to arrive, not
+        just the first, or the reader is silently dropping a frame per resync.
+        """
+        self.board_side.sendall(b"\x5A" * 9)
+        for flags in (0x01, 0x02, 0x03):
+            self.board_side.sendall(
+                pack_sil_can_frame(
+                    CAN_ID_ENV_TELEMETRY, struct.pack("<3fB", 1013.25, 42.0, 26.5, flags)
+                )
+            )
+
+        self._wait_for_leak_flags(0x03, "the last of three frames behind the garbage")
+        self.assertEqual(
+            self.client.frame_count,
+            3,
+            "the reader counted a different number of frames than were sent, so it "
+            "either dropped one or split the stream somewhere",
+        )
+
+    def test_an_undecodable_payload_is_dropped_and_the_next_frame_survives(self) -> None:
+        """
+        A frame with a valid header but a payload too short to decode must be
+        skipped, not allowed to reach the loop's exit handler.
+
+        ``EnvTelemetry.unpack`` requires 13 bytes, so 12 is undecodable while
+        the enclosing SIL frame is perfectly well formed -- which is the whole
+        point.  Header validation alone does not cover this, and it is the case
+        that would otherwise take the reader down.
+        """
+        self.board_side.sendall(
+            pack_sil_can_frame(CAN_ID_ENV_TELEMETRY, self.ENV_PAYLOAD[:-1])
+        )
+        self.board_side.sendall(
+            pack_sil_can_frame(CAN_ID_ENV_TELEMETRY, self.ENV_PAYLOAD)
+        )
+
+        self._wait_for_leak_flags(
+            self.ENV_LEAK_FLAGS, "the env frame that followed the undecodable one"
+        )
+        self._assert_reader_intact("after an undecodable payload")
+
+    def test_the_legacy_magic_header_is_still_accepted(self) -> None:
+        """
+        The reader must keep accepting the legacy magic, not just the current one.
+
+        ``unpack_sil_can_frame`` accepts both, so a reader that gates on the
+        current header alone would reject every legacy frame the function
+        itself considers valid -- turning a compatibility allowance into a
+        silent drop for the whole session, with no error to show for it.  That
+        is why the assertion is on the decoded payload and not on the absence
+        of a crash.
+        """
+        frame = bytearray(pack_sil_can_frame(CAN_ID_ENV_TELEMETRY, self.ENV_PAYLOAD))
+        frame[:4] = SIL_MAGIC_HEADER_LEGACY.to_bytes(4, "little")
+        self.board_side.sendall(bytes(frame))
+
+        self._wait_for_leak_flags(
+            self.ENV_LEAK_FLAGS,
+            "the legacy-magic env frame to be decoded",
+        )
+        self._assert_reader_intact("after a legacy-magic frame")
 
 
 class TestDashboardHandlersAgainstServer(ServerBackedTestCase):
