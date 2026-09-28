@@ -19,6 +19,7 @@
 #include "mock_bsp.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* Register map, matching drivers/src/bme280.c. */
