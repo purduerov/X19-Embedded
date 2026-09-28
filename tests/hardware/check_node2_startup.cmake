@@ -4,6 +4,13 @@ endif()
 
 file(READ "${MAIN_SOURCE}" MAIN_CONTENTS)
 
+# Strip C comments before searching. Without this, a startup call that has been
+# commented out still satisfies the check below, so a node whose main.c no longer
+# calls HAL_Init() or the peripheral MX_* initialisers would pass anyway. The
+# ordering contract is about executed code, not about text present in the file.
+string(REGEX REPLACE "/\\*[^*]*\\*+([^/*][^*]*\\*+)*/" " " MAIN_CONTENTS "${MAIN_CONTENTS}")
+string(REGEX REPLACE "//[^\n]*" " " MAIN_CONTENTS "${MAIN_CONTENTS}")
+
 set(EXPECTED_CALLS
     "HAL_Init()"
     "SystemClock_Config()"
