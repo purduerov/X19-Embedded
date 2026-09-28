@@ -323,8 +323,7 @@ bool bsp_i2c_probe(uint8_t addr) {
     return false;
 }
 
-void bsp_i2c_init(void) {
-}
+void bsp_i2c_init(void) {}
 
 uint8_t bsp_i2c_scan(void) {
     return 0;

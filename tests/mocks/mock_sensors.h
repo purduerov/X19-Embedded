@@ -29,12 +29,6 @@ extern "C" {
 void mock_sensors_reset(void);
 
 /**
- * @brief Inject Bosch BME280 enclosure pressure, humidity, and temperature.
- */
-void mock_sensors_set_bme280(float pressure_hpa, float humidity_pct, float temp_c);
-bool mock_sensors_get_bme280(float *pressure_hpa, float *humidity_pct, float *temp_c);
-
-/**
  * @brief Inject MS5837-30BA hydrostatic pressure and temperature.
  */
 void mock_sensors_set_ms5837(float pressure_mbar, float temp_c);

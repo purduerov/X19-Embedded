@@ -8,13 +8,6 @@
 #include <string.h>
 
 static struct {
-    float pressure_hpa;
-    float humidity_pct;
-    float temp_c;
-    bool valid;
-} g_mock_bme280;
-
-static struct {
     float pressure_mbar;
     float temp_c;
     bool valid;
@@ -47,11 +40,6 @@ static struct {
 
 void mock_sensors_reset(void) {
     /* Nominal atmospheric defaults */
-    g_mock_bme280.pressure_hpa = 1013.25f;
-    g_mock_bme280.humidity_pct = 35.0f;
-    g_mock_bme280.temp_c = 24.0f;
-    g_mock_bme280.valid = true;
-
     g_mock_ms5837.pressure_mbar = 1013.25f;
     g_mock_ms5837.temp_c = 18.0f;
     g_mock_ms5837.valid = true;
@@ -81,25 +69,6 @@ void mock_sensors_reset(void) {
 
     g_mock_tmp1075.temp_c = 25.0f;
     g_mock_tmp1075.valid = true;
-}
-
-void mock_sensors_set_bme280(float pressure_hpa, float humidity_pct, float temp_c) {
-    g_mock_bme280.pressure_hpa = pressure_hpa;
-    g_mock_bme280.humidity_pct = humidity_pct;
-    g_mock_bme280.temp_c = temp_c;
-    g_mock_bme280.valid = true;
-}
-
-bool mock_sensors_get_bme280(float *pressure_hpa, float *humidity_pct, float *temp_c) {
-    if (!g_mock_bme280.valid)
-        return false;
-    if (pressure_hpa)
-        *pressure_hpa = g_mock_bme280.pressure_hpa;
-    if (humidity_pct)
-        *humidity_pct = g_mock_bme280.humidity_pct;
-    if (temp_c)
-        *temp_c = g_mock_bme280.temp_c;
-    return true;
 }
 
 void mock_sensors_set_ms5837(float pressure_mbar, float temp_c) {
@@ -188,4 +157,3 @@ bool mock_sensors_get_tmp1075(float *temp_c) {
         *temp_c = g_mock_tmp1075.temp_c;
     return true;
 }
-

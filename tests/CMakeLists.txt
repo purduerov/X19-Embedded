@@ -9,6 +9,7 @@ add_definitions(-DROV_UNIT_TEST -DX19_UNIT_TEST -UNDEBUG)
 add_library(rov_mocks OBJECT
     mocks/mock_can.c
     mocks/mock_bsp.c
+    mocks/mock_bme280.c
     mocks/mock_sensors.c
     mocks/mock_physics.c
 )

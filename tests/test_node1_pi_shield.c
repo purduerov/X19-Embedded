@@ -5,6 +5,7 @@
  */
 
 #include "app.h"
+#include "mocks/mock_bme280.h"
 #include "mocks/mock_bsp.h"
 #include "mocks/mock_can.h"
 #include "mocks/mock_sensors.h"
@@ -15,10 +16,37 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The BME280's primary I2C address; the driver falls back to 0x77 if 0x76 is absent. */
+#define BME280_TEST_ADDR 0x76u
+
+/*
+ * Place the BME280 at an engineering reading.
+ *
+ * This used to be mock_sensors_set_bme280(), which injected finished hPa / %RH /
+ * C values straight into the driver through a test-only hook. The hook is gone:
+ * the driver now reads a real I2C register file, so a test has to put the
+ * *sensor* at a reading rather than the driver at a value. Going through the
+ * device model is the point -- it means these leak-threshold tests exercise the
+ * same init, the same register reads and the same compensation the firmware
+ * runs, instead of bypassing all three.
+ */
+static void set_bme280_reading(float pressure_hpa, float humidity_pct, float temp_c) {
+    mock_bme280_set_reading(BME280_TEST_ADDR, pressure_hpa, humidity_pct, temp_c);
+}
+
 static void setup(void) {
     mock_bsp_reset();
     mock_can_reset();
     mock_sensors_reset();
+
+    /*
+     * Put the sensor on the bus with a plausible trimming, then park it at the
+     * nominal enclosure conditions. Without this the driver's probe for the
+     * chip id fails, bme280_init() returns an error, and every assertion below
+     * would be reading the zeroed struct instead of a measurement.
+     */
+    mock_bme280_present(BME280_TEST_ADDR);
+    set_bme280_reading(1013.25f, 35.0f, 24.0f);
 
     mock_can_set_current_node(ROV_NODE_PI_SHIELD);
 }
@@ -26,7 +54,7 @@ static void setup(void) {
 void test_node1_nominal_telemetry(void) {
     setup();
 
-    mock_sensors_set_bme280(1013.25f, 42.0f, 26.5f);
+    set_bme280_reading(1013.25f, 42.0f, 26.5f);
 
     mock_sensors_set_ina226(5.21f, 1.35f);
 
@@ -80,7 +108,7 @@ void test_node1_vacuum_loss_leak_trigger(void) {
      * Start with a sealed enclosure pulled to
      * 750 hPa vacuum.
      */
-    mock_sensors_set_bme280(750.0f, 30.0f, 22.0f);
+    set_bme280_reading(750.0f, 30.0f, 22.0f);
 
     node1_app_init();
 
@@ -96,7 +124,7 @@ void test_node1_vacuum_loss_leak_trigger(void) {
      * Simulate vacuum loss:
      * pressure rises by 25 hPa.
      */
-    mock_sensors_set_bme280(775.0f, 30.0f, 22.0f);
+    set_bme280_reading(775.0f, 30.0f, 22.0f);
 
     mock_bsp_advance_time_ms(100);
     node1_app_step();
@@ -136,7 +164,7 @@ void test_node1_vacuum_loss_leak_trigger(void) {
 void test_node1_humidity_spike_leak_trigger(void) {
     setup();
 
-    mock_sensors_set_bme280(1013.25f, 35.0f, 24.0f);
+    set_bme280_reading(1013.25f, 35.0f, 24.0f);
 
     node1_app_init();
 
@@ -149,7 +177,7 @@ void test_node1_humidity_spike_leak_trigger(void) {
      * Spike humidity to 85%.
      * Threshold is 80%.
      */
-    mock_sensors_set_bme280(1013.25f, 85.0f, 24.0f);
+    set_bme280_reading(1013.25f, 85.0f, 24.0f);
 
     mock_bsp_advance_time_ms(100);
     node1_app_step();
@@ -179,7 +207,7 @@ void test_node1_humidity_spike_leak_trigger(void) {
 void test_node1_floor_probe_leak_polling_backup(void) {
     setup();
 
-    mock_sensors_set_bme280(1013.25f, 35.0f, 24.0f);
+    set_bme280_reading(1013.25f, 35.0f, 24.0f);
 
     node1_app_init();
 
@@ -228,7 +256,7 @@ void test_node1_floor_probe_leak_polling_backup(void) {
 void test_node1_floor_probe0_irq_emergency(void) {
     setup();
 
-    mock_sensors_set_bme280(1013.25f, 35.0f, 24.0f);
+    set_bme280_reading(1013.25f, 35.0f, 24.0f);
 
     node1_app_init();
 

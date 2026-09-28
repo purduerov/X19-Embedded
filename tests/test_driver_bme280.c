@@ -5,9 +5,12 @@
  */
 
 #include "bme280.h"
+#include "mocks/mock_bme280.h"
 #include "mocks/mock_bsp.h"
+#include "rov_safety.h"
 
 #include <assert.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -296,13 +299,164 @@ static void test_compensation(void) {
     assert(dev.temperature_c > 25.07f && dev.temperature_c < 25.09f);
 
     assert(dev.pressure_hpa > 1006.4f && dev.pressure_hpa < 1006.7f);
+}
 
-    /*
-     * At minimum, humidity should remain in its physical range.
-     * This is NOT a reference-value accuracy test.
-     */
-    assert(dev.humidity_pct >= 0.0f);
-    assert(dev.humidity_pct <= 100.0f);
+/*
+ * Verify humidity against a published vector rather than against its own clamp.
+ *
+ * With the datasheet's example trimming at 25.08 C, the datasheet's reference
+ * algorithm returns 48.59 %RH for adc_H = 30000.
+ *
+ * This assertion is the reason the earlier revision of this driver was caught.
+ * It used the widely copied integer humidity transcription, which returns
+ * 0.37 %RH for the same input, and the previous test only asserted
+ * 0 <= humidity <= 100 -- bounds that the function's own clamp guarantees, so
+ * a formula that returned a flat ~0.00-0.03 %RH for every possible input
+ * passed. That silently disabled node1's humidity leak threshold, which sits
+ * at ROV_LEAK_HUMIDITY_MAX_PCT, because 0 %RH can never cross it.
+ */
+static void test_humidity_reference_vector(void) {
+    bme280_dev_t dev;
+    uint8_t data[8] = {0};
+
+    setup_bme280();
+
+    data[3] = (uint8_t)((519888 >> 12) & 0xFF);
+    data[4] = (uint8_t)((519888 >> 4) & 0xFF);
+    data[5] = (uint8_t)((519888 & 0x0F) << 4);
+    data[6] = (uint8_t)((30000 >> 8) & 0xFF);
+    data[7] = (uint8_t)(30000 & 0xFF);
+    mock_bsp_i2c_set_regs(BME280_TEST_ADDR, BME280_REG_DATA, data, sizeof(data));
+
+    assert(bme280_init(&dev) == ROV_OK);
+    assert(bme280_read_all(&dev) == ROV_OK);
+
+    assert(dev.temperature_c > 25.07f && dev.temperature_c < 25.09f);
+    assert(dev.humidity_pct > 48.5f && dev.humidity_pct < 48.7f);
+}
+
+/*
+ * Verify humidity rises with the raw word, so the leak threshold is reachable.
+ *
+ * A single vector can be satisfied by a formula that is right once and wrong
+ * everywhere else. Node1's leak logic compares against a percentage, so what
+ * matters is that the reading is monotonic in the raw word and spans the
+ * threshold; a flat or inverted response would pass a one-point check and still
+ * make the threshold unreachable.
+ */
+static void test_humidity_is_monotonic_across_the_threshold(void) {
+    bme280_dev_t dev;
+    float previous = -1.0f;
+    uint8_t data[8] = {0};
+    int saw_below = 0;
+    int saw_above = 0;
+
+    setup_bme280();
+    data[3] = (uint8_t)((519888 >> 12) & 0xFF);
+    data[4] = (uint8_t)((519888 >> 4) & 0xFF);
+    data[5] = (uint8_t)((519888 & 0x0F) << 4);
+
+    assert(bme280_init(&dev) == ROV_OK);
+
+    for (int32_t adc_h = 16000; adc_h <= 48000; adc_h += 1000) {
+        float got;
+
+        data[6] = (uint8_t)((adc_h >> 8) & 0xFF);
+        data[7] = (uint8_t)(adc_h & 0xFF);
+        mock_bsp_i2c_set_regs(BME280_TEST_ADDR, BME280_REG_DATA, data, sizeof(data));
+
+        assert(bme280_read_all(&dev) == ROV_OK);
+        got = dev.humidity_pct;
+
+        assert(got >= previous);
+        previous = got;
+
+        if (got < ROV_LEAK_HUMIDITY_MAX_PCT) {
+            saw_below = 1;
+        }
+        if (got > ROV_LEAK_HUMIDITY_MAX_PCT) {
+            saw_above = 1;
+        }
+    }
+
+    assert(saw_below);
+    assert(saw_above);
+}
+
+/*
+ * Verify a read that hits the power-on sentinel is reported as a failure.
+ *
+ * The first poll after bme280_init() lands here in practice, because
+ * configuring oversampling starts a conversion that has not finished. Without
+ * the check the driver compensates 0x80000 into a plausible-looking reading and
+ * node1 publishes it, and a leak threshold then gets evaluated against a sample
+ * that was never taken.
+ */
+static void test_power_on_sentinel_is_rejected(void) {
+    bme280_dev_t dev;
+    uint8_t data[8];
+    int32_t sentinel = 0x80000;
+
+    setup_bme280();
+
+    data[0] = (uint8_t)((sentinel >> 12) & 0xFF);
+    data[1] = (uint8_t)((sentinel >> 4) & 0xFF);
+    data[2] = (uint8_t)((sentinel & 0x0F) << 4);
+    data[3] = data[0];
+    data[4] = data[1];
+    data[5] = data[2];
+    data[6] = (uint8_t)((sentinel >> 8) & 0xFF);
+    data[7] = (uint8_t)(sentinel & 0xFF);
+    mock_bsp_i2c_set_regs(BME280_TEST_ADDR, BME280_REG_DATA, data, sizeof(data));
+
+    assert(bme280_init(&dev) == ROV_OK);
+    assert(bme280_read_all(&dev) != ROV_OK);
+}
+
+/*
+ * Verify the device model can actually reach the readings it is asked for.
+ *
+ * tests/test_node1_pi_shield.c sets the BME280 by engineering value and then
+ * asserts on leak thresholds, so if the model silently failed to invert -- and
+ * left every reading at a flat 0 or a saturated 100 -- those tests would keep
+ * passing while testing nothing. This asserts the model's own forward
+ * computation lands on the request, so a broken inversion fails here instead.
+ */
+static void test_device_model_round_trip(void) {
+    static const float cases[][3] = {
+        {1013.25f, 42.0f, 26.5f},
+        {750.0f, 30.0f, 22.0f},
+        {1013.25f, 85.0f, 24.0f},
+    };
+
+    for (unsigned i = 0; i < (sizeof(cases) / sizeof(cases[0])); i++) {
+        bme280_dev_t dev;
+        float want_p = cases[i][0];
+        float want_h = cases[i][1];
+        float want_t = cases[i][2];
+        float model_p = 0.0f;
+        float model_h = 0.0f;
+        float model_t = 0.0f;
+
+        mock_bsp_reset();
+        mock_bme280_present(BME280_TEST_ADDR);
+        mock_bme280_set_reading(BME280_TEST_ADDR, want_p, want_h, want_t);
+
+        assert(mock_bme280_get_modelled_reading(BME280_TEST_ADDR, &model_p, &model_h, &model_t));
+
+        /* Pressure within 0.5 hPa, humidity within 0.5 %RH, temperature within 0.05 C. */
+        assert(fabsf(model_p - want_p) < 0.5f);
+        assert(fabsf(model_h - want_h) < 0.5f);
+        assert(fabsf(model_t - want_t) < 0.05f);
+
+        /* And the driver must agree with the model, since that is the real path. */
+        assert(bme280_init(&dev) == ROV_OK);
+        assert(bme280_read_all(&dev) == ROV_OK);
+
+        assert(fabsf(dev.pressure_hpa - want_p) < 0.5f);
+        assert(fabsf(dev.humidity_pct - want_h) < 0.5f);
+        assert(fabsf(dev.temperature_c - want_t) < 0.05f);
+    }
 }
 
 void test_bme280_driver(void) {
@@ -313,6 +467,10 @@ void test_bme280_driver(void) {
     test_wrong_chip_id();
     test_invalid_calibration();
     test_compensation();
+    test_humidity_reference_vector();
+    test_humidity_is_monotonic_across_the_threshold();
+    test_power_on_sentinel_is_rejected();
+    test_device_model_round_trip();
 
     printf("[PASS] test_bme280_driver\n");
 }
