@@ -1,6 +1,39 @@
 #ifndef X19_TEST_FAKE_MAIN_H
 #define X19_TEST_FAKE_MAIN_H
 
+/*
+ * ============================================================================
+ * THIS HEADER IS NOT A SOURCE OF TRUTH FOR PINS. DO NOT DERIVE BSP CODE,
+ * A .ioc FILE, OR A CUBEMX CONFIGURATION FROM IT.
+ * ============================================================================
+ *
+ * Every pin macro below is a hand-written guess. None of it came from a
+ * generated CubeMX `main.h` or from a schematic netlist. Passing the
+ * `target_bsp_*` contract tests proves that the BSP logic is internally
+ * correct and calls the HAL in the expected order. It does NOT prove that
+ * firmware drives real hardware.
+ *
+ * Verified against the KiCad schematics on 2026-09-28, this header is
+ * actively wrong:
+ *
+ *   - `EMERGENCY_CUTOFF` is on `GPIOC PIN_10`. The STM32C542CCT6 LQFP-48 that
+ *     all three boards use has NO PC0-PC12 pins. PC13 is its only PC pin.
+ *     This pin cannot physically be bonded out.
+ *   - The Pi Shield has no leak-probe net and no emergency-cutoff net at all.
+ *     PA4 and PA5 are unconnected on that board.
+ *   - The Power Slab has no brick-enable net. Its four Murata E48SC12030
+ *     converters have `ON/OFF` hard-tied to `VIN(-)`, so as drawn they are all
+ *     held off. It also contains no LM74700.
+ *   - The Control Board has no `SOL_0..SOL_9`. Its ten solenoid MOSFET gates are
+ *     netted `GATE1..GATE10` on PA0-PA3, PA7, PB0-PB2, PB10 and VCAP.
+ *   - `LED_STATUS` and `LED_HEARTBEAT` are both defined on `GPIOC PIN_13`, so
+ *     they collide with each other. No board has a GPIO LED at all; the three
+ *     Control Board LEDs are rail indicators.
+ *
+ * A green `target_bsp_node*` test is a statement about logic, never about
+ * silicon. See docs/pinout_mappings.md and docs/board_findings.md.
+ */
+
 #include <stdbool.h>
 #include <stdint.h>
 
