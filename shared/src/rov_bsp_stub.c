@@ -148,3 +148,16 @@ __attribute__((weak)) rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, 
 
     return ROV_ERROR;
 }
+
+/*
+ * Reports failure rather than a zero word, so a node that has not implemented
+ * PMBus cannot mistake "no bus" for "the brick is reading zero volts" and latch a
+ * fault it cannot clear, nor publish a zero reading as though it were measured.
+ */
+__attribute__((weak)) bool bsp_pmbus_read_word(uint8_t pmbus_addr, uint8_t command, uint16_t *raw_word) {
+    (void)pmbus_addr;
+    (void)command;
+    (void)raw_word;
+
+    return false;
+}

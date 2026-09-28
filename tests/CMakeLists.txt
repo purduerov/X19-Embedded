@@ -136,6 +136,7 @@ add_test(NAME test_node2_control_board COMMAND test_node2_control_board)
 add_executable(test_node3_power_slab
     test_node3_power_slab.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
 )
 target_include_directories(test_node3_power_slab PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
@@ -149,6 +150,7 @@ add_executable(test_multi_node_bus
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
 )
 target_include_directories(test_multi_node_bus PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
@@ -167,6 +169,7 @@ add_executable(test_sil_safety
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
 )
 target_include_directories(test_sil_safety PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
@@ -184,6 +187,7 @@ add_executable(test_sil_power
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
 )
 target_include_directories(test_sil_power PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
@@ -201,6 +205,7 @@ add_executable(test_sil_fuzz
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
 )
 target_include_directories(test_sil_fuzz PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
@@ -215,6 +220,7 @@ add_executable(test_sil_burnin
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
 )
 target_include_directories(test_sil_burnin PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc
@@ -291,6 +297,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/power_sequence.c
     )
     target_include_directories(sil_bridge_server PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Inc

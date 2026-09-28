@@ -124,6 +124,18 @@ void mock_bsp_i2c_set_regs(uint8_t addr, uint8_t start_reg, const uint8_t *data,
  */
 uint8_t mock_bsp_i2c_get_reg(uint8_t addr, uint8_t reg);
 
+/**
+ * @brief Report whether a converter brick's enable line is asserted.
+ *
+ * The power sequencing state machine drives these lines, so a test that asserts
+ * on a sequencing outcome needs to read back what the sequencer actually did
+ * rather than infer it.
+ *
+ * @param brick_idx Brick index 0 to 3.
+ * @return true if the brick is enabled.
+ */
+bool mock_bsp_is_power_brick_enabled(uint8_t brick_idx);
+
 #ifdef __cplusplus
 }
 #endif
