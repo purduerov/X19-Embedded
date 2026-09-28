@@ -62,9 +62,7 @@
 static int32_t compensate_t_fine(int32_t adc_t) {
     int32_t var1 = ((((adc_t >> 3) - ((int32_t)DIG_T1 << 1))) * (int32_t)DIG_T2) >> 11;
     int32_t var2 =
-        (((((adc_t >> 4) - (int32_t)DIG_T1) * ((adc_t >> 4) - (int32_t)DIG_T1)) >> 12) *
-         (int32_t)DIG_T3) >>
-        14;
+        (((((adc_t >> 4) - (int32_t)DIG_T1) * ((adc_t >> 4) - (int32_t)DIG_T1)) >> 12) * (int32_t)DIG_T3) >> 14;
 
     return var1 + var2;
 }
@@ -130,10 +128,7 @@ static float humidity_pct_from_raw(int32_t adc_h, int32_t t_fine) {
     var_h = (double)t_fine / 5120.0;
     var_h = var_h - 76800.0;
     var_h =
-        ((double)adc_h -
-         (((double)DIG_H4 * 64.0) +
-          (((double)DIG_H5 / 16384.0) * var_h))) *
-        ((double)DIG_H2 / 65536.0);
+        ((double)adc_h - (((double)DIG_H4 * 64.0) + (((double)DIG_H5 / 16384.0) * var_h))) * ((double)DIG_H2 / 65536.0);
     var_h = var_h * (1.0 + (((double)DIG_H3 / 67108864.0) * var_h));
     var_h = var_h * (1.0 - (((double)DIG_H1 * var_h) / 524288.0));
 
@@ -219,8 +214,8 @@ static float measure_humidity(int32_t adc_h, int32_t t_fine) {
  * 40 iterations over a 20-bit range is far finer than any caller's threshold
  * and costs microseconds, running only from test setup.
  */
-static int32_t solve_raw_word(int32_t lo, int32_t hi, float target, float (*measure)(int32_t, int32_t),
-                              int32_t t_fine, bool increasing) {
+static int32_t solve_raw_word(int32_t lo, int32_t hi, float target, float (*measure)(int32_t, int32_t), int32_t t_fine,
+                              bool increasing) {
     for (int i = 0; i < 40; i++) {
         int32_t mid = lo + ((hi - lo) / 2);
         float got;
