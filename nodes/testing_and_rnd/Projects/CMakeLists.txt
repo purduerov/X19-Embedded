@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node1_pi_shield/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node2_control_board/Core/Src/app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Src/power_sequence.c
 )
 
 # Add include paths
@@ -149,6 +150,7 @@ target_sources(bench_node3_power_slab.elf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/bsp.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/can_f4.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Src/power_sequence.c
     ${MX_Application_Src}
 )
 target_include_directories(bench_node3_power_slab.elf PRIVATE
