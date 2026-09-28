@@ -19,6 +19,7 @@
  *                         Physics engine is enabled. Useful for CI burn-in.
  */
 
+#include "mocks/mock_bme280.h"
 #include "mocks/mock_bsp.h"
 #include "mocks/mock_can.h"
 #include "mocks/mock_physics.h"
@@ -29,6 +30,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * Nominal enclosure conditions for the modelled BME280, and the address the
+ * model is placed at. tests/sil_stimulus/test_stimulus_flows.py asserts against
+ * these through the 0x210 stream, so they are shared deliberately rather than
+ * duplicated as literals in the server.
+ */
+#define SIL_BME280_I2C_ADDR     0x76u
+#define SIL_BME280_PRESSURE_HPA 1013.25f
+#define SIL_BME280_HUMIDITY_PCT 35.0f
+#define SIL_BME280_TEMP_C       24.0f
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -59,10 +71,10 @@ extern void node2_app_step(void);
 extern void node3_app_init(void);
 extern void node3_app_step(void);
 
-#define SIL_BRIDGE_DEFAULT_PORT 8765
-#define SIL_CAN_ID_OUTPUT_STATUS 0x7FEU /* SIL-only snapshot of mocked BSP outputs */
-#define SIL_MAGIC_HEADER_LEGACY 0x58313943 /* "X19C" in ASCII */
-#define SIL_MAGIC_HEADER        0x524F5643 /* "ROVC" in ASCII */
+#define SIL_BRIDGE_DEFAULT_PORT  8765
+#define SIL_CAN_ID_OUTPUT_STATUS 0x7FEU     /* SIL-only snapshot of mocked BSP outputs */
+#define SIL_MAGIC_HEADER_LEGACY  0x58313943 /* "X19C" in ASCII */
+#define SIL_MAGIC_HEADER         0x524F5643 /* "ROVC" in ASCII */
 
 /* Frame packet: 4 bytes magic, 4 bytes id, 1 byte len, up to 64 bytes data */
 #pragma pack(push, 1)
@@ -134,6 +146,24 @@ int main(int argc, char **argv) {
         mock_bsp_set_auto_advance_delay(false);
         mock_can_reset();
         mock_sensors_reset();
+
+        /*
+         * Put a BME280 on the mock bus at the nominal enclosure conditions.
+         *
+         * This used to come from mock_sensors_reset(), which stored finished
+         * hPa / %RH / C values that the driver short-circuited to. The driver
+         * now reads a real register file, so the sensor has to be present on
+         * the bus at all: without this the chip-id probe fails, bme280_init()
+         * errors, and node1 publishes zeros on 0x210.
+         *
+         * Seeding the device rather than the driver is the point. The SIL now
+         * exercises node1's actual init, register reads and compensation
+         * instead of bypassing all three.
+         */
+        mock_bme280_present(SIL_BME280_I2C_ADDR);
+        mock_bme280_set_reading(SIL_BME280_I2C_ADDR, SIL_BME280_PRESSURE_HPA, SIL_BME280_HUMIDITY_PCT,
+                                SIL_BME280_TEMP_C);
+
         mock_physics_reset();
         mock_physics_set_enabled(true);
 
@@ -238,6 +268,11 @@ int main(int argc, char **argv) {
     mock_bsp_set_auto_advance_delay(false);
     mock_can_reset();
     mock_sensors_reset();
+
+    /* Nominal enclosure; see the fast-forward block above for why. */
+    mock_bme280_present(SIL_BME280_I2C_ADDR);
+    mock_bme280_set_reading(SIL_BME280_I2C_ADDR, SIL_BME280_PRESSURE_HPA, SIL_BME280_HUMIDITY_PCT, SIL_BME280_TEMP_C);
+
     mock_physics_reset();
     mock_physics_set_enabled(true); /* Run 6-DOF physics plant model in real-time mode */
 
@@ -298,7 +333,9 @@ int main(int argc, char **argv) {
                     if (pkt->magic == SIL_MAGIC_HEADER || pkt->magic == SIL_MAGIC_HEADER_LEGACY) {
                         /* Security: Validate payload length to prevent buffer over-read */
                         if (pkt->len > 64) {
-                            printf("SIL Bridge: WARNING: Dropped malformed packet with length %u (exceeds maximum 64)\n", pkt->len);
+                            printf(
+                                "SIL Bridge: WARNING: Dropped malformed packet with length %u (exceeds maximum 64)\n",
+                                pkt->len);
                             fflush(stdout);
                             memmove(rx_stream_buf, rx_stream_buf + 1, rx_stream_len - 1);
                             rx_stream_len--;

@@ -3255,9 +3255,31 @@ class TestStimulusAgainstServer(ServerBackedTestCase):
 # values are exactly the sensor mock's reset defaults, sampled by node 1 at 10 Hz
 # (nodes/node1_pi_shield/Core/Src/app.c:159) and copied straight into the record
 # at nodes/node1_pi_shield/Core/Src/app.c:206-212.
-SIL_ENV_PRESSURE_HPA = 1013.25  # tests/mocks/mock_sensors.c:50
-SIL_ENV_HUMIDITY_PCT = 35.0     # tests/mocks/mock_sensors.c:51
-SIL_ENV_TEMPERATURE_C = 24.0    # tests/mocks/mock_sensors.c:52
+SIL_ENV_PRESSURE_HPA = 1013.25  # SIL_BME280_PRESSURE_HPA, tests/sil_bridge_server.c
+SIL_ENV_HUMIDITY_PCT = 35.0     # SIL_BME280_HUMIDITY_PCT
+SIL_ENV_TEMPERATURE_C = 24.0    # SIL_BME280_TEMP_C
+
+# Tolerances for the three environment values on the 0x210 stream.
+#
+# These used to be exact-equality assertions, and that was only possible because
+# the BME280 driver was bypassed: mock_sensors_reset() stored finished hPa /
+# %RH / C values that the driver returned without reading any hardware. Node 1
+# now reads a real register file through bsp_i2c_mem_read(), so the value it
+# publishes is whatever a discrete ADC word compensates to, and the requested
+# figure is only reachable to within the sensor's own resolution:
+#
+#   pressure   Bosch Q24.8, so 1 LSB = 1/256 hPa = 0.0039 hPa
+#   temperature  the driver reports hundredths of a degree, so 1 LSB = 0.01 C
+#   humidity   a float reference over a discrete 16-bit raw word
+#
+# The bounds below are 2-5 LSB in each case. That is still three orders of
+# magnitude tighter than the drift this test exists to catch -- a regression
+# that halved the reported humidity would read 17.5, not 35 -- so the exactness
+# that mattered for catching drift is preserved; what is given up is only the
+# ability to assert a value the hardware cannot produce.
+SIL_ENV_PRESSURE_TOL_HPA = 0.01
+SIL_ENV_HUMIDITY_TOL_PCT = 0.05
+SIL_ENV_TEMPERATURE_TOL_C = 0.02
 # Dry, and provably so: 35 % is below the 80 % humidity trip
 # (shared/include/rov_safety.h:19) evaluated at node1 app.c:181, the constant
 # pressure gives a 0 hPa rise against the 15 hPa vacuum-decay trip
@@ -3553,20 +3575,26 @@ class SilNodeIntegrationTests(ServerBackedTestCase):
                 # rounding at any hop. A tolerance here would let a 0.0004 drift
                 # through a test whose stated purpose is catching drift, and would
                 # contradict the principle recorded at the top of this section.
-                self.assertEqual(
+                self.assertAlmostEqual(
                     record.pressure_hpa,
                     SIL_ENV_PRESSURE_HPA,
-                    f"0x210 frame {index}: node1 app.c:206 publishes the BME280 reading verbatim",
+                    delta=SIL_ENV_PRESSURE_TOL_HPA,
+                    msg=(
+                        f"0x210 frame {index}: node1 app.c:206 publishes the BME280 "
+                        f"reading within the sensor's Q24.8 resolution"
+                    ),
                 )
-                self.assertEqual(
+                self.assertAlmostEqual(
                     record.humidity_pct,
                     SIL_ENV_HUMIDITY_PCT,
-                    f"0x210 frame {index}: node1 app.c:208",
+                    delta=SIL_ENV_HUMIDITY_TOL_PCT,
+                    msg=f"0x210 frame {index}: node1 app.c:208",
                 )
-                self.assertEqual(
+                self.assertAlmostEqual(
                     record.temperature_c,
                     SIL_ENV_TEMPERATURE_C,
-                    f"0x210 frame {index}: node1 app.c:210",
+                    delta=SIL_ENV_TEMPERATURE_TOL_C,
+                    msg=f"0x210 frame {index}: node1 app.c:210",
                 )
                 self.assertEqual(
                     record.leak_flags,
