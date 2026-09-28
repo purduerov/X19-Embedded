@@ -328,3 +328,38 @@ void bsp_i2c_init(void) {}
 uint8_t bsp_i2c_scan(void) {
     return 0;
 }
+
+bool mock_bsp_is_power_brick_enabled(uint8_t brick_idx) {
+    if (brick_idx >= (uint8_t)(sizeof(g_mock_brick_enabled) / sizeof(g_mock_brick_enabled[0]))) {
+        return false;
+    }
+
+    return g_mock_brick_enabled[brick_idx];
+}
+
+/*
+ * PMBus word read, as the register-oriented drivers use it.
+ *
+ * A PMBus slave is write-addressed: the master sends the command code, then the
+ * slave answers with a 16-bit word. There is no register pointer, so this mock
+ * keys off the command code and reports zero for everything.
+ *
+ * Reporting success with a zero word is deliberate rather than convenient.
+ * pmbus_brick_read_telemetry() takes the mock path first and only falls through
+ * to this when no mock telemetry is staged, so a zero word here is what a test
+ * gets when it has not set up brick data -- and the resulting 0 V / 0 A reading
+ * is what the node's sanitizers and overcurrent checks are supposed to react
+ * to. Returning false instead would short-circuit the read and hide that.
+ */
+bool bsp_pmbus_read_word(uint8_t pmbus_addr, uint8_t command, uint16_t *raw_word) {
+    (void)pmbus_addr;
+    (void)command;
+
+    if (raw_word == NULL) {
+        return false;
+    }
+
+    *raw_word = 0U;
+
+    return true;
+}

@@ -8,11 +8,15 @@
 #include "mocks/mock_bsp.h"
 #include "mocks/mock_can.h"
 #include "mocks/mock_sensors.h"
+#include "power_sequence.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+/* Four 12 V converter bricks; the 5.2 V logic rail is not one of them. */
+#define TEST_NUM_POWER_BRICKS 4U
 
 static void setup(void) {
     mock_bsp_reset();
@@ -100,11 +104,288 @@ void test_node3_overtemperature_fault_alert(void) {
     printf("[PASS] test_node3_overtemperature_fault_alert\n");
 }
 
+/*
+ * ==========================================================================
+ * Power Sequencing SIL Tests
+ * ==========================================================================
+ */
+
+/*
+ * Drive the sequencer to PWR_SEQ_STAGGER_ENABLE, which is where the brick
+ * enable lines start being asserted.
+ */
+static void advance_to_stagger_enable(void) {
+    mock_bsp_set_logic_voltage_mv(5001U);
+    mock_bsp_set_pcb_temperature_c(25.0f);
+    mock_bsp_set_lm74700_ok(true);
+
+    power_sequence_init();
+
+    /* INIT -> WAIT_LOGIC_STABLE */
+    power_sequence_step();
+
+    /* First sample above 5.0 V starts the stability timer. */
+    power_sequence_step();
+
+    mock_bsp_advance_time_ms(500U);
+
+    /* WAIT_LOGIC_STABLE -> DIAGNOSTICS */
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_DIAGNOSTICS);
+
+    /* DIAGNOSTICS -> STAGGER_ENABLE */
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_STAGGER_ENABLE);
+}
+
+/**
+ * Verify cold boot stays in PWR_SEQ_WAIT_LOGIC_STABLE until the logic rail has
+ * been above 5.0 V continuously for 500 ms.
+ */
+void test_node3_power_sequence_logic_stability(void) {
+    setup();
+
+    power_sequence_init();
+    assert(power_sequence_get_state() == PWR_SEQ_INIT);
+
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_WAIT_LOGIC_STABLE);
+
+    mock_bsp_set_logic_voltage_mv(5001U);
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_WAIT_LOGIC_STABLE);
+
+    /* 499 ms is not enough. */
+    mock_bsp_advance_time_ms(499U);
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_WAIT_LOGIC_STABLE);
+
+    /* Exactly 500 ms allows the transition. */
+    mock_bsp_advance_time_ms(1U);
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_DIAGNOSTICS);
+
+    printf("[PASS] test_node3_power_sequence_logic_stability\n");
+}
+
+/**
+ * Verify a logic-rail drop resets the 500 ms stability timer.
+ *
+ * The point is that the timer measures *continuous* stability. A rail that dips
+ * to the threshold and recovers must restart the count, not resume it, or a rail
+ * that browns out repeatedly would eventually pass a cumulative timer and enable
+ * the converters while the rail is still unstable.
+ */
+void test_node3_power_sequence_voltage_drop_resets_timer(void) {
+    setup();
+
+    power_sequence_init();
+    power_sequence_step();
+
+    mock_bsp_set_logic_voltage_mv(5001U);
+    power_sequence_step();
+
+    mock_bsp_advance_time_ms(300U);
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_WAIT_LOGIC_STABLE);
+
+    /* Rail falls back to the threshold: the timer must reset. */
+    mock_bsp_set_logic_voltage_mv(5000U);
+    power_sequence_step();
+
+    mock_bsp_set_logic_voltage_mv(5001U);
+    power_sequence_step();
+
+    /* 499 ms after the new valid sample is still insufficient. */
+    mock_bsp_advance_time_ms(499U);
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_WAIT_LOGIC_STABLE);
+
+    mock_bsp_advance_time_ms(1U);
+    power_sequence_step();
+    assert(power_sequence_get_state() == PWR_SEQ_DIAGNOSTICS);
+
+    printf("[PASS] test_node3_power_sequence_voltage_drop_resets_timer\n");
+}
+
+/**
+ * Verify bricks enable one at a time at 50 ms intervals.
+ *
+ * Sequential enable is the inrush limit: five converters switched together would
+ * pull the tether down far enough to trip the undervoltage lockout.
+ */
+void test_node3_power_sequence_brick_stagger(void) {
+    setup();
+
+    advance_to_stagger_enable();
+
+    for (uint8_t i = 0U; i < TEST_NUM_POWER_BRICKS; i++) {
+        assert(!mock_bsp_is_power_brick_enabled(i));
+    }
+
+    mock_bsp_advance_time_ms(49U);
+    power_sequence_step();
+    assert(!mock_bsp_is_power_brick_enabled(0U));
+
+    mock_bsp_advance_time_ms(1U);
+    power_sequence_step();
+    assert(mock_bsp_is_power_brick_enabled(0U));
+    assert(!mock_bsp_is_power_brick_enabled(1U));
+
+    mock_bsp_advance_time_ms(50U);
+    power_sequence_step();
+    assert(mock_bsp_is_power_brick_enabled(1U));
+    assert(!mock_bsp_is_power_brick_enabled(2U));
+
+    mock_bsp_advance_time_ms(50U);
+    power_sequence_step();
+    assert(mock_bsp_is_power_brick_enabled(2U));
+    assert(!mock_bsp_is_power_brick_enabled(3U));
+
+    mock_bsp_advance_time_ms(50U);
+    power_sequence_step();
+    assert(mock_bsp_is_power_brick_enabled(3U));
+
+    assert(power_sequence_get_state() == PWR_SEQ_RUNNING);
+
+    printf("[PASS] test_node3_power_sequence_brick_stagger\n");
+}
+
+/**
+ * Verify an emergency stop latches FAULT and drops every rail.
+ *
+ * Two rails are enabled first so the assertion is about shutting down something
+ * that was actually on, rather than about a state change alone.
+ */
+void test_node3_power_sequence_emergency_fault(void) {
+    setup();
+
+    advance_to_stagger_enable();
+
+    mock_bsp_advance_time_ms(50U);
+    power_sequence_step();
+    mock_bsp_advance_time_ms(50U);
+    power_sequence_step();
+
+    assert(mock_bsp_is_power_brick_enabled(0U));
+    assert(mock_bsp_is_power_brick_enabled(1U));
+
+    power_sequence_emergency_stop();
+    assert(power_sequence_get_state() == PWR_SEQ_FAULT);
+
+    for (uint8_t i = 0U; i < TEST_NUM_POWER_BRICKS; i++) {
+        assert(!mock_bsp_is_power_brick_enabled(i));
+    }
+
+    /*
+     * Latched, not momentary: further steps must not bring the rails back on
+     * without a reset. A fault that cleared itself would re-energise the
+     * converters with no operator action.
+     */
+    mock_bsp_advance_time_ms(1000U);
+    power_sequence_step();
+
+    assert(power_sequence_get_state() == PWR_SEQ_FAULT);
+    for (uint8_t i = 0U; i < TEST_NUM_POWER_BRICKS; i++) {
+        assert(!mock_bsp_is_power_brick_enabled(i));
+    }
+
+    printf("[PASS] test_node3_power_sequence_emergency_fault\n");
+}
+
+/**
+ * Verify a PCB temperature above the sequencer's 50 C threshold latches FAULT.
+ */
+void test_node3_power_sequence_high_temp_fault(void) {
+    setup();
+
+    advance_to_stagger_enable();
+
+    mock_bsp_advance_time_ms(50U);
+    power_sequence_step();
+    mock_bsp_advance_time_ms(50U);
+    power_sequence_step();
+
+    assert(mock_bsp_is_power_brick_enabled(0U));
+    assert(mock_bsp_is_power_brick_enabled(1U));
+
+    mock_bsp_set_pcb_temperature_c(60.0f);
+    power_sequence_step();
+
+    assert(power_sequence_get_state() == PWR_SEQ_FAULT);
+
+    for (uint8_t i = 0U; i < TEST_NUM_POWER_BRICKS; i++) {
+        assert(!mock_bsp_is_power_brick_enabled(i));
+    }
+
+    printf("[PASS] test_node3_power_sequence_high_temp_fault\n");
+}
+
+/**
+ * Verify a node-level fault latches the sequencer, not just the pins.
+ *
+ * node3_app_step() clears the brick enable lines on a protection trip. That is
+ * not sufficient on its own: PWR_SEQ_STAGGER_ENABLE would keep advancing and
+ * re-enable a brick on the next 50 ms tick, so the shutdown would undo itself
+ * within one stagger period. This drives the real app path and asserts the
+ * state machine is latched too.
+ */
+void test_node3_app_fault_latches_the_sequencer(void) {
+    setup();
+
+    /* Nominal bricks, then one overcurrent on the 12 V rail. */
+    mock_sensors_set_tps25990(0, 48.0f, 5.2f, 2.0f, 32.0f, 0);
+    for (int i = 1; i < 5; i++) {
+        mock_sensors_set_tps25990((uint8_t)i, 48.0f, 12.0f, 5.0f, 38.0f, 0);
+    }
+
+    node3_app_init();
+    advance_to_stagger_enable();
+
+    mock_bsp_advance_time_ms(50U);
+    power_sequence_step();
+    power_sequence_step();
+    assert(mock_bsp_is_power_brick_enabled(0U));
+
+    /* Brick 2 to 28 A, above ROV_BRICK_MAX_CURRENT_A. */
+    mock_sensors_set_tps25990(2, 48.0f, 12.0f, 28.0f, 45.0f, 0);
+    mock_bsp_advance_time_ms(50U);
+    node3_app_step();
+
+    assert(power_sequence_get_state() == PWR_SEQ_FAULT);
+    for (uint8_t i = 0U; i < TEST_NUM_POWER_BRICKS; i++) {
+        assert(!mock_bsp_is_power_brick_enabled(i));
+    }
+
+    /*
+     * The overcurrent clears, and the node's own fault latch holds. The
+     * sequencer must not restart the stagger sequence on its own.
+     */
+    mock_sensors_set_tps25990(2, 48.0f, 12.0f, 5.0f, 38.0f, 0);
+    for (int i = 0; i < 20; i++) {
+        mock_bsp_advance_time_ms(50U);
+        node3_app_step();
+    }
+
+    assert(power_sequence_get_state() == PWR_SEQ_FAULT);
+    for (uint8_t i = 0U; i < TEST_NUM_POWER_BRICKS; i++) {
+        assert(!mock_bsp_is_power_brick_enabled(i));
+    }
+
+    printf("[PASS] test_node3_app_fault_latches_the_sequencer\n");
+}
+
 int main(void) {
     printf("Running Node 3 (Power Slab) SIL Unit Tests...\n");
     test_node3_nominal_telemetry();
     test_node3_overcurrent_fault_alert();
     test_node3_overtemperature_fault_alert();
+    test_node3_power_sequence_logic_stability();
+    test_node3_power_sequence_voltage_drop_resets_timer();
+    test_node3_power_sequence_brick_stagger();
+    test_node3_power_sequence_emergency_fault();
+    test_node3_power_sequence_high_temp_fault();
+    test_node3_app_fault_latches_the_sequencer();
     printf("All Node 3 SIL Tests Passed Successfully!\n");
     return 0;
 }

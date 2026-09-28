@@ -13,6 +13,7 @@
 #include "bsp.h"
 #include "can_interface.h"
 #include "pmbus_brick.h"
+#include "power_sequence.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
@@ -45,6 +46,16 @@ static int16_t node3_to_i16(float value) {
 
 void node3_app_init(void) {
     bsp_init();
+
+    /*
+     * Before anything else: all four 12 V converter bricks must be off, and the
+     * sequencer must be latched into a state where it is not about to enable
+     * them. power_sequence_init() disables them as its first action, so calling
+     * it here -- ahead of the CAN bring-up below -- means the bricks are never
+     * briefly enabled while the rest of init runs.
+     */
+    power_sequence_init();
+
     rov_safety_init(&g_safety_state);
 
     g_can_ready = can_init();
@@ -68,7 +79,21 @@ void node3_app_init(void) {
 void node3_app_step(void) {
     uint32_t current_time = time_get_ms();
 
+    /*
+     * The sequencer runs on every pass, ahead of the CAN check and the telemetry
+     * block below. It has to keep running while a fault is latched: PWR_SEQ_FAULT
+     * re-asserts the brick disables on each call, so it is what holds the outputs
+     * off after a trip, and it is what re-enables them once the fault clears.
+     */
+    power_sequence_step();
+
     if (!g_can_ready) {
+        /*
+         * Latch the sequencer too, not just the pins. Without this the state
+         * machine would carry on advancing toward PWR_SEQ_RUNNING and enable the
+         * bricks on a node that cannot report what they are doing.
+         */
+        power_sequence_emergency_stop();
         bsp_power_brick_disable_all();
         delay_ms(5);
         return;
@@ -184,6 +209,14 @@ void node3_app_step(void) {
 
         if (fault_detected) {
             g_power_telemetry.status_flags |= 0x0001; /* Fault bit */
+            /*
+             * Latch the sequencer as well as clearing the pins. Clearing the pins
+             * alone is not enough: PWR_SEQ_STAGGER_ENABLE would keep advancing
+             * and re-enable a brick on the next 50 ms tick, so the fault would
+             * clear itself and the slab would come back up with no operator
+             * action. The sequencer's FAULT state is latched until reset.
+             */
+            power_sequence_emergency_stop();
             bsp_power_brick_disable_all();
 
             /* Broadcast Priority 0 eFuse Fault Alert (0x005) once per fault. */

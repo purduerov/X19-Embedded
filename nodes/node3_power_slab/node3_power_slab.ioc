@@ -1,11 +1,4 @@
-# MicroX Explorer Configuration for STM32C542CCTx
-# Node 3 Power Slab
-#
-# IMPORTANT HARDWARE NOTE:
-# STM32C542CCT6 exposes I2C1 and I3C1, but not an I2C2 peripheral.
-# I3C1 is configured below for legacy I2C Fast-mode (400 kHz) as the
-# closest second-bus substitute. Legacy I2C devices on I3C1 must not
-# require clock stretching.
+#MicroXplorer Configuration settings
 
 File.Version=6
 KeepUserPlacement=false
@@ -15,88 +8,112 @@ Mcu.Family=STM32C5
 Mcu.Name=STM32C542CCTx
 Mcu.Package=LQFP48
 
-# Enabled peripherals
 Mcu.IP0=FDCAN1
 Mcu.IP1=I2C1
-Mcu.IP2=I3C1
-Mcu.IP3=ADC1
-Mcu.IP4=RCC
-Mcu.IP5=SYS
+Mcu.IP2=ADC1
+Mcu.IP3=RCC
+Mcu.IP4=SYS
 
-# Pin assignments
-# FDCAN1
-Mcu.Pin0=PB8
+Mcu.Pin0=PB8-BOOT0
 Mcu.Pin1=PB9
-PB8.Signal=FDCAN1_RX
-PB9.Signal=FDCAN1_TX
-
-# I2C1 - valid STM32C542 pin pair
-Mcu.Pin2=PA11
-Mcu.Pin3=PA12
-PA11.Signal=I2C1_SCL
-PA12.Signal=I2C1_SDA
-
-# I3C1 used as legacy I2C second bus
-Mcu.Pin4=PB6
-Mcu.Pin5=PB7
-PB6.Signal=I3C1_SCL
-PB7.Signal=I3C1_SDA
-
-# Existing ADC input
-Mcu.Pin6=PA0
-PA0.Signal=ADC1_IN1
-
-# 24 MHz HSE crystal pins
-Mcu.Pin7=PH0-OSC_IN
-Mcu.Pin8=PH1-OSC_OUT
-PH0-OSC_IN.Signal=RCC_OSC_IN
-PH1-OSC_OUT.Signal=RCC_OSC_OUT
+Mcu.Pin2=PA9
+Mcu.Pin3=PA10
+Mcu.Pin4=PA0
+Mcu.Pin5=PB0
+Mcu.Pin6=PB1
+Mcu.Pin7=PB2
+Mcu.Pin8=PB4
 
 Mcu.PinsNb=9
 Mcu.UserConstants=
 
-# -----------------------------------------------------------------------------
-# Clock configuration
-# STM32C5 uses the PSI clock block. 24 MHz HSE is the PSI reference and
-# PSIS supplies the 144 MHz system clock.
-# -----------------------------------------------------------------------------
-RCC.HSESource=CrystalCeramicResonator
-RCC.HSEFrequency=24000000
-RCC.PSIReference=HSE
-RCC.PSIFrequency=144000000
-RCC.SYSCLKSource=PSIS
-RCC.SYSCLKFrequency=144000000
-RCC.AHBPrescaler=1
-RCC.APB1Prescaler=1
-RCC.APB2Prescaler=1
-RCC.APB3Prescaler=1
+# -------------------------------------------------
+# PIN ASSIGNMENTS
+# -------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# I2C1 - Fast mode, 400 kHz
-# -----------------------------------------------------------------------------
-I2C1.Mode=I2C
-I2C1.AddressingMode=7bit
-I2C1.SpeedMode=Fast
-I2C1.Frequency=400000
-I2C1.ClockSource=PCLK1
+PB8-BOOT0.Signal=FDCAN1_RX
+PB9.Signal=FDCAN1_TX
 
-# -----------------------------------------------------------------------------
-# Second two-wire bus
-# STM32C542CCT6 has no I2C2. I3C1 is configured for legacy I2C Fast mode.
-# -----------------------------------------------------------------------------
-I3C1.Mode=LegacyI2CController
-I3C1.LegacyI2CSpeedMode=Fast
-I3C1.LegacyI2CFrequency=400000
-I3C1.ClockSource=PCLK1
+PA9.Signal=I2C1_SCL
+PA10.Signal=I2C1_SDA
 
-# -----------------------------------------------------------------------------
-# FDCAN1 - CAN FD with bit-rate switching
-# Requested bus rates: 1.0 Mbps nominal / 5.0 Mbps data, TDC enabled.
-# Exact bit timing must be solved against the selected FDCAN kernel clock by
-# STM32CubeMX2 / the HAL2 timing utility before hardware validation.
-# -----------------------------------------------------------------------------
-FDCAN1.FrameFormat=CANFD_BRS
-FDCAN1.NominalBitrate=1000000
-FDCAN1.DataBitrate=5000000
-FDCAN1.TDC=Enabled
-FDCAN1.ClockSource=PCLK1
+PA0.Signal=ADC1_IN1
+
+PB0.Signal=GPIO_Output
+PB1.Signal=GPIO_Output
+PB2.Signal=GPIO_Output
+PB4.Signal=GPIO_Output
+
+
+# -------------------------------------------------
+# BRICK ENABLE GPIOs
+# -------------------------------------------------
+
+PB0.GPIOParameters=GPIO_ModeDefaultOutputPP,GPIO_Label,GPIO_Speed,GPIO_PuPd,PinState
+PB0.GPIO_Label=BRICK1_EN
+PB0.GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_PP
+PB0.GPIO_PuPd=GPIO_PULLDOWN
+PB0.GPIO_Speed=GPIO_SPEED_LOW
+PB0.PinState=GPIO_PIN_RESET
+
+PB1.GPIOParameters=GPIO_ModeDefaultOutputPP,GPIO_Label,GPIO_Speed,GPIO_PuPd,PinState
+PB1.GPIO_Label=BRICK2_EN
+PB1.GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_PP
+PB1.GPIO_PuPd=GPIO_PULLDOWN
+PB1.GPIO_Speed=GPIO_SPEED_LOW
+PB1.PinState=GPIO_PIN_RESET
+
+PB2.GPIOParameters=GPIO_ModeDefaultOutputPP,GPIO_Label,GPIO_Speed,GPIO_PuPd,PinState
+PB2.GPIO_Label=BRICK3_EN
+PB2.GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_PP
+PB2.GPIO_PuPd=GPIO_PULLDOWN
+PB2.GPIO_Speed=GPIO_SPEED_LOW
+PB2.PinState=GPIO_PIN_RESET
+
+PB4.GPIOParameters=GPIO_ModeDefaultOutputPP,GPIO_Label,GPIO_Speed,GPIO_PuPd,PinState
+PB4.GPIO_Label=BRICK4_EN
+PB4.GPIO_ModeDefaultOutputPP=GPIO_MODE_OUTPUT_PP
+PB4.GPIO_PuPd=GPIO_PULLDOWN
+PB4.GPIO_Speed=GPIO_SPEED_LOW
+PB4.PinState=GPIO_PIN_RESET
+
+
+# -------------------------------------------------
+# CLOCK CONFIGURATION
+# 24 MHz external HSE -> PLL -> 144 MHz SYSCLK
+# -------------------------------------------------
+
+RCC.HSE_VALUE=24000000
+RCC.SYSCLKSource=RCC_SYSCLKSOURCE_PLLCLK
+
+RCC.PLLM=2
+RCC.PLLN=24
+RCC.PLLR=2
+
+RCC.SYSCLKFreq_VALUE=144000000
+
+
+# -------------------------------------------------
+# I2C1
+# Shared PMBus / sensor / telemetry bus
+# Target: Fast Mode 400 kHz
+# -------------------------------------------------
+
+I2C1.AddressingMode=I2C_ADDRESSINGMODE_7BIT
+I2C1.DualAddressMode=I2C_DUALADDRESS_DISABLE
+I2C1.GeneralCallMode=I2C_GENERALCALL_DISABLE
+I2C1.NoStretchMode=I2C_NOSTRETCH_DISABLE
+
+
+# -------------------------------------------------
+# FDCAN1
+# CAN FD with Bit Rate Switching
+# Target:
+#   Nominal phase = 1 Mbps
+#   Data phase    = 5 Mbps
+# -------------------------------------------------
+
+FDCAN1.FrameFormat=FDCAN_FRAME_FD_BRS
+FDCAN1.Mode=FDCAN_MODE_NORMAL
+FDCAN1.AutoRetransmission=ENABLE
+FDCAN1.ClockDivider=FDCAN_CLOCK_DIV1

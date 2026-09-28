@@ -157,6 +157,21 @@ uint32_t bsp_get_logic_voltage_mv(void);
 bool bsp_lm74700_status_ok(void);
 
 /**
+ * @brief Read one 16-bit PMBus command word from a converter brick.
+ *
+ * A PMBus slave is write-addressed rather than register-addressed: the master
+ * sends the command code and the slave answers with a word. This is therefore a
+ * different shape from bsp_i2c_read(), which resumes from whatever pointer the
+ * last write left behind.
+ *
+ * @param pmbus_addr 7-bit PMBus slave address.
+ * @param command PMBus command code.
+ * @param raw_word Destination for the 16-bit response.
+ * @return true if the transaction succeeded.
+ */
+bool bsp_pmbus_read_word(uint8_t pmbus_addr, uint8_t command, uint16_t *raw_word);
+
+/**
  * @brief Get PCB temperature in degrees Celsius from onboard sensor (TMP1075).
  * @return Temperature in degrees C.
  */

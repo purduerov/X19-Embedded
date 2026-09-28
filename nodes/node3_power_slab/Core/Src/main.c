@@ -8,10 +8,12 @@
 #include "app.h"
 
 int main(void) {
-    /* USER CODE BEGIN 2 */
+
     /* Hand over execution to Application Layer (Src/app.c).
      * CubeMX code generation preserves this call, while all
      * application logic, state machines, and telemetry stay safe in app.c */
+
+    /* USER CODE BEGIN 2 */
     app_main();
     /* USER CODE END 2 */
 

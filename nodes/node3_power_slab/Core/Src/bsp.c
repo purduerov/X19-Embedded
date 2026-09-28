@@ -119,4 +119,24 @@ float bsp_get_pcb_temperature_c(void) {
     return 25.0f;
 }
 
+/*
+ * PMBus word read for the converter bricks.
+ *
+ * Not implemented yet: node 3 has no I2C peripheral configured (no MX_I2C*_Init
+ * in main.c, and no HAL module enabled), so there is no bus to drive a PMBus
+ * transaction on. Reporting failure is the honest answer -- a zero word would
+ * reach pmbus_brick_read_telemetry() as a genuine 0 V / 0 A sample and be
+ * published on 0x300 as though it had been measured.
+ *
+ * When the I2C peripheral does land, this becomes a send-command-then-receive
+ * with a repeated start between them, which is the shape PMBus requires.
+ */
+bool bsp_pmbus_read_word(uint8_t pmbus_addr, uint8_t command, uint16_t *raw_word) {
+    (void)pmbus_addr;
+    (void)command;
+    (void)raw_word;
+
+    return false;
+}
+
 #endif /* ROV_UNIT_TEST */
