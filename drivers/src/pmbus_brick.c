@@ -20,22 +20,48 @@ __attribute__((weak)) bool mock_sensors_get_tps25990(uint8_t index, float *v_in,
     return false;
 }
 
+static const float pmbus_exp_lut[32] = {
+    1.0f,                /* 0: 2^0 */
+    2.0f,                /* 1: 2^1 */
+    4.0f,                /* 2: 2^2 */
+    8.0f,                /* 3: 2^3 */
+    16.0f,               /* 4: 2^4 */
+    32.0f,               /* 5: 2^5 */
+    64.0f,               /* 6: 2^6 */
+    128.0f,              /* 7: 2^7 */
+    256.0f,              /* 8: 2^8 */
+    512.0f,              /* 9: 2^9 */
+    1024.0f,             /* 10: 2^10 */
+    2048.0f,             /* 11: 2^11 */
+    4096.0f,             /* 12: 2^12 */
+    8192.0f,             /* 13: 2^13 */
+    16384.0f,            /* 14: 2^14 */
+    32768.0f,            /* 15: 2^15 */
+    0.0000152587890625f, /* 16: 2^-16 */
+    0.000030517578125f,  /* 17: 2^-15 */
+    0.00006103515625f,   /* 18: 2^-14 */
+    0.0001220703125f,    /* 19: 2^-13 */
+    0.000244140625f,     /* 20: 2^-12 */
+    0.00048828125f,      /* 21: 2^-11 */
+    0.0009765625f,       /* 22: 2^-10 */
+    0.001953125f,        /* 23: 2^-9 */
+    0.00390625f,         /* 24: 2^-8 */
+    0.0078125f,          /* 25: 2^-7 */
+    0.015625f,           /* 26: 2^-6 */
+    0.03125f,            /* 27: 2^-5 */
+    0.0625f,             /* 28: 2^-4 */
+    0.125f,              /* 29: 2^-3 */
+    0.25f,               /* 30: 2^-2 */
+    0.5f                 /* 31: 2^-1 */
+};
+
 float pmbus_linear11_to_float(uint16_t raw_value) {
-    int16_t exponent = (int16_t)((int8_t)((raw_value >> 11) & 0x1F));
-    if (exponent > 15) {
-        exponent -= 32;
-    }
+    uint8_t exp_idx = (raw_value >> 11) & 0x1F;
     int16_t mantissa = (int16_t)(raw_value & 0x07FF);
     if (mantissa > 1023) {
         mantissa -= 2048;
     }
-    float result = (float)mantissa;
-    if (exponent >= 0) {
-        result *= (float)(1 << exponent);
-    } else {
-        result /= (float)(1 << (-exponent));
-    }
-    return result;
+    return (float)mantissa * pmbus_exp_lut[exp_idx];
 }
 
 rov_status_t pmbus_brick_init(pmbus_brick_dev_t *dev, uint8_t pmbus_addr) {
@@ -155,13 +181,6 @@ bool pmbus_status_has_thermal_fault(uint16_t status_word) {
 }
 
 float pmbus_linear16_to_float(uint16_t raw_value, int8_t exponent) {
-    float result = (float)raw_value;
-
-    if (exponent >= 0) {
-        result *= (float)(1UL << exponent);
-    } else {
-        result /= (float)(1UL << (-exponent));
-    }
-
-    return result;
+    uint8_t exp_idx = (uint8_t)exponent & 0x1F;
+    return (float)raw_value * pmbus_exp_lut[exp_idx];
 }
