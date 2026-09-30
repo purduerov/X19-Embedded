@@ -154,3 +154,25 @@ bool mock_sensors_get_tmp1075(float *temperature_c) {
     *temperature_c = s_tmp1075_temperature_c;
     return true;
 }
+
+__attribute__((weak)) void HAL_Init(void) {
+    // Weak implementation to satisfy the linker for tests that don't provide one
+}
+
+__attribute__((weak)) void SystemClock_Config(void) {
+}
+
+__attribute__((weak)) void MX_GPIO_Init(void) {
+}
+
+__attribute__((weak)) void MX_FDCAN1_Init(void) {
+}
+
+__attribute__((weak)) void MX_I2C1_Init(void) {
+}
+
+__attribute__((weak)) void MX_TIM1_Init(void) {
+}
+
+__attribute__((weak)) void MX_TIM8_Init(void) {
+}
