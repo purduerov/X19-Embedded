@@ -213,10 +213,7 @@ class PiCoreSilBridge:
             self.node_status_count += 1
 
         elif can_id == CAN_ID_NAV_TELEMETRY:
-            try:
-                nav = NavTelemetry.unpack(payload)
-            except ValueError:
-                return
+            nav = NavTelemetry.unpack(payload)
             self.nav_count += 1
             self.latest_depth = nav.depth_meters
 
@@ -253,19 +250,13 @@ class PiCoreSilBridge:
                 self.imu_pub.publish(imu_msg)
 
         elif can_id == CAN_ID_ENV_TELEMETRY:
-            try:
-                env = EnvTelemetry.unpack(payload)
-            except ValueError:
-                return
+            env = EnvTelemetry.unpack(payload)
             self.env_count += 1
             self.latest_env = env
             self.latest_temp = env.temperature_c
 
         elif can_id == CAN_ID_POWER_TELEMETRY:
-            try:
-                self.latest_power = PowerTelemetry.unpack(payload)
-            except ValueError:
-                return
+            self.latest_power = PowerTelemetry.unpack(payload)
             self.power_count += 1
 
         elif can_id == CAN_ID_EMERGENCY_BREAK:

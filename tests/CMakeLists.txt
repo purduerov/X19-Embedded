@@ -267,7 +267,7 @@ function(add_target_startup_contract node_id node_dir)
     set(main_source "${PROJECT_SOURCE_DIR}/nodes/${node_dir}/Core/Src/main.c")
     set_source_files_properties("${main_source}" PROPERTIES
         COMPILE_DEFINITIONS "main=target_firmware_entrypoint")
-    add_executable(test_target_startup_node${node_id} hardware/fakes/fake_hal.c
+    add_executable(test_target_startup_node${node_id}
         hardware/test_target_startup.c
         "${main_source}"
     )
