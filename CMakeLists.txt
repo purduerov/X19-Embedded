@@ -30,6 +30,7 @@ include_directories(
 # Add shared libraries
 add_subdirectory(shared)
 add_subdirectory(drivers)
+add_subdirectory(services)
 
 # Add application nodes (only when cross-compiling for embedded targets)
 if(CMAKE_CROSSCOMPILING)

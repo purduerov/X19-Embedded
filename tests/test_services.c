@@ -5,6 +5,7 @@
 
 #include "actuator_service.h"
 #include "env_service.h"
+#include "mock_bsp.h"
 #include "safety_service.h"
 #include <assert.h>
 #include <math.h>
@@ -52,6 +53,7 @@ static void test_safety_service_tripping(void) {
     pwm_set_pulse_us(0, 1800);
     assert(pwm_get_pulse_us(0) == 1500);
 
+    mock_bsp_reset();
     safety_emergency_reset();
     assert(!safety_is_tripped());
 
