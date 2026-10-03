@@ -10,8 +10,8 @@
 extern FDCAN_HandleTypeDef hfdcan1;
 
 bool can_init(void) {
-    HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_ACCEPT_IN_RX_FIFO0,
-                                 FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE);
+    HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_FILTER_REMOTE,
+                                 FDCAN_FILTER_REMOTE);
     return HAL_FDCAN_Start(&hfdcan1) == HAL_OK;
 }
 

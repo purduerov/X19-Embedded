@@ -44,8 +44,8 @@ rov_status_t bsp_i2c_mem_read(uint8_t addr, uint8_t reg, uint8_t *data, uint16_t
     if (!data || len == 0U) {
         return ROV_ERR_INVALID_ARG;
     }
-    if (HAL_I2C_Mem_Read(&hi2c1, (uint16_t)(addr << 1U), (uint16_t)reg,
-                         I2C_MEMADD_SIZE_8BIT, data, len, 10U) != HAL_OK) {
+    if (HAL_I2C_Mem_Read(&hi2c1, (uint16_t)(addr << 1U), (uint16_t)reg, I2C_MEMADD_SIZE_8BIT, data, len, 10U) !=
+        HAL_OK) {
         return ROV_ERROR;
     }
     return ROV_OK;
@@ -55,8 +55,8 @@ rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, const uint8_t *data, u
     if (!data || len == 0U) {
         return ROV_ERR_INVALID_ARG;
     }
-    if (HAL_I2C_Mem_Write(&hi2c1, (uint16_t)(addr << 1U), (uint16_t)reg,
-                          I2C_MEMADD_SIZE_8BIT, (uint8_t *)data, len, 10U) != HAL_OK) {
+    if (HAL_I2C_Mem_Write(&hi2c1, (uint16_t)(addr << 1U), (uint16_t)reg, I2C_MEMADD_SIZE_8BIT, (uint8_t *)data, len,
+                          10U) != HAL_OK) {
         return ROV_ERROR;
     }
     return ROV_OK;

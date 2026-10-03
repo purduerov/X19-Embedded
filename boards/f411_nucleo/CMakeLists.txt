@@ -102,3 +102,9 @@ target_include_directories(f411_node3_power_slab.elf PRIVATE
 add_f411_node_executable(f411_sandbox.elf
     "${CMAKE_CURRENT_SOURCE_DIR}/../../sandbox/sandbox.c"
 )
+
+# Backwards-compatible aliases
+add_custom_target(testing_and_rnd.elf DEPENDS f411_sandbox.elf)
+add_custom_target(bench_node1_pi_shield.elf DEPENDS f411_node1_pi_shield.elf)
+add_custom_target(bench_node2_control_board.elf DEPENDS f411_node2_control_board.elf)
+add_custom_target(bench_node3_power_slab.elf DEPENDS f411_node3_power_slab.elf)

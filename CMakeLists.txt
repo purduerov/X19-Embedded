@@ -40,7 +40,6 @@ if(CMAKE_CROSSCOMPILING)
         add_subdirectory(nodes/node2_control_board)
     endif()
     add_subdirectory(nodes/node3_power_slab)
-    add_subdirectory(nodes/testing_and_rnd)
 endif()
 
 # Add unit tests

@@ -48,8 +48,7 @@ default_baud = 115200
 display_name = "ST NUCLEO-G474RE (Control Bench)"
 architecture = "arm-cortex-m4"
 mcu = "STM32G474RET6"
-preset = "Debug"
-build_dir = "nodes/node2_control_board/build/Debug"
+preset = "arm-c542-debug"
 flash_driver = "stm32cubeprog"
 default_baud = 115200
 
@@ -57,8 +56,7 @@ default_baud = 115200
 display_name = "ST NUCLEO-G431RB (Dev Bench)"
 architecture = "arm-cortex-m4"
 mcu = "STM32G431RBT6"
-preset = "Debug"
-build_dir = "nodes/node2_control_board/build/Debug"
+preset = "arm-c542-debug"
 flash_driver = "stm32cubeprog"
 default_baud = 115200
 
@@ -80,11 +78,13 @@ default_baud = 0
 # Monorepo Subsea Nodes
 [nodes.pi_shield]
 display_name = "Node 1: Pi Shield (BME280 / Leak / INA237)"
-supported_boards = ["f411", "stm32c5", "host"]
+supported_boards = ["f411", "g474", "stm32c5", "host"]
 can_id_base = "0x100"
 # Target binary mapping per board
-target_f411 = "bench_node1_pi_shield.elf"
-binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node1_pi_shield.elf"
+target_f411 = "f411_node1_pi_shield.elf"
+binary_f411 = "build/arm-c542-debug/boards/f411_nucleo/f411_node1_pi_shield.elf"
+target_g474 = "g474_node1_pi_shield.elf"
+binary_g474 = "build/arm-c542-debug/boards/g474_nucleo/g474_node1_pi_shield.elf"
 target_stm32c5 = "node1_pi_shield.elf"
 binary_stm32c5 = "build/arm-c542-debug/nodes/node1_pi_shield/node1_pi_shield.elf"
 
@@ -92,49 +92,51 @@ binary_stm32c5 = "build/arm-c542-debug/nodes/node1_pi_shield/node1_pi_shield.elf
 display_name = "Node 2: Control Board (PWM / Solenoids / IMU / Depth)"
 supported_boards = ["f411", "g474", "stm32c5", "host"]
 can_id_base = "0x200"
-target_f411 = "bench_node2_control_board.elf"
-binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node2_control_board.elf"
-target_g474 = "node2_control_board.elf"
-binary_g474 = "nodes/node2_control_board/build/Debug/node2_control_board.elf"
+target_f411 = "f411_node2_control_board.elf"
+binary_f411 = "build/arm-c542-debug/boards/f411_nucleo/f411_node2_control_board.elf"
+target_g474 = "g474_node2_control_board.elf"
+binary_g474 = "build/arm-c542-debug/boards/g474_nucleo/g474_node2_control_board.elf"
 target_stm32c5 = "node2_control_board.elf"
 binary_stm32c5 = "build/arm-c542-debug/nodes/node2_control_board/node2_control_board.elf"
 
 [nodes.power_slab]
 display_name = "Node 3: Power Slab (PMBus / Power Telemetry)"
-supported_boards = ["f411", "stm32c5", "host"]
+supported_boards = ["f411", "g474", "stm32c5", "host"]
 can_id_base = "0x300"
-target_f411 = "bench_node3_power_slab.elf"
-binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node3_power_slab.elf"
+target_f411 = "f411_node3_power_slab.elf"
+binary_f411 = "build/arm-c542-debug/boards/f411_nucleo/f411_node3_power_slab.elf"
+target_g474 = "g474_node3_power_slab.elf"
+binary_g474 = "build/arm-c542-debug/boards/g474_nucleo/g474_node3_power_slab.elf"
 target_stm32c5 = "node3_power_slab.elf"
 binary_stm32c5 = "build/arm-c542-debug/nodes/node3_power_slab/node3_power_slab.elf"
 
 [nodes.rnd]
 display_name = "Testing & R&D (I2C Scanner / CAN Ping-Pong)"
 supported_boards = ["f411", "f446", "f401", "g474", "g431"]
-target_f411 = "testing_and_rnd.elf"
-binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf"
-target_f446 = "testing_and_rnd.elf"
-binary_f446 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf"
-target_f401 = "testing_and_rnd.elf"
-binary_f401 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf"
-target_g474 = "node2_i2c_scanner.elf"
-binary_g474 = "nodes/node2_control_board/build/Debug/node2_i2c_scanner.elf"
-target_g431 = "node2_i2c_scanner.elf"
-binary_g431 = "nodes/node2_control_board/build/Debug/node2_i2c_scanner.elf"
+target_f411 = "f411_sandbox.elf"
+binary_f411 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
+target_f446 = "f411_sandbox.elf"
+binary_f446 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
+target_f401 = "f411_sandbox.elf"
+binary_f401 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
+target_g474 = "g474_i2c_scanner.elf"
+binary_g474 = "build/arm-c542-debug/boards/g474_nucleo/g474_i2c_scanner.elf"
+target_g431 = "g474_i2c_scanner.elf"
+binary_g431 = "build/arm-c542-debug/boards/g474_nucleo/g474_i2c_scanner.elf"
 
 [nodes.sandbox]
 display_name = "Developer Sandbox (Rapid Prototyping / Single-File Test)"
 supported_boards = ["f411", "f446", "f401", "g474", "g431", "host"]
-target_f411 = "bench_sandbox.elf"
-binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf"
-target_f446 = "bench_sandbox.elf"
-binary_f446 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf"
-target_f401 = "bench_sandbox.elf"
-binary_f401 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf"
-target_g474 = "sandbox.elf"
-binary_g474 = "nodes/node2_control_board/build/Debug/sandbox.elf"
-target_g431 = "sandbox.elf"
-binary_g431 = "nodes/node2_control_board/build/Debug/sandbox.elf"
+target_f411 = "f411_sandbox.elf"
+binary_f411 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
+target_f446 = "f411_sandbox.elf"
+binary_f446 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
+target_f401 = "f411_sandbox.elf"
+binary_f401 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
+target_g474 = "g474_sandbox.elf"
+binary_g474 = "build/arm-c542-debug/boards/g474_nucleo/g474_sandbox.elf"
+target_g431 = "g474_sandbox.elf"
+binary_g431 = "build/arm-c542-debug/boards/g474_nucleo/g474_sandbox.elf"
 target_host = "sil_sandbox"
 binary_host = "build/sil-debug/tests/sil_sandbox.exe"
 
