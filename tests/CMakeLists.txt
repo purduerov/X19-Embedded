@@ -163,6 +163,18 @@ if(NOT WIN32 OR MINGW)
 endif()
 add_test(NAME test_multi_node_bus COMMAND test_multi_node_bus)
 
+# Domain Services Test
+add_executable(test_services
+    test_services.c
+)
+target_include_directories(test_services PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../services/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../drivers/include
+)
+target_link_libraries(test_services PRIVATE rov_mocks rov_services)
+add_test(NAME test_services COMMAND test_services)
+
 # SIL Safety, Power, Fuzz, and Burn-In Integration Tests
 add_executable(test_sil_safety
     test_sil_safety.c
