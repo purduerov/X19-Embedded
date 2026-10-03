@@ -76,6 +76,7 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
     -T "${CMAKE_CURRENT_SOURCE_DIR}/STM32F446xx_FLASH.ld"
     -Wl,-Map=${CMAKE_PROJECT_NAME}.map
     -Wl,--gc-sections
+    -u _printf_float
 )
 
 # Add linked libraries
