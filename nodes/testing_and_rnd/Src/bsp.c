@@ -255,6 +255,61 @@ bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
     return true;
 }
 
+rov_status_t bsp_i2c_mem_read(uint8_t addr, uint8_t reg, uint8_t *data, uint16_t len) {
+    if (data == NULL || len == 0U) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
+    /*
+     * Tell the device which register we want to read.
+     *
+     * For example, the BME280 chip-ID register is 0xD0.
+     */
+    if (!bsp_i2c_write(addr, &reg, 1U)) {
+        return ROV_ERROR;
+    }
+
+    /*
+     * Now read the requested bytes starting from that register.
+     */
+    if (!bsp_i2c_read(addr, data, len)) {
+        return ROV_ERROR;
+    }
+
+    return ROV_OK;
+}
+
+rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, const uint8_t *data, uint16_t len) {
+    if (data == NULL || len == 0U) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
+    /*
+     * BME280 configuration writes are currently one byte each.
+     *
+     * Send:
+     *
+     *     register address
+     *     data byte
+     *
+     * in one I2C transaction.
+     */
+    if (len != 1U) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
+    uint8_t tx_data[2];
+
+    tx_data[0] = reg;
+    tx_data[1] = data[0];
+
+    if (!bsp_i2c_write(addr, tx_data, sizeof(tx_data))) {
+        return ROV_ERROR;
+    }
+
+    return ROV_OK;
+}
+
 uint64_t time_get_us(void) {
     return (uint64_t)HAL_GetTick() * 1000U;
 }
