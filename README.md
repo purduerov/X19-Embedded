@@ -150,7 +150,11 @@ python rov.py scan -b g474
 ```
 
 #### 3. `rov run` - Production Node Build, Flash & Monitor
-Builds a production subsea vehicle node or bench development image, programs it to the connected MCU via ST-Link, and opens the serial monitor:
+Builds a production subsea vehicle node or bench development image, programs it to the connected MCU via ST-Link, and opens the serial monitor.
+
+> [!IMPORTANT]
+> **Always pass both `-n <node>` and `-b <board>` with `rov run`** (e.g. `python rov.py run -n control_board -b g474` or `python rov.py run -n pi_shield -b f411`).
+> If omitted, the CLI falls back to the workspace baseline configured in `rov.toml` (`pi_shield` on `f411`), which will fail or flash the wrong firmware if you have a different board plugged in.
 
 ```bash
 # Build, flash, and monitor Node 1 (Pi Shield) bench firmware on F411:
@@ -162,7 +166,7 @@ python rov.py run -n control_board -b g474
 # Build, flash, and monitor Node 3 (Power Slab) bench firmware on F411:
 python rov.py run -n power_slab -b f411
 
-# Run the R&D testing node (CAN echo & I2C scanner):
+# Run the R&D testing node (CAN echo & continuous I2C scanner):
 python rov.py run -n rnd -b f411
 ```
 

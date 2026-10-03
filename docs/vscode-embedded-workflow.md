@@ -53,7 +53,10 @@ python rov.py build -n pi_shield -b f411
 python rov.py build -n control_board -b g474
 
 # Build, flash via ST-Link SWD, and auto-open live serial monitor:
-python rov.py run
+# (IMPORTANT: Always specify both -n <node> and -b <board> to target the intended firmware)
+python rov.py run -n pi_shield -b f411
+python rov.py run -n control_board -b g474
+python rov.py run -n rnd -b f411
 
 # Rapid Prototyping / Developer Sandbox (Single-File Testing):
 # Test code in sandbox/sandbox.c or pass any custom C file with app_main():
