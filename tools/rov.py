@@ -45,7 +45,7 @@ def load_config() -> dict:
         return tomllib.load(f)
 
 
-def find_stm32programmer_cli() -> str:
+def find_stm32programmer_cli(required: bool = True) -> str | None:
     """Find STM32_Programmer_CLI executable across system PATH and standard ST directories."""
     found = shutil.which("STM32_Programmer_CLI") or shutil.which("STM32_Programmer_CLI.exe")
     if found:
@@ -60,16 +60,24 @@ def find_stm32programmer_cli() -> str:
         Path("/opt/ST/STM32CubeCLT/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
         Path("/opt/st/stm32cubeprogrammer/bin/STM32_Programmer_CLI"),
         Path("/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
+        Path("/usr/local/bin/STM32_Programmer_CLI"),
+        Path("/opt/homebrew/bin/STM32_Programmer_CLI"),
+        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
+        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI"),
+        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
+        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI"),
         Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
     ]
     for c in candidates:
         if c.is_file():
             return str(c)
 
-    sys.exit(
-        "Error: 'STM32_Programmer_CLI' could not be found.\n"
-        "Please ensure STM32CubeProgrammer or STM32CubeCLT is installed and added to PATH."
-    )
+    if required:
+        sys.exit(
+            "Error: 'STM32_Programmer_CLI' could not be found.\n"
+            "Please ensure STM32CubeProgrammer or STM32CubeCLT is installed and added to PATH."
+        )
+    return None
 
 
 def run_cmd(cmd: list[str], cwd: Path = REPO_ROOT) -> None:
@@ -159,7 +167,9 @@ def build_target(node: str, board: str, profile: str = "debug", custom_file: str
 
 def get_stlink_probes() -> list[dict]:
     """Scan and enumerate all ST-Link probes connected via USB."""
-    cli_path = find_stm32programmer_cli()
+    cli_path = find_stm32programmer_cli(required=False)
+    if not cli_path:
+        return []
     try:
         res = subprocess.run(
             [cli_path, "-l"],
@@ -167,8 +177,8 @@ def get_stlink_probes() -> list[dict]:
             text=True,
             check=False
         )
-    except Exception as e:
-        sys.exit(f"Error executing STM32_Programmer_CLI: {e}")
+    except Exception:
+        return []
 
     probes = []
     lines = res.stdout.splitlines()
@@ -195,7 +205,23 @@ def get_stlink_probes() -> list[dict]:
 
 def match_serial_port(probe_sn: str | None = None) -> str | None:
     """Correlate an ST-Link probe serial number to its CDC-ACM Virtual COM Port."""
+    # 0. Check native macOS /dev/cu.usbmodem* devices directly
+    if sys.platform == "darwin":
+        import glob
+        cu_ports = sorted(glob.glob("/dev/cu.usbmodem*") + glob.glob("/dev/cu.usbserial*"))
+        if cu_ports:
+            if probe_sn:
+                for cp in cu_ports:
+                    if probe_sn.lower() in cp.lower():
+                        return cp
+            if not probe_sn:
+                return cu_ports[0]
+
     if serial is None:
+        if sys.platform == "darwin":
+            import glob
+            cu = glob.glob("/dev/cu.usbmodem*")
+            return cu[0] if cu else None
         return None
 
     ports = list(serial.tools.list_ports.comports())
@@ -215,7 +241,7 @@ def match_serial_port(probe_sn: str | None = None) -> str | None:
 
     # 2. Match any STMicroelectronics CDC USB device (VID: 0x0483)
     for port in ports:
-        if port.vid == 0x0483:
+        if getattr(port, "vid", None) == 0x0483:
             return port.device
 
     # 3. Match descriptions or device paths containing STLink, STM32, or usbmodem (macOS)
@@ -230,6 +256,13 @@ def match_serial_port(probe_sn: str | None = None) -> str | None:
         dev = (port.device or "").lower()
         if "/dev/cu.usb" in dev or "/dev/ttyacm" in dev:
             return port.device
+
+    # 5. Linux /dev/ttyACM* glob fallback
+    if sys.platform.startswith("linux"):
+        import glob
+        acm_ports = sorted(glob.glob("/dev/ttyACM*"))
+        if acm_ports:
+            return acm_ports[0]
 
     return None
 
@@ -270,12 +303,27 @@ def flash_binary(elf_path: str, probe_sn: str | None = None) -> str:
 
 
 def open_monitor(port: str, baud: int) -> None:
+    if sys.platform == "darwin" and port.startswith("/dev/tty."):
+        cu_candidate = port.replace("/dev/tty.", "/dev/cu.")
+        if os.path.exists(cu_candidate):
+            port = cu_candidate
+
     if serial is None:
-        sys.exit("Error: 'pyserial' package is not installed. Run 'pip install pyserial'.")
+        print("\033[1;33mNotice: 'pyserial' package is not installed.\033[0m")
+        if sys.platform == "darwin" or sys.platform.startswith("linux"):
+            print(f"You can use native terminal monitor: screen {port} {baud}")
+            print(f"Or install pyserial: pip install pyserial\n")
+        sys.exit("Error: 'pyserial' package is required for built-in serial monitor.")
 
     print(f"\033[1;32m=== Opening Serial Monitor on {port} @ {baud} baud (Ctrl+C to exit) ===\033[0m\n")
     try:
         ser = serial.Serial(port, baud, timeout=0.1)
+        # CRITICAL for ST-Link V2/V3 USB CDC on macOS, Linux, and Windows:
+        # DTR (Data Terminal Ready) and RTS (Request To Send) MUST be asserted.
+        # Otherwise, the ST-Link CDC firmware buffers data internally and never flushes over USB.
+        ser.dtr = True
+        ser.rts = True
+        ser.reset_input_buffer()
     except serial.SerialException as e:
         sys.exit(f"Failed to open port {port}: {e}")
 
@@ -434,7 +482,19 @@ Examples:
             port = match_serial_port(sn)
 
         if not port:
-            sys.exit("Error: No serial port could be determined. Use --port COMx to specify.")
+            print("\033[1;31mError: No serial port could be determined automatically.\033[0m")
+            if sys.platform == "darwin":
+                import glob
+                modems = glob.glob("/dev/cu.usbmodem*") + glob.glob("/dev/cu.usbserial*")
+                if modems:
+                    print(f"Found candidate USB modem ports: {modems}")
+            if serial:
+                ports = list(serial.tools.list_ports.comports())
+                if ports:
+                    print("Available serial ports:")
+                    for p in ports:
+                        print(f"  {p.device}: {p.description}")
+            sys.exit("Please specify the port explicitly with: --port <port>")
         open_monitor(port, args.baud)
 
     elif args.command == "test":
@@ -459,13 +519,18 @@ Examples:
             print(f"  Error enumerating probes: {e}")
 
         print("\n\033[1;36m=== Available Serial COM Ports ===\033[0m")
+        if sys.platform == "darwin":
+            import glob
+            mac_ports = sorted(glob.glob("/dev/cu.usbmodem*") + glob.glob("/dev/cu.usbserial*"))
+            for mp in mac_ports:
+                print(f"  {mp} (macOS USB CDC)")
         if serial:
-            ports = serial.tools.list_ports.comports()
+            ports = list(serial.tools.list_ports.comports())
             if ports:
                 for p in ports:
-                    vid_str = f"VID:{hex(p.vid)}" if p.vid else ""
+                    vid_str = f"VID:{hex(p.vid)}" if getattr(p, "vid", None) else ""
                     print(f"  {p.device}: {p.description} {vid_str}")
-            else:
+            elif sys.platform != "darwin":
                 print("  No COM ports detected.")
         print()
 
