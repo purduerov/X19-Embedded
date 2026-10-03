@@ -1,0 +1,104 @@
+# ==============================================================================
+# Purdue ROV (X19-ROV) - ST NUCLEO-F411RE / F446RE Hardware Target
+# ==============================================================================
+
+cmake_minimum_required(VERSION 3.22)
+enable_language(C ASM)
+
+add_subdirectory(cmake/stm32cubemx)
+
+# Hardware Platform Library
+add_library(f411_platform STATIC
+    platform/bsp_f411.c
+    platform/platform_time.c
+    platform/platform_i2c.c
+    platform/platform_can.c
+    platform/platform_gpio.c
+    platform/platform_pwm.c
+    Core/Src/gpio.c
+    Core/Src/can.c
+    Core/Src/usart.c
+    Core/Src/stm32f4xx_it.c
+    Core/Src/stm32f4xx_hal_msp.c
+    Core/Src/sysmem.c
+    Core/Src/syscalls.c
+    startup_stm32f446xx.s
+)
+
+target_include_directories(f411_platform PUBLIC
+    Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../services/include
+)
+
+target_link_libraries(f411_platform PUBLIC
+    stm32cubemx_f411
+    rov_shared
+    rov_drivers
+    rov_services
+    m
+)
+
+target_compile_features(f411_platform PUBLIC c_std_11)
+target_compile_options(f411_platform PUBLIC -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb)
+
+# Helper function to generate an executable combining F411 platform + node app.c
+function(add_f411_node_executable TARGET_NAME)
+    add_executable(${TARGET_NAME}
+        Core/Src/main.c
+        ${ARGN}
+    )
+    target_include_directories(${TARGET_NAME} BEFORE PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc
+    )
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb
+    )
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        f411_platform
+        STM32_Drivers_F411
+        stm32cubemx_f411
+        rov_shared
+        rov_drivers
+        rov_services
+        m
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb
+        -T "${CMAKE_CURRENT_SOURCE_DIR}/STM32F446xx_FLASH.ld"
+        -Wl,-Map=${TARGET_NAME}.map
+        -Wl,--gc-sections
+        -u _printf_float
+    )
+endfunction()
+
+# 1. Bench Node 1 Pi Shield Target
+add_f411_node_executable(f411_node1_pi_shield.elf
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node1_pi_shield/Core/Src/app.c"
+)
+target_include_directories(f411_node1_pi_shield.elf PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node1_pi_shield/Core/Inc"
+)
+
+# 2. Bench Node 2 Control Board Target
+add_f411_node_executable(f411_node2_control_board.elf
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Src/app.c"
+)
+target_include_directories(f411_node2_control_board.elf PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Inc"
+)
+
+# 3. Bench Node 3 Power Slab Target
+add_f411_node_executable(f411_node3_power_slab.elf
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/app.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/power_sequence.c"
+)
+target_include_directories(f411_node3_power_slab.elf PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Inc"
+)
+
+# 4. R&D / Sandbox Target
+add_f411_node_executable(f411_sandbox.elf
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../sandbox/sandbox.c"
+)
