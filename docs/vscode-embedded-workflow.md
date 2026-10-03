@@ -1,6 +1,6 @@
 # VS Code embedded development workflow
 
-This workflow keeps the shared CMake libraries and multi-folder VS Code workspace. CMake remains the source of truth for host simulation and firmware targets. USB DFU flashing is exposed as one task per vehicle node.
+This workflow coordinates host Software-in-the-Loop (SIL) simulation, ST-Link development bench hardware bring-up, and target vehicle flashing across the X19 embedded monorepo. CMake and `rov.toml` remain the source of truth for all builds. Bench hardware development is prioritized around ST-Link dev boards (Nucleo G474, F411), with USB DFU and SWD provided for custom vehicle PCB bring-up.
 
 ## Install once
 
@@ -24,63 +24,91 @@ ctest --preset sil-debug
 
 Host SIL targets compile and link natively out-of-the-box. Running `ctest --preset sil-debug` executes the 25 host test suites while excluding unfinished `target_*` acceptance contracts until physical target bring-up is completed.
 
-## Flash a vehicle node over USB-C
+## Development bench workflow (ST-Link & Nucleo dev boards - Recommended active workflow)
 
-The STM32C542 factory system-memory bootloader supports USB DFU. When the board routes USB D+ and D− to the MCU USB pins, enter system-memory boot mode, connect the board's USB-C device port to the PC, then choose **Terminal > Run Task** and select one of:
+While custom vehicle PCB schematics are undergoing revision (see [`board_findings.md`](board_findings.md)), physical hardware validation is conducted on ST Nucleo development boards over **ST-Link SWD**.
 
-- **Flash: Node 1 Pi Shield (STM32C542 USB DFU)**
-- **Flash: Node 2 Vehicle Control Board (STM32C542 USB DFU)**
-- **Flash: Node 3 Power Slab (STM32C542 USB DFU)**
+### Declarative multi-target CLI (`rov.toml` & `rov.py`)
 
-Each task prompts for that node's ELF or Intel HEX image, connects through `USB1`, programs, verifies, then resets the MCU. In STM32CubeProgrammer GUI, the equivalent flow is: select **USB**, refresh and select the DFU device, open the matching node ELF/HEX, then click **Download**.
-
-For STM32C5, BOOT0 high selects the factory system bootloader, subject to the BOOT_SEL option-byte configuration; BOOT0 low selects user flash. The board needs a way to assert BOOT0 and reset, such as straps/buttons. USB-C must be wired as a USB device, with proper Type-C CC Rd resistors, protection, and power arrangement. The C542 USB DFU pins are PA11 (USB_DM) and PA12 (USB_DP); check the selected package and board routing before relying on the connector. A USB-C connector by itself does not provide DFU.
-
-### Per-node readiness
-
-| Vehicle node | MCU | USB DFU support | Build/image status in this repository |
-| --- | --- | --- | --- |
-| Node 1 Pi Shield | STM32C542 | Factory ROM supports USB DFU if USB D−/D+ reach PA11/PA12 and BOOT0/reset are accessible. | `.ioc` exists; no complete generated target, startup, linker script, or deployable image yet. |
-| Node 2 Control Board | STM32C542 per vehicle architecture | Same C542 DFU workflow if the custom board routes USB and exposes BOOT0/reset. | Checked-in generated project is STM32G474 Nucleo bench firmware, not vehicle firmware. Do not flash its image to the C542 vehicle board. The C542 target project/image is missing. |
-| Node 3 Power Slab | STM32C542 | Same C542 DFU workflow if the board routes USB and exposes BOOT0/reset. | `.ioc` exists; no complete generated target, startup, linker script, or deployable image yet. |
-
-The flash tasks are ready to program compatible images, but this checkout does not yet produce deployable vehicle images for all three nodes. They prompt for an image and never substitute the Node 2 G474 bench ELF. Confirm the selected image belongs to the connected node before programming. The checked-in board designs do not establish that each vehicle board has USB-C data routed to its MCU; the Control Board schematic explicitly labels its USB-C connector as unused. Node 3's `.ioc` also assigns PA11/PA12 to I2C1, so its board routing and connected peripherals need review before those pins can serve USB DFU.
-
-## Node 2 Nucleo G474 bench target
-
-The checked-in generated project is a **STM32G474RE Nucleo bench project**, useful only for that bench target. It is not firmware for the custom X19 Node 2 board, whose vehicle architecture specifies STM32C542.
-
-Install `arm-none-eabi-gcc` and Ninja, connect the Nucleo to the PC, then choose **Terminal > Run Task > Build: Node 2 Nucleo G474 (Debug)**. The Nucleo's onboard ST-LINK can program that bench board. This is separate from the C542 USB DFU tasks for vehicle nodes.
-
-## Declarative Multi-Target CLI (`rov.toml` & `rov`)
-
-To switch rapidly between development boards (e.g. NUCLEO-F411, NUCLEO-F446, NUCLEO-G474) and production vehicle targets (STM32C542), use the platform-agnostic `rov` CLI tool written in pure Python:
+The embedded workspace includes a unified declarative CLI (`tools/rov.py`, accessible from the repo root as `python rov.py` or `./rov` / `.\rov`). It automatically correlates connected ST-Link hardware probe serial numbers to their corresponding CDC Virtual COM Ports, providing an automated build, flash, and live monitor cycle:
 
 ```bash
-# Platform-agnostic (Windows, Linux, macOS):
+# Build active node and board configured in rov.toml:
 python rov.py build
-python rov.py build -n pi_shield -b f411
-python rov.py build -n control_board -b f411
-python rov.py build -n pi_shield -b stm32c5
 
-# Build, flash via ST-Link with reset, and auto-open live serial monitor:
+# Build a specific node for a bench development board:
+python rov.py build -n pi_shield -b f411
+python rov.py build -n control_board -b g474
+
+# Build, flash via ST-Link SWD, and auto-open live serial monitor:
 python rov.py run
 
-# Auto-detect connected ST-Link COM port and stream serial output:
-python rov.py monitor
+# Rapid Prototyping / Developer Sandbox (Single-File Testing):
+# Test code in sandbox/sandbox.c or pass any custom C file with app_main():
+python rov.py sandbox                      # Run default sandbox/sandbox.c on default board (f411)
+python rov.py sandbox -b f411              # Run default sandbox on NUCLEO-F411RE
+python rov.py sandbox -b g474              # Run default sandbox on NUCLEO-G474RE
+python rov.py sandbox -b host              # Run sandbox natively in Host SIL simulator (no hardware)
+python rov.py sandbox -f my_experiment.c -b f411  # Run custom scratch C file on F411
 
-# Run host SIL simulation test suite:
-python rov.py test
+# Hardware I2C Diagnostic Bus Scanner (Builds, flashes, and streams live ASCII table):
+python rov.py scan -b f411                 # Zero-code I2C bus scanner on NUCLEO-F411RE (Pins PB8/PB9)
+python rov.py scan -b g474                 # Zero-code I2C bus scanner on NUCLEO-G474RE (Pins PA15/PB7)
+
+# Auto-detect connected ST-Link COM port and stream serial output at 115200 baud:
+python rov.py monitor
 
 # Enumerate connected ST-Link probes and serial COM ports:
 python rov.py devices
 
+# Run host SIL simulation test suite:
+python rov.py test
+
 # Optional: Install as an editable package to use 'rov' directly in any shell:
 pip install -e .
-rov build
+rov run
 ```
 
-In VS Code, pressing `Ctrl+Shift+B` executes `ROV: Run (Build, Flash, & Monitor)` by default.
+### VS Code bench tasks
+
+The `.vscode/tasks.json` configuration wires these workflows directly into the editor:
+- **Default Build Task (`Ctrl+Shift+B`)**: Runs `ROV: Run (Build, Flash, & Monitor)`.
+- **Node 2 Nucleo G474 Bench**:
+  - `Build: Node 2 Nucleo G474 (Debug)`: Compiles the bench firmware in `nodes/node2_control_board/` using preset `Debug`.
+  - `Flash: Node 2 Nucleo G474 Bench (ST-Link)`: Flashes the bench ELF using the Nucleo's onboard ST-Link over SWD.
+- **Testing & R&D Sandbox F446 Dev Board**:
+  - `Build: Testing & R&D F446 Dev Board`: Cross-compiles `nodes/testing_and_rnd` for bench testing.
+
+---
+
+## Custom vehicle PCB flashing (USB DFU & ST-Link SWD - Vehicle integration)
+
+Production vehicle nodes standardize on the **STM32C542CCT6** (LQFP48). Vehicle firmware targets can be programmed either via their SWD debug header or through the STM32 factory system-memory USB DFU bootloader once physical boards route USB data lines.
+
+### Flashing tasks in VS Code
+
+For vehicle targets, choose **Terminal > Run Task** and select one of:
+- **ST-Link SWD**:
+  - `Flash: Node 1 Pi Shield (ST-Link SWD)`
+  - `Flash: Node 2 Vehicle Control Board (ST-Link SWD)`
+  - `Flash: Node 3 Power Slab (ST-Link SWD)`
+- **USB DFU (Factory System Bootloader)**:
+  - `Flash: Node 1 Pi Shield (STM32C542 USB DFU)`
+  - `Flash: Node 2 Vehicle Control Board (STM32C542 USB DFU)`
+  - `Flash: Node 3 Power Slab (STM32C542 USB DFU)`
+
+Each task invokes `tools/flash_firmware.py`, connecting via `SWD` or `USB1`, programming, verifying, and resetting the target MCU.
+
+### Hardware caveats & per-node DFU status
+
+As documented in [`board_findings.md`](board_findings.md), USB DFU is an aspirational vehicle-level target and cannot run on current board revisions:
+
+| Vehicle Node | Target MCU | USB DFU Status | Hardware Reality Check |
+|---|---|---|---|
+| **Node 1 Pi Shield** | STM32C542 | ROM supports DFU if PA11/PA12 wired | Pending C542 pinout definition (#138). Missing generated startup/HAL. |
+| **Node 2 Control Board** | STM32C542 | Blocked on hardware schematic | The Control Board schematic explicitly labels its USB-C connector as unused (data lines unconnected). Must use ST-Link dev board or SWD header. |
+| **Node 3 Power Slab** | STM32C542 | Pin collision on hardware schematic | Pins PA11/PA12 (USB D+/D-) are assigned to I2C1 in `.ioc`. Pending pinout review. |
+
 
 ## Why this workflow
 

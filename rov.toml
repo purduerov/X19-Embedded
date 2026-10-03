@@ -28,6 +28,22 @@ preset = "arm-c542-debug"
 flash_driver = "stm32cubeprog"
 default_baud = 115200
 
+[boards.f446]
+display_name = "ST NUCLEO-F446RE (Dev Bench)"
+architecture = "arm-cortex-m4"
+mcu = "STM32F446RET6"
+preset = "arm-c542-debug"
+flash_driver = "stm32cubeprog"
+default_baud = 115200
+
+[boards.f401]
+display_name = "ST NUCLEO-F401RE (Dev Bench)"
+architecture = "arm-cortex-m4"
+mcu = "STM32F401RET6"
+preset = "arm-c542-debug"
+flash_driver = "stm32cubeprog"
+default_baud = 115200
+
 [boards.g474]
 display_name = "ST NUCLEO-G474RE (Control Bench)"
 architecture = "arm-cortex-m4"
@@ -36,6 +52,16 @@ preset = "Debug"
 build_dir = "nodes/node2_control_board/build/Debug"
 flash_driver = "stm32cubeprog"
 default_baud = 115200
+
+[boards.g431]
+display_name = "ST NUCLEO-G431RB (Dev Bench)"
+architecture = "arm-cortex-m4"
+mcu = "STM32G431RBT6"
+preset = "Debug"
+build_dir = "nodes/node2_control_board/build/Debug"
+flash_driver = "stm32cubeprog"
+default_baud = 115200
+
 
 [boards.stm32c5]
 display_name = "STM32C542 Custom Vehicle PCB"
@@ -84,6 +110,32 @@ binary_stm32c5 = "build/arm-c542-debug/nodes/node3_power_slab/node3_power_slab.e
 
 [nodes.rnd]
 display_name = "Testing & R&D (I2C Scanner / CAN Ping-Pong)"
-supported_boards = ["f411"]
+supported_boards = ["f411", "f446", "f401", "g474", "g431"]
 target_f411 = "testing_and_rnd.elf"
 binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf"
+target_f446 = "testing_and_rnd.elf"
+binary_f446 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf"
+target_f401 = "testing_and_rnd.elf"
+binary_f401 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf"
+target_g474 = "node2_i2c_scanner.elf"
+binary_g474 = "nodes/node2_control_board/build/Debug/node2_i2c_scanner.elf"
+target_g431 = "node2_i2c_scanner.elf"
+binary_g431 = "nodes/node2_control_board/build/Debug/node2_i2c_scanner.elf"
+
+[nodes.sandbox]
+display_name = "Developer Sandbox (Rapid Prototyping / Single-File Test)"
+supported_boards = ["f411", "f446", "f401", "g474", "g431", "host"]
+target_f411 = "bench_sandbox.elf"
+binary_f411 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf"
+target_f446 = "bench_sandbox.elf"
+binary_f446 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf"
+target_f401 = "bench_sandbox.elf"
+binary_f401 = "build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf"
+target_g474 = "sandbox.elf"
+binary_g474 = "nodes/node2_control_board/build/Debug/sandbox.elf"
+target_g431 = "sandbox.elf"
+binary_g431 = "nodes/node2_control_board/build/Debug/sandbox.elf"
+target_host = "sil_sandbox"
+binary_host = "build/sil-debug/tests/sil_sandbox.exe"
+
+

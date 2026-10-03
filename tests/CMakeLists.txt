@@ -311,4 +311,24 @@ if(NOT CMAKE_CROSSCOMPILING)
     if(NOT WIN32 OR MINGW)
         target_link_libraries(sil_bridge_server PRIVATE m)
     endif()
+
+    # Host SIL Developer Sandbox / Scratchpad Target
+    if(NOT DEFINED SANDBOX_FILE OR SANDBOX_FILE STREQUAL "")
+        set(SANDBOX_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../sandbox/sandbox.c")
+    endif()
+    get_filename_component(SANDBOX_FILE_ABS "${SANDBOX_FILE}" ABSOLUTE)
+
+    add_executable(sil_sandbox
+        sil_sandbox_main.c
+        ${SANDBOX_FILE_ABS}
+    )
+    target_link_libraries(sil_sandbox PRIVATE
+        rov_mocks
+        rov_shared
+        rov_drivers
+    )
+    if(NOT WIN32 OR MINGW)
+        target_link_libraries(sil_sandbox PRIVATE m)
+    endif()
 endif()
+

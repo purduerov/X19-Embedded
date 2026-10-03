@@ -62,6 +62,7 @@ void app_main(void) {
     bsp_i2c_scan();
 
     uint32_t last_tx_time = 0;
+    uint32_t last_scan_time = time_get_ms();
     uint8_t tx_data[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
 
     while (1) {
@@ -71,6 +72,12 @@ void app_main(void) {
             tx_data[0]++;
             can_send(0x123, tx_data, 8);
             led_toggle(); /* Blink Green LED (1 Hz) */
+        }
+
+        /* Periodic I2C bus scan every 4000 ms */
+        if (time_get_ms() - last_scan_time >= 4000) {
+            last_scan_time = time_get_ms();
+            bsp_i2c_scan();
         }
 
         /* 3. Poll for incoming CAN messages from Raspberry Pi */

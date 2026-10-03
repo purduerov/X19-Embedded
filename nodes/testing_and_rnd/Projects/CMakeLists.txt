@@ -172,3 +172,35 @@ target_link_libraries(bench_node3_power_slab.elf
     m
 )
 
+# 4. Generic Developer Sandbox / Scratchpad Target (zero app modifications required)
+if(NOT DEFINED SANDBOX_FILE OR SANDBOX_FILE STREQUAL "")
+    set(SANDBOX_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../../sandbox/sandbox.c")
+endif()
+get_filename_component(SANDBOX_FILE_ABS "${SANDBOX_FILE}" ABSOLUTE)
+
+add_executable(bench_sandbox.elf)
+target_sources(bench_sandbox.elf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Src/bsp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Src/can_f4.c
+    ${SANDBOX_FILE_ABS}
+    ${MX_Application_Src}
+)
+target_include_directories(bench_sandbox.elf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+)
+target_link_options(bench_sandbox.elf PRIVATE
+    -T "${CMAKE_CURRENT_SOURCE_DIR}/STM32F446xx_FLASH.ld"
+    -Wl,-Map=bench_sandbox.map
+    -Wl,--gc-sections
+)
+target_link_libraries(bench_sandbox.elf
+    STM32_Drivers
+    stm32cubemx
+    rov_shared
+    rov_drivers
+    m
+)
+
+

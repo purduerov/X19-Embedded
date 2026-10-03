@@ -3,7 +3,7 @@
 > **Purdue ROV — Modular Subsea Microcontroller Firmware Platform (Configured for X19 Subsea Vehicle)**  
 > *Standardized across 100% of nodes on STM32C542CCT6 (Cortex-M33 @ 144 MHz with single-precision FPU, 2x FDCAN) running CAN FD @ 1 Mbps / 5 Mbps*
 
-For the recommended VS Code build, SIL, and per-node USB DFU flashing workflow, see [VS Code embedded development](docs/vscode-embedded-workflow.md).
+For the recommended VS Code build, host SIL, ST-Link dev-bench bring-up, and vehicle target workflow, see [VS Code embedded development](docs/vscode-embedded-workflow.md).
 
 ---
 
@@ -26,21 +26,36 @@ The embedded workspace includes a unified declarative CLI implemented in pure Py
 
 ```bash
 # Platform-agnostic (works identically on Windows, Linux, and macOS):
-python rov.py build
-python rov.py build -n pi_shield -b f411
-python rov.py build -n control_board -b f411
-python rov.py run
-python rov.py monitor
-python rov.py test
-python rov.py devices
+# (Use 'python rov.py <cmd>', '.\rov <cmd>' on Windows, or './rov <cmd>' on Linux/macOS)
+
+# 1. Developer Sandbox (Rapid Prototyping / Single-File Testing):
+# Compiles sandbox/sandbox.c (or any custom C file with app_main()), flashes, and auto-monitors:
+python rov.py sandbox                         # Build, flash & monitor sandbox/sandbox.c on default board (f411)
+python rov.py sandbox -b f411                 # Run sandbox on ST NUCLEO-F411RE
+python rov.py sandbox -b g474                 # Run sandbox on ST NUCLEO-G474RE
+python rov.py sandbox -b host                 # Run sandbox natively in Host SIL simulator (no hardware needed)
+python rov.py sandbox -f my_test.c -b f411    # Run custom scratch C file on NUCLEO-F411RE
+
+# 2. Hardware I2C Diagnostic Bus Scanner:
+# Zero-code tool: builds scanner firmware, flashes over ST-Link SWD, and streams live ASCII address grid:
+python rov.py scan -b f411                    # Scan I2C bus on NUCLEO-F411RE (SCL: PB8 / D15, SDA: PB9 / D14)
+python rov.py scan -b g474                    # Scan I2C bus on NUCLEO-G474RE (SCL: PA15, SDA: PB7)
+
+# 3. Subsea Production Nodes (Vehicle & Bench Firmware):
+python rov.py run -n pi_shield -b f411        # Build, flash & monitor Node 1 (Pi Shield) bench firmware
+python rov.py run -n control_board -b g474    # Build, flash & monitor Node 2 (Control Board) bench firmware
+python rov.py run -n power_slab -b f411       # Build, flash & monitor Node 3 (Power Slab) bench firmware
+python rov.py build                           # Build only without flashing
+python rov.py flash -n rnd -b f411            # Flash only without opening monitor
+
+# 4. Utilities:
+python rov.py monitor                         # Auto-detect ST-Link COM port (or macOS /dev/cu.usbmodem) and stream serial
+python rov.py devices                         # Enumerate connected ST-Link debug probes and serial COM ports
+python rov.py test                            # Run all 25 Host SIL CTest test suites
 
 # Or install as an editable global/venv command (enables typing 'rov' anywhere):
 pip install -e .
-rov build
-
-# Convenience wrappers are also provided:
-# Windows PowerShell / CMD:  .\rov build
-# Linux / macOS Bash:         ./rov build
+rov sandbox -b f411
 ```
 
 ---
