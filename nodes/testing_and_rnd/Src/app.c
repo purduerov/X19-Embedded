@@ -118,8 +118,8 @@ void app_main(void) {
             status = bme280_read_all(&bme280);
 
             if (status == ROV_OK) {
-                printf("BME280 | Temp: %.2f C | Pressure: %.2f hPa | Humidity: %.2f %%\r\n",
-                       (double)bme280.temperature_c, (double)bme280.pressure_hpa, (double)bme280.humidity_pct);
+                printf("BME280 | Temp: %.2f F | Pressure: %.2f hPa | Humidity: %.2f %%\r\n",
+                       (double)((bme280.temperature_c) * (float)(9.0 / 5) + (float)32.0), (double)bme280.pressure_hpa, (double)bme280.humidity_pct);
             } else {
                 printf("BME280 read FAILED. Status = %d\r\n", (int)status);
             }
