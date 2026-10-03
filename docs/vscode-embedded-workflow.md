@@ -2,9 +2,31 @@
 
 This workflow coordinates host Software-in-the-Loop (SIL) simulation, ST-Link development bench hardware bring-up, and target vehicle flashing across the X19 embedded monorepo. CMake and `rov.toml` remain the source of truth for all builds. Bench hardware development is prioritized around ST-Link dev boards (Nucleo G474, F411), with USB DFU and SWD provided for custom vehicle PCB bring-up.
 
-## Install once
+## Install once (Prerequisites & Toolchain Setup)
 
-Install CMake 3.22 or newer, Ninja, a native compiler, the GNU Arm Embedded toolchain, and STM32CubeProgrammer. In VS Code install the recommended extensions, especially **STM32CubeIDE for Visual Studio Code** by ST and **CMake Tools**. The flash tasks expect STM32CubeProgrammer at its default Windows install path under `Program Files`; update `.vscode/tasks.json` if installed elsewhere. Install the STM32 DFU driver if Windows does not recognize the MCU in DFU mode.
+Install CMake 3.22 or newer, Ninja, a native host compiler (for SIL simulation), the GNU Arm Embedded toolchain (`arm-none-eabi-gcc`), and STM32CubeProgrammer:
+
+- **macOS (Apple Silicon & Intel)**:
+  ```bash
+  brew install cmake ninja arm-none-eabi-gcc
+  pip3 install -r requirements.txt
+  # Install STM32CubeProgrammer from ST: https://www.st.com/en/development-tools/stm32cubeprog.html
+  # (If Gatekeeper blocks installer: sudo xattr -cr ~/Downloads/SetupSTM32CubeProgrammer.app)
+  ```
+- **Windows (PowerShell)**:
+  ```powershell
+  choco install cmake ninja gcc-arm-embedded
+  pip install -r requirements.txt
+  # Install STM32CubeProgrammer from ST (default path: C:\Program Files\STMicroelectronics\...)
+  ```
+- **Linux (Ubuntu / Debian / WSL2)**:
+  ```bash
+  sudo apt update && sudo apt install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential python3-pip
+  pip3 install -r requirements.txt
+  sudo usermod -a -G dialout $USER
+  ```
+
+In VS Code install the recommended extensions: **STM32CubeIDE for Visual Studio Code**, **CMake Tools**, and **C/C++**. The flash tasks and `rov` CLI automatically search standard installation paths for `STM32_Programmer_CLI`.
 
 Open `X19-Embedded.code-workspace`, not an individual `Core` folder. The workspace keeps all nodes and shared libraries visible together.
 

@@ -20,7 +20,65 @@ For the recommended VS Code build, host SIL, ST-Link dev-bench bring-up, and veh
 
 ---
 
-## 2. Declarative Developer CLI (`rov.toml` & `rov`)
+## 2. Prerequisites & Toolchain Setup
+
+Before running the `rov` CLI or compiling firmware, install the prerequisites for your host platform:
+
+### macOS (Apple Silicon M1/M2/M3/M4 & Intel)
+
+```bash
+# 1. Install CMake, Ninja, and ARM GCC cross-compiler via Homebrew:
+brew install cmake ninja arm-none-eabi-gcc
+
+# 2. Install Python serial monitor dependency:
+pip3 install -r requirements.txt
+# (Optional: install CLI globally into environment: pip3 install -e .)
+
+# 3. Flashing Tool (STM32CubeProgrammer):
+# Download the macOS installer from ST:
+#   https://www.st.com/en/development-tools/stm32cubeprog.html
+# If macOS Gatekeeper blocks running SetupSTM32CubeProgrammer.app, strip the quarantine flag:
+#   sudo xattr -cr ~/Downloads/SetupSTM32CubeProgrammer.app
+# The 'rov' CLI auto-detects STM32_Programmer_CLI inside the application bundle.
+```
+
+### Windows (PowerShell / Command Prompt)
+
+```powershell
+# 1. Install CMake, Ninja, and ARM GCC (via Chocolatey or winget):
+choco install cmake ninja gcc-arm-embedded
+# Or install STM32CubeCLT (Command Line Toolchain):
+#   https://www.st.com/en/development-tools/stm32cubeclt.html
+
+# 2. Install STM32CubeProgrammer:
+#   https://www.st.com/en/development-tools/stm32cubeprog.html
+
+# 3. Install Python dependencies:
+pip install -r requirements.txt
+# (Optional: install CLI globally into environment: pip install -e .)
+```
+
+### Linux (Ubuntu / Debian / Raspberry Pi OS)
+
+```bash
+# 1. Install build tools, native compiler, and ARM cross-compiler:
+sudo apt update && sudo apt install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential python3 python3-pip
+
+# 2. Install Python dependencies:
+pip3 install -r requirements.txt
+
+# 3. Flashing Tool:
+# Download STM32CubeProgrammer Linux package from ST (.tar.xz), extract, and execute SetupSTM32CubeProgrammer-*.linux
+
+# 4. Serial Port & USB Permissions:
+# Add your user to the 'dialout' group to access USB CDC devices (/dev/ttyACM*):
+sudo usermod -a -G dialout $USER
+# (Note: In WSL2, USB devices must be forwarded from the Windows host using 'usbipd-win')
+```
+
+---
+
+## 3. Declarative Developer CLI (`rov.toml` & `rov`)
 
 The embedded workspace includes a unified declarative CLI implemented in pure Python ([`tools/rov.py`](tools/rov.py), backed by [`rov.toml`](rov.toml)). Inspired by PlatformIO and Cargo, it abstracts away complex CMake configuration commands, toolchain selection, ST-Link probe serial enumeration, flash programmer parameters, and serial COM port detection into simple, single-word commands.
 
@@ -185,7 +243,7 @@ The monorepo organizes builds by hardware target. [`rov.toml`](rov.toml) acts as
 
 ---
 
-## 3. Software-in-the-Loop (SIL) Host Testing (Zero-Hardware Simulation)
+## 4. Software-in-the-Loop (SIL) Host Testing (Zero-Hardware Simulation)
 
 Developers can compile and execute the shared application logic, protocol code, and host-testable drivers natively on Linux, Windows, or macOS. SIL substitutes mock CAN, BSP, and sensor interfaces for the target peripherals. It does not build or validate STM32 startup code, vendor HAL integration, peripheral timing, or electrical behavior; use the cross-compile and hardware bench checks for those layers.
 
@@ -286,7 +344,7 @@ These 25 native executables are registered with CTest. The Python bridge integra
 
 ---
 
-## 3. Communication, Safety & Hardware Abstraction Contracts
+## 5. Communication, Safety & Hardware Abstraction Contracts
 
 - **Master Parameters**: All physical bounds, vehicle power caps (1200W tether, 12.5A thruster cap), timing intervals, and CAN bitrates are strictly defined in [`shared/include/rov_parameters.h`](shared/include/rov_parameters.h).
 - **Packet Serialization**: Standard packet packing and unpacking routines are in [`shared/include/rov_can_protocol.h`](shared/include/rov_can_protocol.h).
@@ -299,7 +357,7 @@ These 25 native executables are registered with CTest. The Python bridge integra
 
 ---
 
-## 4. Contributing & Pull Request Rules
+## 6. Contributing & Pull Request Rules
 
 - **Zero-Vendor-HAL in Application Code**: PRs introducing direct `HAL_CAN_...` / `HAL_FDCAN_...` / `HAL_GPIO_...` calls inside node application code will be rejected during code review; use `can_interface.h` and `bsp.h`.
 - **CI/CD Enforced**: All Pull Requests to `master` must pass automated cross-compilation with zero warnings (`-Wall -Wextra -Werror -Wpedantic`) and formatting checks.
