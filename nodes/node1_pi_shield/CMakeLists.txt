@@ -8,6 +8,7 @@ target_include_directories(node1_pi_shield.elf PRIVATE
     Core/Inc
     ../../shared/include
     ../../drivers/include
+    ../../services/include
     "../Shared Library/include"
     "../Hardware Drivers/include"
 )
@@ -15,6 +16,7 @@ target_include_directories(node1_pi_shield.elf PRIVATE
 target_link_libraries(node1_pi_shield.elf PRIVATE
     rov_shared
     rov_drivers
+    rov_services
 )
 
 target_compile_features(node1_pi_shield.elf PUBLIC c_std_11)

@@ -17,6 +17,7 @@
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
+#include "safety_service.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -53,11 +54,11 @@ static volatile bool g_emergency_latched = false;
 static uint8_t node1_get_floor_leak_bits(void) {
     uint8_t leak_bits = 0;
 
-    if (bsp_leak_probe_read(0)) {
+    if (leak_probe_is_wet(0)) {
         leak_bits |= 0x02;
     }
 
-    if (bsp_leak_probe_read(1)) {
+    if (leak_probe_is_wet(1)) {
         leak_bits |= 0x04;
     }
 
@@ -82,7 +83,7 @@ static void node1_trigger_emergency(uint8_t leak_bits) {
      * Trip the local hardware safety path immediately.
      * This must not depend on successful CAN transmission.
      */
-    bsp_emergency_brake_trip();
+    safety_emergency_trip();
 
     /*
      * Update the software safety state.
