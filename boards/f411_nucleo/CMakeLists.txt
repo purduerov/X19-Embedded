@@ -56,12 +56,12 @@ function(add_f411_node_executable TARGET_NAME)
         -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb
     )
     target_link_libraries(${TARGET_NAME} PRIVATE
+        rov_services
         f411_platform
         STM32_Drivers_F411
         stm32cubemx_f411
         rov_shared
         rov_drivers
-        rov_services
         m
     )
     target_link_options(${TARGET_NAME} PRIVATE

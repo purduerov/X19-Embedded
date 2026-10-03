@@ -53,12 +53,12 @@ function(add_g474_node_executable TARGET_NAME)
         -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb
     )
     target_link_libraries(${TARGET_NAME} PRIVATE
+        rov_services
         g474_platform
         STM32_Drivers_G474
         stm32cubemx_g474
         rov_shared
         rov_drivers
-        rov_services
         m
     )
     target_link_options(${TARGET_NAME} PRIVATE

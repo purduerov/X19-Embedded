@@ -5,8 +5,10 @@
  */
 
 #include "mock_bsp.h"
+#include "actuator_service.h"
 #include "mock_physics.h"
 #include "rov_parameters.h"
+#include "safety_service.h"
 #include <string.h>
 
 #define MOCK_I2C_NUM_ADDRS 128
@@ -27,6 +29,8 @@ static bool g_mock_lm74700_ok = true;
 static float g_mock_pcb_temperature_c = 25.0f;
 
 void mock_bsp_reset(void) {
+    safety_service_init();
+    actuator_service_init();
     g_mock_time_us = 0;
     g_mock_led_state = false;
     g_mock_led_toggle_count = 0;
@@ -137,6 +141,8 @@ uint8_t mock_bsp_i2c_get_reg(uint8_t addr, uint8_t reg) {
 
 void bsp_init(void) {
     /* Initialize to safe neutral state */
+    safety_service_init();
+    actuator_service_init();
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_mock_pwm_us[i] = ROV_PWM_STOP_US;
     }

@@ -5,6 +5,7 @@
 
 #include "env_service.h"
 #include "bme280.h"
+#include "bsp.h"
 #include <string.h>
 
 static bme280_dev_t g_bme_dev;
@@ -60,4 +61,8 @@ float env_get_pressure(void) {
 
 float env_get_humidity(void) {
     return g_cached_hum_pct;
+}
+
+bool env_probe_i2c(uint8_t addr) {
+    return bsp_i2c_probe(addr);
 }

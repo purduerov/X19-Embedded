@@ -51,6 +51,13 @@ float env_get_pressure(void);
  */
 float env_get_humidity(void);
 
+/**
+ * @brief Probe if an I2C device acknowledges at the given address.
+ * @param addr 7-bit I2C device address.
+ * @return true if device responded, false otherwise.
+ */
+bool env_probe_i2c(uint8_t addr);
+
 #ifdef __cplusplus
 }
 #endif

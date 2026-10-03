@@ -24,10 +24,7 @@ void safety_emergency_trip(void) {
 }
 
 bool safety_is_tripped(void) {
-    if (bsp_is_emergency_brake_tripped()) {
-        g_emergency_tripped = true;
-    }
-    return g_emergency_tripped;
+    return g_emergency_tripped || bsp_is_emergency_brake_tripped();
 }
 
 bool safety_emergency_reset(void) {

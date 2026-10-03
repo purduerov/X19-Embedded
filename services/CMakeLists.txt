@@ -6,6 +6,7 @@ add_library(rov_services STATIC
     src/env_service.c
     src/safety_service.c
     src/actuator_service.c
+    src/power_service.c
 )
 
 target_include_directories(rov_services PUBLIC
