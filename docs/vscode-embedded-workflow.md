@@ -36,22 +36,6 @@ In VS Code install the recommended extensions: **STM32CubeIDE for Visual Studio 
 
 Open `X19-Embedded.code-workspace`, not an individual `Core` folder. The workspace keeps all nodes and shared libraries visible together.
 
-## Host SIL: build and run tests
-
-Use **Terminal > Run Task > Build: Host SIL (Debug)** or press `Ctrl+Shift+B`. This configures and builds the host simulation without an STM32 or debug probe. Run native CTest with **Test: Host SIL (Debug)**.
-
-Equivalent commands from this directory:
-
-```powershell
-cmake --preset sil-debug
-cmake --build --preset sil-debug
-ctest --preset sil-debug
-```
-
-`sil-release` provides the corresponding release configuration in a separate build directory.
-
-Host SIL targets compile and link natively out-of-the-box. Running `ctest --preset sil-debug` executes the 25 host test suites while excluding unfinished `target_*` acceptance contracts until physical target bring-up is completed.
-
 ## Development bench workflow (ST-Link & Nucleo dev boards - Recommended active workflow)
 
 While custom vehicle PCB schematics are undergoing revision (see [`board_findings.md`](board_findings.md)), physical hardware validation is conducted on ST Nucleo development boards over **ST-Link SWD**.
@@ -123,6 +107,24 @@ The `.vscode/tasks.json` configuration wires these workflows directly into the e
   - `Flash: Node 2 Nucleo G474 Bench (ST-Link)`: Flashes the bench ELF using the Nucleo's onboard ST-Link over SWD.
 - **Testing & R&D Sandbox F446 Dev Board**:
   - `Build: Testing & R&D F446 Dev Board`: Cross-compiles `nodes/testing_and_rnd` for bench testing.
+
+---
+
+## Host SIL: build and run tests
+
+Use **Terminal > Run Task > Build: Host SIL (Debug)** or press `Ctrl+Shift+B`. This configures and builds the host simulation without an STM32 or debug probe. Run native CTest with **Test: Host SIL (Debug)**.
+
+Equivalent commands from this directory:
+
+```powershell
+cmake --preset sil-debug
+cmake --build --preset sil-debug
+ctest --preset sil-debug
+```
+
+`sil-release` provides the corresponding release configuration in a separate build directory.
+
+Host SIL targets compile and link natively out-of-the-box. Running `ctest --preset sil-debug` executes the 25 host test suites while excluding unfinished `target_*` acceptance contracts until physical target bring-up is completed.
 
 ---
 
