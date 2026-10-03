@@ -22,41 +22,166 @@ For the recommended VS Code build, host SIL, ST-Link dev-bench bring-up, and veh
 
 ## 2. Declarative Developer CLI (`rov.toml` & `rov`)
 
-The embedded workspace includes a unified declarative CLI implemented in pure Python (`rov.py` / `tools/rov.py`, backed by [`rov.toml`](rov.toml)). It works natively across Windows, Linux, and macOS without requiring any platform-specific shell:
+The embedded workspace includes a unified declarative CLI implemented in pure Python ([`tools/rov.py`](tools/rov.py), backed by [`rov.toml`](rov.toml)). Inspired by PlatformIO and Cargo, it abstracts away complex CMake configuration commands, toolchain selection, ST-Link probe serial enumeration, flash programmer parameters, and serial COM port detection into simple, single-word commands.
+
+### Invocation Styles
+
+The CLI works natively on Windows, Linux, and macOS:
 
 ```bash
-# Platform-agnostic (works identically on Windows, Linux, and macOS):
-# (Use 'python rov.py <cmd>', '.\rov <cmd>' on Windows, or './rov <cmd>' on Linux/macOS)
+# Direct Python invocation (available immediately in any terminal):
+python rov.py <command> [options]
 
-# 1. Developer Sandbox (Rapid Prototyping / Single-File Testing):
-# Compiles sandbox/sandbox.c (or any custom C file with app_main()), flashes, and auto-monitors:
-python rov.py sandbox                         # Build, flash & monitor sandbox/sandbox.c on default board (f411)
-python rov.py sandbox -b f411                 # Run sandbox on ST NUCLEO-F411RE
-python rov.py sandbox -b g474                 # Run sandbox on ST NUCLEO-G474RE
-python rov.py sandbox -b host                 # Run sandbox natively in Host SIL simulator (no hardware needed)
-python rov.py sandbox -f my_test.c -b f411    # Run custom scratch C file on NUCLEO-F411RE
+# PowerShell / Windows CMD (convenience wrapper):
+.\rov <command> [options]
 
-# 2. Hardware I2C Diagnostic Bus Scanner:
-# Zero-code tool: builds scanner firmware, flashes over ST-Link SWD, and streams live ASCII address grid:
-python rov.py scan -b f411                    # Scan I2C bus on NUCLEO-F411RE (SCL: PB8 / D15, SDA: PB9 / D14)
-python rov.py scan -b g474                    # Scan I2C bus on NUCLEO-G474RE (SCL: PA15, SDA: PB7)
+# Linux / macOS Bash (convenience wrapper):
+./rov <command> [options]
 
-# 3. Subsea Production Nodes (Vehicle & Bench Firmware):
-python rov.py run -n pi_shield -b f411        # Build, flash & monitor Node 1 (Pi Shield) bench firmware
-python rov.py run -n control_board -b g474    # Build, flash & monitor Node 2 (Control Board) bench firmware
-python rov.py run -n power_slab -b f411       # Build, flash & monitor Node 3 (Power Slab) bench firmware
-python rov.py build                           # Build only without flashing
-python rov.py flash -n rnd -b f411            # Flash only without opening monitor
-
-# 4. Utilities:
-python rov.py monitor                         # Auto-detect ST-Link COM port (or macOS /dev/cu.usbmodem) and stream serial
-python rov.py devices                         # Enumerate connected ST-Link debug probes and serial COM ports
-python rov.py test                            # Run all 25 Host SIL CTest test suites
-
-# Or install as an editable global/venv command (enables typing 'rov' anywhere):
+# Optional: Install as an editable global/venv CLI tool (enables typing 'rov' anywhere):
 pip install -e .
-rov sandbox -b f411
+rov <command> [options]
 ```
+
+---
+
+### Command Reference
+
+#### 1. `rov sandbox` - Rapid Prototyping & Single-File Testing
+Builds, flashes, and immediately opens the serial monitor for rapid prototyping. By default, it targets [`sandbox/sandbox.c`](sandbox/sandbox.c). You can also pass any custom C file containing `app_main()` with `-f`:
+
+```bash
+# Build, flash, and monitor default sandbox/sandbox.c on connected F411 Nucleo:
+python rov.py sandbox -b f411
+
+# Build, flash, and monitor on STM32G474 Nucleo:
+python rov.py sandbox -b g474
+
+# Run scratch code natively in Host SIL simulator (no STM32 hardware needed):
+python rov.py sandbox -b host
+
+# Compile and test an arbitrary single-file experiment on target hardware:
+python rov.py sandbox -f my_experiment.c -b f411
+
+# Specify custom ST-Link probe serial or explicit baud rate:
+python rov.py sandbox -b f411 -s 0673FF525655857067103637 --baud 115200
+```
+
+#### 2. `rov scan` - Zero-Code Hardware I2C Bus Scanner
+Builds the dedicated diagnostic I2C scanner firmware, flashes it over ST-Link SWD, and connects to the virtual COM port. It automatically detects and displays all connected I2C devices on a live ASCII address matrix (0x08 to 0x77), identifying known ROV sensors (BME280, MS5837, INA237, TMP1075, BNO086) and rescanning every 4 seconds for hot-plug bring-up:
+
+```bash
+# Scan I2C bus on NUCLEO-F411RE (Hardware pins: PB8 / D15 = SCL, PB9 / D14 = SDA):
+python rov.py scan -b f411
+
+# Scan I2C bus on NUCLEO-G474RE (Hardware pins: PA15 = SCL, PB7 = SDA):
+python rov.py scan -b g474
+```
+
+#### 3. `rov run` - Production Node Build, Flash & Monitor
+Builds a production subsea vehicle node or bench development image, programs it to the connected MCU via ST-Link, and opens the serial monitor:
+
+```bash
+# Build, flash, and monitor Node 1 (Pi Shield) bench firmware on F411:
+python rov.py run -n pi_shield -b f411
+
+# Build, flash, and monitor Node 2 (Control Board) bench firmware on G474:
+python rov.py run -n control_board -b g474
+
+# Build, flash, and monitor Node 3 (Power Slab) bench firmware on F411:
+python rov.py run -n power_slab -b f411
+
+# Run the R&D testing node (CAN echo & I2C scanner):
+python rov.py run -n rnd -b f411
+```
+
+#### 4. `rov build` - Standalone Compilation
+Compiles the target ELF binary using CMake and Ninja without connecting to or programming hardware:
+
+```bash
+# Build active node and board configured in rov.toml:
+python rov.py build
+
+# Cross-compile specific node for bench dev board:
+python rov.py build -n pi_shield -b f411
+python rov.py build -n control_board -b g474
+
+# Build in Release mode (-O2 optimizations, assertions disabled):
+python rov.py build -n control_board -b g474 -p release
+```
+
+#### 5. `rov flash` - Direct Hardware Flashing
+Compiles (if outdated) and flashes the ELF image to the target MCU using `STM32_Programmer_CLI` over SWD without launching the serial monitor:
+
+```bash
+python rov.py flash -n pi_shield -b f411
+python rov.py flash -n control_board -b g474
+python rov.py flash -n rnd -b f411
+```
+
+#### 6. `rov monitor` - Serial Terminal
+Auto-correlates the connected ST-Link debug probe serial number to its CDC Virtual COM Port (or macOS `/dev/cu.usbmodem*`) and opens a 115200 baud serial stream:
+
+```bash
+# Auto-detect connected ST-Link COM port:
+python rov.py monitor
+
+# Explicit port override or custom baud rate:
+python rov.py monitor --port COM4 --baud 115200
+python rov.py monitor --port /dev/cu.usbmodem1103 --baud 115200
+```
+
+#### 7. `rov devices` - Hardware Diagnostic Inspection
+Scans USB buses for connected ST-Link debug probes and serial COM ports:
+
+```bash
+python rov.py devices
+```
+Example output:
+```text
+=== Connected ST-Link Probes ===
+  [0] SN: 0673FF525655857067103637 | Board: NUCLEO-F411RE
+
+=== Available Serial COM Ports ===
+  COM4: STMicroelectronics STLink Virtual COM Port (COM4) VID:0x483
+```
+
+#### 8. `rov test` - Native Host SIL Verification
+Compiles and executes all 25 host Software-in-the-Loop unit and simulation test suites:
+
+```bash
+# Run all 25 test suites:
+python rov.py test
+
+# Filter tests by regex pattern:
+python rov.py test -R "pwm|safety"
+```
+
+---
+
+### Understanding Node & Board File Compilation
+
+The monorepo organizes builds by hardware target. [`rov.toml`](rov.toml) acts as the central router that maps nodes and dev boards to their exact CMake target and generated binary:
+
+| Node Name (`-n`) | Target Board (`-b`) | Underlying CMake Target | Generated ELF Binary Path | Primary Source Files |
+| :--- | :--- | :--- | :--- | :--- |
+| **`pi_shield`** (Node 1) | `f411` | `bench_node1_pi_shield.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node1_pi_shield.elf` | `nodes/node1_pi_shield/Core/Src/app.c`, `testing_and_rnd/Src/bsp.c` |
+| **`pi_shield`** (Node 1) | `stm32c5` | `node1_pi_shield.elf` | `build/arm-c542-debug/nodes/node1_pi_shield/node1_pi_shield.elf` | `nodes/node1_pi_shield/Core/Src/app.c`, `bsp.c`, `main.c` |
+| **`control_board`** (Node 2) | `g474` | `node2_control_board.elf` | `nodes/node2_control_board/build/Debug/node2_control_board.elf` | `nodes/node2_control_board/Core/Src/app.c`, `bsp.c`, `main.c` |
+| **`control_board`** (Node 2) | `f411` | `bench_node2_control_board.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node2_control_board.elf` | `nodes/node2_control_board/Core/Src/app.c`, `testing_and_rnd/Src/bsp.c` |
+| **`control_board`** (Node 2) | `stm32c5` | `node2_control_board.elf` | `build/arm-c542-debug/nodes/node2_control_board/node2_control_board.elf` | `nodes/node2_control_board/Core/Src/app.c`, `bsp.c`, `main.c` |
+| **`power_slab`** (Node 3) | `f411` | `bench_node3_power_slab.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node3_power_slab.elf` | `nodes/node3_power_slab/Core/Src/app.c`, `power_sequence.c` |
+| **`power_slab`** (Node 3) | `stm32c5` | `node3_power_slab.elf` | `build/arm-c542-debug/nodes/node3_power_slab/node3_power_slab.elf` | `nodes/node3_power_slab/Core/Src/app.c`, `power_sequence.c`, `bsp.c` |
+| **`rnd`** (I2C Scan) | `f411` / `f446` | `testing_and_rnd.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf` | `nodes/testing_and_rnd/Src/app.c` (`bsp_i2c_scan`), `bsp.c` |
+| **`rnd`** (I2C Scan) | `g474` | `node2_i2c_scanner.elf` | `nodes/node2_control_board/build/Debug/node2_i2c_scanner.elf` | `nodes/node2_control_board/Core/Src/diagnostic_i2c_scan.c` |
+| **`sandbox`** | `f411` | `bench_sandbox.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf` | `sandbox/sandbox.c` (or `-f <file>`), `testing_and_rnd/Src/bsp.c` |
+| **`sandbox`** | `g474` | `sandbox.elf` | `nodes/node2_control_board/build/Debug/sandbox.elf` | `sandbox/sandbox.c` (or `-f <file>`), `node2_control_board/Core/Src/bsp.c` |
+| **`sandbox`** | `host` | `sil_sandbox` | `build/sil-debug/tests/sil_sandbox.exe` | `sandbox/sandbox.c` (or `-f <file>`), `tests/sil_sandbox_main.c` |
+
+#### How to Check What Gets Compiled
+1. **Target Definitions**: Open [`rov.toml`](rov.toml) to inspect the active `default_node` and `default_board` and their corresponding binary paths.
+2. **Source Manifests**: Inspect the `target_sources()` block in the node's `CMakeLists.txt` (e.g. [`nodes/node2_control_board/CMakeLists.txt`](nodes/node2_control_board/CMakeLists.txt)).
+3. **Linker Map Inspection**: Check the `.map` file in the build directory (e.g. `build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.map`) to view every object file linked into the final binary.
 
 ---
 

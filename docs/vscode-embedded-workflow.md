@@ -66,8 +66,25 @@ python rov.py test
 
 # Optional: Install as an editable package to use 'rov' directly in any shell:
 pip install -e .
-rov run
+rov sandbox -b f411
 ```
+
+### Monorepo Node & Board Target Mapping
+
+| Node Name (`-n`) | Target Board (`-b`) | Underlying CMake Target | Generated ELF Binary Path | Primary Source Files |
+| :--- | :--- | :--- | :--- | :--- |
+| **`pi_shield`** (Node 1) | `f411` | `bench_node1_pi_shield.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node1_pi_shield.elf` | `nodes/node1_pi_shield/Core/Src/app.c`, `testing_and_rnd/Src/bsp.c` |
+| **`pi_shield`** (Node 1) | `stm32c5` | `node1_pi_shield.elf` | `build/arm-c542-debug/nodes/node1_pi_shield/node1_pi_shield.elf` | `nodes/node1_pi_shield/Core/Src/app.c`, `bsp.c`, `main.c` |
+| **`control_board`** (Node 2) | `g474` | `node2_control_board.elf` | `nodes/node2_control_board/build/Debug/node2_control_board.elf` | `nodes/node2_control_board/Core/Src/app.c`, `bsp.c`, `main.c` |
+| **`control_board`** (Node 2) | `f411` | `bench_node2_control_board.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node2_control_board.elf` | `nodes/node2_control_board/Core/Src/app.c`, `testing_and_rnd/Src/bsp.c` |
+| **`control_board`** (Node 2) | `stm32c5` | `node2_control_board.elf` | `build/arm-c542-debug/nodes/node2_control_board/node2_control_board.elf` | `nodes/node2_control_board/Core/Src/app.c`, `bsp.c`, `main.c` |
+| **`power_slab`** (Node 3) | `f411` | `bench_node3_power_slab.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_node3_power_slab.elf` | `nodes/node3_power_slab/Core/Src/app.c`, `power_sequence.c` |
+| **`power_slab`** (Node 3) | `stm32c5` | `node3_power_slab.elf` | `build/arm-c542-debug/nodes/node3_power_slab/node3_power_slab.elf` | `nodes/node3_power_slab/Core/Src/app.c`, `power_sequence.c`, `bsp.c` |
+| **`rnd`** (I2C Scan) | `f411` / `f446` | `testing_and_rnd.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf` | `nodes/testing_and_rnd/Src/app.c` (`bsp_i2c_scan`), `bsp.c` |
+| **`rnd`** (I2C Scan) | `g474` | `node2_i2c_scanner.elf` | `nodes/node2_control_board/build/Debug/node2_i2c_scanner.elf` | `nodes/node2_control_board/Core/Src/diagnostic_i2c_scan.c` |
+| **`sandbox`** | `f411` | `bench_sandbox.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf` | `sandbox/sandbox.c` (or `-f <file>`), `testing_and_rnd/Src/bsp.c` |
+| **`sandbox`** | `g474` | `sandbox.elf` | `nodes/node2_control_board/build/Debug/sandbox.elf` | `sandbox/sandbox.c` (or `-f <file>`), `node2_control_board/Core/Src/bsp.c` |
+| **`sandbox`** | `host` | `sil_sandbox` | `build/sil-debug/tests/sil_sandbox.exe` | `sandbox/sandbox.c` (or `-f <file>`), `tests/sil_sandbox_main.c` |
 
 ### VS Code bench tasks
 
