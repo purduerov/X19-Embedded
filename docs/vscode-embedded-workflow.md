@@ -26,6 +26,12 @@ Install CMake 3.22 or newer, Ninja, a native host compiler (for SIL simulation),
   sudo usermod -a -G dialout $USER
   ```
 
+To verify your installation at any time, run the built-in prerequisite checker:
+```bash
+python rov.py check
+# Or: python tools/check_prereqs.py
+```
+
 In VS Code install the recommended extensions: **STM32CubeIDE for Visual Studio Code**, **CMake Tools**, and **C/C++**. The flash tasks and `rov` CLI automatically search standard installation paths for `STM32_Programmer_CLI`.
 
 Open `X19-Embedded.code-workspace`, not an individual `Core` folder. The workspace keeps all nodes and shared libraries visible together.

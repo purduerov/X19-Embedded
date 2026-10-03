@@ -76,6 +76,19 @@ sudo usermod -a -G dialout $USER
 # (Note: In WSL2, USB devices must be forwarded from the Windows host using 'usbipd-win')
 ```
 
+### Automated Prerequisite Verification
+
+Run the built-in diagnostic doctor to verify that your compiler, CMake, Ninja, STM32CubeProgrammer, and Python dependencies are properly detected:
+
+```bash
+# Via declarative rov CLI:
+python rov.py check
+# (Or: ./rov check | .\rov check)
+
+# Or directly run the standalone checker script:
+python tools/check_prereqs.py
+```
+
 ---
 
 ## 3. Declarative Developer CLI (`rov.toml` & `rov`)
@@ -213,6 +226,27 @@ python rov.py test
 
 # Filter tests by regex pattern:
 python rov.py test -R "pwm|safety"
+```
+
+#### 9. `rov check` - Environment & Toolchain Doctor
+Verifies that all required host tools, compilers, flashing utilities, and Python dependencies are reachable and ready:
+
+```bash
+python rov.py check
+```
+Example output:
+```text
+X19 Embedded - build and flash prerequisites
+=============================================
+  [ ok ]   cmake                  cmake version 4.3.1
+  [ ok ]   ninja                  1.13.2
+  [ ok ]   arm-none-eabi-gcc      arm-none-eabi-gcc.EXE (GNU Tools for STM32 14.3...)
+  [ ok ]   STM32_Programmer_CLI   C:\ST\STM32CubeCLT_1.22.0\STM32CubeProgrammer\...
+  [ ok ]   python                 3.14.0
+  [ ok ]   pyserial               3.5
+  [ ok ]   streamlit              dashboard UI can be tested
+
+All required tools are present.
 ```
 
 ---
