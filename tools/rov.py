@@ -365,6 +365,7 @@ Examples:
   rov monitor                         Auto-detect COM port and open serial monitor
   rov test                            Run 25 Host SIL CTest unit test suites
   rov devices                         List connected ST-Link probes and COM ports
+  rov check                           Verify toolchain, compiler, and programmer prerequisites
 """
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -419,6 +420,9 @@ Examples:
 
     # 7. Devices
     subparsers.add_parser("devices", help="List connected ST-Link probes and serial COM ports")
+
+    # 8. Check
+    subparsers.add_parser("check", help="Verify build tools, ARM cross-compiler, flashing CLI, and Python dependencies")
 
     args = parser.parse_args()
 
@@ -537,6 +541,11 @@ Examples:
             elif sys.platform != "darwin":
                 print("  No COM ports detected.")
         print()
+
+    elif args.command == "check":
+        sys.path.insert(0, str(REPO_ROOT))
+        from tools.check_prereqs import main as run_check_prereqs
+        sys.exit(run_check_prereqs())
 
 
 if __name__ == "__main__":

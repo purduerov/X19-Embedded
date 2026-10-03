@@ -26,25 +26,15 @@ Install CMake 3.22 or newer, Ninja, a native host compiler (for SIL simulation),
   sudo usermod -a -G dialout $USER
   ```
 
+To verify your installation at any time, run the built-in prerequisite checker:
+```bash
+python rov.py check
+# Or: python tools/check_prereqs.py
+```
+
 In VS Code install the recommended extensions: **STM32CubeIDE for Visual Studio Code**, **CMake Tools**, and **C/C++**. The flash tasks and `rov` CLI automatically search standard installation paths for `STM32_Programmer_CLI`.
 
 Open `X19-Embedded.code-workspace`, not an individual `Core` folder. The workspace keeps all nodes and shared libraries visible together.
-
-## Host SIL: build and run tests
-
-Use **Terminal > Run Task > Build: Host SIL (Debug)** or press `Ctrl+Shift+B`. This configures and builds the host simulation without an STM32 or debug probe. Run native CTest with **Test: Host SIL (Debug)**.
-
-Equivalent commands from this directory:
-
-```powershell
-cmake --preset sil-debug
-cmake --build --preset sil-debug
-ctest --preset sil-debug
-```
-
-`sil-release` provides the corresponding release configuration in a separate build directory.
-
-Host SIL targets compile and link natively out-of-the-box. Running `ctest --preset sil-debug` executes the 25 host test suites while excluding unfinished `target_*` acceptance contracts until physical target bring-up is completed.
 
 ## Development bench workflow (ST-Link & Nucleo dev boards - Recommended active workflow)
 
@@ -63,7 +53,10 @@ python rov.py build -n pi_shield -b f411
 python rov.py build -n control_board -b g474
 
 # Build, flash via ST-Link SWD, and auto-open live serial monitor:
-python rov.py run
+# (IMPORTANT: Always specify both -n <node> and -b <board> to target the intended firmware)
+python rov.py run -n pi_shield -b f411
+python rov.py run -n control_board -b g474
+python rov.py run -n rnd -b f411
 
 # Rapid Prototyping / Developer Sandbox (Single-File Testing):
 # Test code in sandbox/sandbox.c or pass any custom C file with app_main():
@@ -117,6 +110,24 @@ The `.vscode/tasks.json` configuration wires these workflows directly into the e
   - `Flash: Node 2 Nucleo G474 Bench (ST-Link)`: Flashes the bench ELF using the Nucleo's onboard ST-Link over SWD.
 - **Testing & R&D Sandbox F446 Dev Board**:
   - `Build: Testing & R&D F446 Dev Board`: Cross-compiles `nodes/testing_and_rnd` for bench testing.
+
+---
+
+## Host SIL: build and run tests
+
+Use **Terminal > Run Task > Build: Host SIL (Debug)** or press `Ctrl+Shift+B`. This configures and builds the host simulation without an STM32 or debug probe. Run native CTest with **Test: Host SIL (Debug)**.
+
+Equivalent commands from this directory:
+
+```powershell
+cmake --preset sil-debug
+cmake --build --preset sil-debug
+ctest --preset sil-debug
+```
+
+`sil-release` provides the corresponding release configuration in a separate build directory.
+
+Host SIL targets compile and link natively out-of-the-box. Running `ctest --preset sil-debug` executes the 25 host test suites while excluding unfinished `target_*` acceptance contracts until physical target bring-up is completed.
 
 ---
 

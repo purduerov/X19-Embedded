@@ -55,6 +55,8 @@ ARM_GCC_SEARCH_PATTERNS = {
         r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeCLT*\GNU-tools-for-STM32\bin\arm-none-eabi-gcc.exe",
     ],
     "Darwin": [
+        "/opt/homebrew/bin/arm-none-eabi-gcc",
+        "/usr/local/bin/arm-none-eabi-gcc",
         "/Applications/ArmGNUToolchain/*/arm-none-eabi/bin/arm-none-eabi-gcc",
         "/opt/ST/STM32CubeCLT*/GNU-tools-for-STM32/bin/arm-none-eabi-gcc",
         "/opt/ST/STM32CubeCLT*/GNU-tools-arm-embedded/bin/arm-none-eabi-gcc",
@@ -79,8 +81,17 @@ CUBE_PROGRAMMER_PATTERNS = {
         r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeCLT*\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
     ],
     "Darwin": [
+        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
+        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI"),
+        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI"),
+        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI"),
         Path("/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
+        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI"),
+        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI"),
+        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI"),
         Path.home() / "Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI",
+        Path("/opt/homebrew/bin/STM32_Programmer_CLI"),
+        Path("/usr/local/bin/STM32_Programmer_CLI"),
         "/opt/ST/STM32CubeCLT*/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
     ],
     "Linux": [
@@ -93,34 +104,35 @@ CUBE_PROGRAMMER_PATTERNS = {
 INSTALL_HINTS = {
     "cmake": (
         "REQUIRED to configure. Install CMake 3.22 or newer:\n"
-        "           brew install cmake | apt install cmake | winget install Kitware.CMake"
+        "           brew install cmake | apt install cmake | choco install cmake"
     ),
     "ninja": (
         "REQUIRED as the CMake generator:\n"
-        "           brew install ninja | apt install ninja-build | winget install Ninja-build.Ninja"
+        "           brew install ninja | apt install ninja-build | choco install ninja"
     ),
     "arm-none-eabi-gcc": (
-        "REQUIRED to build node firmware. GNU Arm Embedded toolchain 13.x+, on PATH:\n"
-        "           brew install --cask gcc-arm-embedded | apt install gcc-arm-none-eabi\n"
-        "           winget install Arm.GnuArmEmbeddedToolchain\n"
-        "           (Note: restart terminal or VS Code after winget install)"
+        "REQUIRED to build node firmware. GNU Arm Embedded toolchain:\n"
+        "           macOS:   brew install arm-none-eabi-gcc\n"
+        "           Linux:   sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi\n"
+        "           Windows: choco install gcc-arm-embedded  (or winget install Arm.GnuArmEmbeddedToolchain)"
     ),
     "STM32_Programmer_CLI": (
-        "REQUIRED to flash. Install STM32CubeCLT (Command Line Toolset) or STM32CubeProgrammer:\n"
-        "           Download from st.com:\n"
-        "           https://www.st.com/en/development-tools/stm32cubeclt.html\n"
-        "           or https://www.st.com/en/development-tools/stm32cubeprog.html\n"
-        "           The ST VS Code extension does NOT bundle it. If installed in a custom location,\n"
-        "           update .vscode/tasks.json to match."
+        "REQUIRED to flash physical targets. Install STM32CubeProgrammer or STM32CubeCLT:\n"
+        "           Download from st.com: https://www.st.com/en/development-tools/stm32cubeprog.html\n"
+        "           (macOS: if Gatekeeper blocks installer, run: sudo xattr -cr ~/Downloads/SetupSTM32CubeProgrammer.app)"
     ),
-    "python": "REQUIRED for the host SIL suites and the stimulus tool",
+    "python": "REQUIRED for the host SIL suites and the declarative rov CLI",
+    "pyserial": (
+        "REQUIRED for rov CLI serial monitor and USB CDC device detection:\n"
+        "           pip install -r requirements.txt  (or pip install pyserial)"
+    ),
     "streamlit": (
         "optional, dashboard tests only:\n"
         "           python -m pip install \"streamlit>=1.40,<2\""
     ),
 }
 
-REQUIRED = ("cmake", "ninja", "arm-none-eabi-gcc", "STM32_Programmer_CLI")
+REQUIRED = ("cmake", "ninja", "arm-none-eabi-gcc", "STM32_Programmer_CLI", "pyserial")
 
 
 def tool_version(argv: list[str]) -> str:
@@ -199,6 +211,16 @@ def main() -> int:
 
     python_ok = True
     rows.append(("python", sys.version.split()[0], python_ok))
+
+    pyserial_ok = False
+    pyserial_detail = ""
+    try:
+        import serial
+        pyserial_ok = True
+        pyserial_detail = getattr(serial, "__version__", "installed")
+    except ImportError:
+        pass
+    rows.append(("pyserial", pyserial_detail, pyserial_ok))
 
     for name, detail, present in rows:
         if present:

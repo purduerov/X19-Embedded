@@ -76,6 +76,19 @@ sudo usermod -a -G dialout $USER
 # (Note: In WSL2, USB devices must be forwarded from the Windows host using 'usbipd-win')
 ```
 
+### Automated Prerequisite Verification
+
+Run the built-in diagnostic doctor to verify that your compiler, CMake, Ninja, STM32CubeProgrammer, and Python dependencies are properly detected:
+
+```bash
+# Via declarative rov CLI:
+python rov.py check
+# (Or: ./rov check | .\rov check)
+
+# Or directly run the standalone checker script:
+python tools/check_prereqs.py
+```
+
 ---
 
 ## 3. Declarative Developer CLI (`rov.toml` & `rov`)
@@ -137,7 +150,11 @@ python rov.py scan -b g474
 ```
 
 #### 3. `rov run` - Production Node Build, Flash & Monitor
-Builds a production subsea vehicle node or bench development image, programs it to the connected MCU via ST-Link, and opens the serial monitor:
+Builds a production subsea vehicle node or bench development image, programs it to the connected MCU via ST-Link, and opens the serial monitor.
+
+> [!IMPORTANT]
+> **Always pass both `-n <node>` and `-b <board>` with `rov run`** (e.g. `python rov.py run -n control_board -b g474` or `python rov.py run -n pi_shield -b f411`).
+> If omitted, the CLI falls back to the workspace baseline configured in `rov.toml` (`pi_shield` on `f411`), which will fail or flash the wrong firmware if you have a different board plugged in.
 
 ```bash
 # Build, flash, and monitor Node 1 (Pi Shield) bench firmware on F411:
@@ -149,7 +166,7 @@ python rov.py run -n control_board -b g474
 # Build, flash, and monitor Node 3 (Power Slab) bench firmware on F411:
 python rov.py run -n power_slab -b f411
 
-# Run the R&D testing node (CAN echo & I2C scanner):
+# Run the R&D testing node (CAN echo & continuous I2C scanner):
 python rov.py run -n rnd -b f411
 ```
 
@@ -213,6 +230,27 @@ python rov.py test
 
 # Filter tests by regex pattern:
 python rov.py test -R "pwm|safety"
+```
+
+#### 9. `rov check` - Environment & Toolchain Doctor
+Verifies that all required host tools, compilers, flashing utilities, and Python dependencies are reachable and ready:
+
+```bash
+python rov.py check
+```
+Example output:
+```text
+X19 Embedded - build and flash prerequisites
+=============================================
+  [ ok ]   cmake                  cmake version 4.3.1
+  [ ok ]   ninja                  1.13.2
+  [ ok ]   arm-none-eabi-gcc      arm-none-eabi-gcc.EXE (GNU Tools for STM32 14.3...)
+  [ ok ]   STM32_Programmer_CLI   C:\ST\STM32CubeCLT_1.22.0\STM32CubeProgrammer\...
+  [ ok ]   python                 3.14.0
+  [ ok ]   pyserial               3.5
+  [ ok ]   streamlit              dashboard UI can be tested
+
+All required tools are present.
 ```
 
 ---
