@@ -9,6 +9,7 @@
 #include "main.h"
 #include "stm32f4xx_hal.h"
 #include <stdio.h>
+#include <string.h>
 
 void bsp_init(void) {
     /* Disable stdout buffering so printf flushes immediately to UART */
@@ -280,30 +281,15 @@ rov_status_t bsp_i2c_mem_read(uint8_t addr, uint8_t reg, uint8_t *data, uint16_t
 }
 
 rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, const uint8_t *data, uint16_t len) {
-    if (data == NULL || len == 0U) {
+    if (data == NULL || len == 0U || len > 32U) {
         return ROV_ERR_INVALID_ARG;
     }
 
-    /*
-     * BME280 configuration writes are currently one byte each.
-     *
-     * Send:
-     *
-     *     register address
-     *     data byte
-     *
-     * in one I2C transaction.
-     */
-    if (len != 1U) {
-        return ROV_ERR_INVALID_ARG;
-    }
-
-    uint8_t tx_data[2];
-
+    uint8_t tx_data[33];
     tx_data[0] = reg;
-    tx_data[1] = data[0];
+    memcpy(&tx_data[1], data, len);
 
-    if (!bsp_i2c_write(addr, tx_data, sizeof(tx_data))) {
+    if (!bsp_i2c_write(addr, tx_data, (uint16_t)(len + 1U))) {
         return ROV_ERROR;
     }
 
