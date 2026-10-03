@@ -28,6 +28,8 @@ set(MX_Application_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/syscalls.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../startup_stm32g474xx.s
 )
+set(MX_Application_Src ${MX_Application_Src} PARENT_SCOPE)
+
 
 # STM32 HAL/LL Drivers
 set(STM32_Drivers_Src

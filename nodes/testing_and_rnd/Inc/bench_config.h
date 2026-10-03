@@ -12,9 +12,9 @@
 /* =========================================================================
  * Select Active Node on Dev Board Bench (Uncomment ONE):
  * ========================================================================= */
-#define BENCH_APP_NODE1_PI_SHIELD /* Node 1: BME280, leak probes, 10 Hz CAN telemetry */
+// #define BENCH_APP_NODE1_PI_SHIELD /* Node 1: BME280, leak probes, 10 Hz CAN telemetry */
 // #define BENCH_APP_NODE2_CONTROL  /* Node 2: 8x ESC PWMs, solenoids, IMU, depth */
 // #define BENCH_APP_NODE3_POWER    /* Node 3: PMBus power bricks, eFuse monitor */
-// #define BENCH_APP_RND_SCANNER    /* Testing: Raw I2C scanner & CAN ping-pong */
+#define BENCH_APP_RND_SCANNER /* Testing: Raw I2C scanner & CAN ping-pong */
 
 #endif /* BENCH_CONFIG_H */

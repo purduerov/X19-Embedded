@@ -8,6 +8,11 @@
 #include <string.h>
 
 bool can_init(void) {
+    if (HAL_GetDEVID() == 0x431) {
+        /* STM32F411 has no CAN peripheral */
+        return false;
+    }
+
     /* 1. Configure CAN acceptance filter (Accept all frames into FIFO 0) */
     CAN_FilterTypeDef filter = {0};
     filter.FilterBank = 0;
@@ -34,7 +39,7 @@ bool can_init(void) {
 }
 
 bool can_send(uint32_t id, const uint8_t *data, uint8_t len) {
-    if (len > 8) {
+    if (HAL_GetDEVID() == 0x431 || len > 8) {
         return false;
     }
 
@@ -58,6 +63,10 @@ bool can_send_emergency(uint32_t id, const uint8_t *data, uint8_t len) {
 }
 
 bool can_receive(uint32_t *id, uint8_t *data, uint8_t *len) {
+    if (HAL_GetDEVID() == 0x431) {
+        return false;
+    }
+
     if (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) == 0) {
         return false;
     }
@@ -78,10 +87,16 @@ bool can_receive(uint32_t *id, uint8_t *data, uint8_t *len) {
 }
 
 bool can_is_bus_off(void) {
+    if (HAL_GetDEVID() == 0x431) {
+        return false;
+    }
     return (hcan1.Instance->ESR & CAN_ESR_BOFF) != 0U;
 }
 
 void can_recover(void) {
+    if (HAL_GetDEVID() == 0x431) {
+        return;
+    }
     if (can_is_bus_off()) {
         HAL_CAN_Stop(&hcan1);
         HAL_CAN_Start(&hcan1);
