@@ -35,6 +35,12 @@ add_executable(test_unity_smoke test_unity_smoke.c)
 target_link_libraries(test_unity_smoke PRIVATE rov_unity)
 add_test(NAME test_unity_smoke COMMAND test_unity_smoke)
 
+# ROV_TEST_MAIN filter harness (ROV_TEST_MAIN / ROV_RUN_TEST macros)
+add_executable(test_rov_test_main test_rov_test_main.c)
+target_include_directories(test_rov_test_main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test_rov_test_main PRIVATE rov_unity)
+add_test(NAME test_rov_test_main COMMAND test_rov_test_main)
+
 # Core Shared Library Tests
 add_executable(test_can_protocol test_can_protocol.c)
 target_link_libraries(test_can_protocol PRIVATE rov_shared)
