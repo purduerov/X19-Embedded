@@ -12,11 +12,13 @@ add_library(rov_mocks OBJECT
     mocks/mock_bme280.c
     mocks/mock_sensors.c
     mocks/mock_physics.c
+    harness/sil_clock.c
 )
 add_library(x19_mocks ALIAS rov_mocks)
 
 target_include_directories(rov_mocks PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mocks
+    ${CMAKE_CURRENT_SOURCE_DIR}/../harness
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../drivers/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../services/include
@@ -40,6 +42,11 @@ add_executable(test_rov_test_main test_rov_test_main.c)
 target_include_directories(test_rov_test_main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_rov_test_main PRIVATE rov_unity)
 add_test(NAME test_rov_test_main COMMAND test_rov_test_main)
+
+add_executable(test_sil_clock test_sil_clock.c)
+target_include_directories(test_sil_clock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/harness)
+target_link_libraries(test_sil_clock PRIVATE rov_unity rov_mocks)
+add_test(NAME test_sil_clock COMMAND test_sil_clock)
 
 # Core Shared Library Tests
 add_executable(test_can_protocol test_can_protocol.c)

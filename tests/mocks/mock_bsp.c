@@ -10,6 +10,7 @@
 #include "rov_parameters.h"
 #include "safety_service.h"
 #include <string.h>
+#include "../harness/sil_clock.h"
 
 #define MOCK_I2C_NUM_ADDRS 128
 #define MOCK_I2C_NUM_REGS  256
@@ -31,6 +32,7 @@ static float g_mock_pcb_temperature_c = 25.0f;
 void mock_bsp_reset(void) {
     safety_service_init();
     actuator_service_init();
+    sil_clock_reset();
     g_mock_time_us = 0;
     g_mock_led_state = false;
     g_mock_led_toggle_count = 0;
@@ -59,7 +61,7 @@ void mock_bsp_set_time_ms(uint32_t ms) {
 }
 
 void mock_bsp_advance_time_ms(uint32_t delta_ms) {
-    g_mock_time_us += (uint64_t)delta_ms * 1000ULL;
+    sil_clock_advance_us((uint64_t)delta_ms * 1000ULL);
     if (mock_physics_is_enabled() && delta_ms > 0) {
         mock_physics_step((float)delta_ms / 1000.0f);
     }
@@ -70,7 +72,7 @@ void mock_bsp_set_time_us(uint64_t us) {
 }
 
 void mock_bsp_advance_time_us(uint64_t delta_us) {
-    g_mock_time_us += delta_us;
+    sil_clock_advance_us(delta_us);
     if (mock_physics_is_enabled() && delta_us > 0) {
         mock_physics_step((float)delta_us / 1000000.0f);
     }
@@ -155,7 +157,7 @@ uint32_t time_get_ms(void) {
 }
 
 uint64_t time_get_us(void) {
-    return g_mock_time_us;
+    return sil_clock_now_us();
 }
 
 void delay_ms(uint32_t ms) {
