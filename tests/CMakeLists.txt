@@ -75,6 +75,9 @@ x19_add_node_test(NAME test_pwm_ramp SUITE shared
     SOURCES test_pwm_ramp.c
     LIBS rov_shared
 )
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_pwm_ramp PRIVATE m)
+endif()
 
 x19_add_node_test(NAME test_safety SUITE safety
     SOURCES test_safety.c
@@ -127,11 +130,17 @@ x19_add_node_test(NAME test_driver_lsm6dsoxtr SUITE driver
     SOURCES test_driver_lsm6dsoxtr.c
     LIBS rov_mocks
 )
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_driver_lsm6dsoxtr PRIVATE m)
+endif()
 
 x19_add_node_test(NAME test_driver_bmi270 SUITE driver
     SOURCES test_driver_bmi270.c
     LIBS rov_mocks
 )
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_driver_bmi270 PRIVATE m)
+endif()
 
 x19_add_node_test(NAME test_driver_ina237 SUITE driver
     SOURCES test_driver_ina237.c
@@ -152,6 +161,9 @@ x19_add_node_test(NAME test_mock_physics SUITE driver
     SOURCES test_mock_physics.c
     LIBS rov_mocks
 )
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_mock_physics PRIVATE m)
+endif()
 
 
 # Subsystem Application Node SIL Tests (Full Node Logic Execution)
@@ -169,6 +181,9 @@ x19_add_node_test(NAME test_node2_control_board NODE control_board SUITE app
     INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Inc
     LIBS rov_mocks
 )
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_node2_control_board PRIVATE m)
+endif()
 
 x19_add_node_test(NAME test_node3_power_slab NODE power_slab SUITE app
     SOURCES test_node3_power_slab.c
@@ -191,6 +206,9 @@ x19_add_node_test(NAME test_multi_node_bus NODE all SUITE integration
             ${CMAKE_CURRENT_SOURCE_DIR}/../services/include
     LIBS rov_mocks rov_services
 )
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_multi_node_bus PRIVATE m)
+endif()
 
 # Domain Services Test
 x19_add_node_test(NAME test_services SUITE services
@@ -213,6 +231,9 @@ x19_add_node_test(NAME test_sil_safety SUITE safety
             ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
     LIBS rov_mocks
 )
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_sil_safety PRIVATE m)
+endif()
 
 x19_add_node_test(NAME test_sil_power SUITE power
     SOURCES test_sil_power.c
@@ -225,6 +246,9 @@ x19_add_node_test(NAME test_sil_power SUITE power
             ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Inc
     LIBS rov_mocks
 )
+if(NOT WIN32 OR MINGW)
+    target_link_libraries(test_sil_power PRIVATE m)
+endif()
 
 x19_add_node_test(NAME test_sil_fuzz SUITE fuzz
     SOURCES test_sil_fuzz.c
@@ -251,6 +275,16 @@ x19_add_node_test(NAME test_sil_burnin SUITE burnin
 )
 
 set_tests_properties(test_sil_burnin PROPERTIES TIMEOUT 300)
+
+x19_add_node_test(NAME test_sil_bridge_logical SUITE integration
+    SOURCES test_sil_bridge_logical.c
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/harness
+            ${CMAKE_CURRENT_SOURCE_DIR}/mocks
+            ${CMAKE_CURRENT_SOURCE_DIR}/../shared/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/../drivers/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/../services/include
+    LIBS rov_unity rov_mocks
+)
 
 # Target-readiness acceptance checks compile the real board BSPs and startup
 # entrypoints against a strict fake HAL. They are expected to expose missing
