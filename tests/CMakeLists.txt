@@ -26,6 +26,15 @@ if(NOT WIN32 OR MINGW)
     target_link_libraries(rov_mocks PUBLIC m)
 endif()
 
+# Vendored Unity test framework (ThrowTheSwitch/Unity v2.6.0, MIT)
+add_library(rov_unity STATIC vendor/unity/unity.c)
+target_include_directories(rov_unity PUBLIC vendor/unity)
+
+# Unity test framework smoke check
+add_executable(test_unity_smoke test_unity_smoke.c)
+target_link_libraries(test_unity_smoke PRIVATE rov_unity)
+add_test(NAME test_unity_smoke COMMAND test_unity_smoke)
+
 # Core Shared Library Tests
 add_executable(test_can_protocol test_can_protocol.c)
 target_link_libraries(test_can_protocol PRIVATE rov_shared)
