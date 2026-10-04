@@ -61,6 +61,13 @@ target_link_libraries(test_rov_test_main PRIVATE rov_unity)
 add_test(NAME test_rov_test_main COMMAND test_rov_test_main)
 
 add_executable(test_sil_clock test_sil_clock.c)
+add_executable(test_sil_vehicle
+    test_sil_vehicle.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/harness/sil_vehicle.c
+)
+target_include_directories(test_sil_vehicle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/harness)
+target_link_libraries(test_sil_vehicle PRIVATE rov_unity rov_mocks)
+add_test(NAME test_sil_vehicle COMMAND test_sil_vehicle)
 target_include_directories(test_sil_clock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/harness)
 target_link_libraries(test_sil_clock PRIVATE rov_unity rov_mocks)
 add_test(NAME test_sil_clock COMMAND test_sil_clock)
@@ -349,6 +356,7 @@ add_target_startup_contract(3 node3_power_slab)
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(sil_bridge_server
         sil_bridge_server.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/harness/sil_vehicle.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node2_control_board/Core/Src/app.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node3_power_slab/Core/Src/app.c
