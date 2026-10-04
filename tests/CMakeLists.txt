@@ -252,6 +252,19 @@ target_include_directories(test_sil_fuzz PRIVATE
 target_link_libraries(test_sil_fuzz PRIVATE rov_mocks)
 add_test(NAME test_sil_fuzz COMMAND test_sil_fuzz)
 
+add_executable(test_sil_bridge_logical
+    test_sil_bridge_logical.c
+)
+target_include_directories(test_sil_bridge_logical PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/harness
+    ${CMAKE_CURRENT_SOURCE_DIR}/mocks
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../services/include
+)
+target_link_libraries(test_sil_bridge_logical PRIVATE rov_unity rov_mocks)
+add_test(NAME test_sil_bridge_logical COMMAND test_sil_bridge_logical)
+
 add_executable(test_sil_burnin
     test_sil_burnin.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../nodes/node1_pi_shield/Core/Src/app.c

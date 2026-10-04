@@ -120,10 +120,13 @@ static bool send_sil_frame(socket_t sock, uint32_t id, const uint8_t *data, uint
     return send(sock, (const char *)&packet, (int)sizeof(packet), 0) == (int)sizeof(packet);
 }
 
+typedef enum { SIL_MODE_LOGICAL, SIL_MODE_REALTIME } sil_scheduler_mode_t;
+
 int main(int argc, char **argv) {
     int port = SIL_BRIDGE_DEFAULT_PORT;
     int max_cycles = 0;   /* 0 = run indefinitely */
     int fast_forward = 0; /* 0 = disabled; > 0 = run N cycles headless and exit */
+    static sil_scheduler_mode_t s_mode = SIL_MODE_LOGICAL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -132,6 +135,10 @@ int main(int argc, char **argv) {
             max_cycles = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--fast-forward") == 0 && i + 1 < argc) {
             fast_forward = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--logical") == 0) {
+            s_mode = SIL_MODE_LOGICAL;
+        } else if (strcmp(argv[i], "--realtime") == 0) {
+            s_mode = SIL_MODE_REALTIME;
         }
     }
 
@@ -484,8 +491,8 @@ int main(int argc, char **argv) {
             break;
         }
 
-        /* Sleep 10 ms to throttle host CPU to true 100 Hz wall clock */
-        platform_sleep_ms(10);
+        /* Sleep 10 ms to throttle host CPU to true 100 Hz wall clock (skipped in LOGICAL mode) */
+        if (s_mode == SIL_MODE_REALTIME) { platform_sleep_ms(10); }
     }
 
     printf("SIL Bridge: Server exiting after %u cycles.\n", cycle_count);
