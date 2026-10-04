@@ -16,7 +16,6 @@
 #define MOCK_I2C_NUM_REGS  256
 
 static uint8_t g_mock_i2c_regs[MOCK_I2C_NUM_ADDRS][MOCK_I2C_NUM_REGS];
-static uint64_t g_mock_time_us = 0;
 static bool g_mock_led_state = false;
 static uint32_t g_mock_led_toggle_count = 0;
 static uint16_t g_mock_pwm_us[ROV_NUM_THRUSTERS];
@@ -33,7 +32,6 @@ void mock_bsp_reset(void) {
     safety_service_init();
     actuator_service_init();
     sil_clock_reset();
-    g_mock_time_us = 0;
     g_mock_led_state = false;
     g_mock_led_toggle_count = 0;
 
@@ -57,7 +55,8 @@ void mock_bsp_reset(void) {
 }
 
 void mock_bsp_set_time_ms(uint32_t ms) {
-    g_mock_time_us = (uint64_t)ms * 1000ULL;
+    sil_clock_reset();
+    sil_clock_advance_us((uint64_t)ms * 1000ULL);
 }
 
 void mock_bsp_advance_time_ms(uint32_t delta_ms) {
@@ -68,7 +67,8 @@ void mock_bsp_advance_time_ms(uint32_t delta_ms) {
 }
 
 void mock_bsp_set_time_us(uint64_t us) {
-    g_mock_time_us = us;
+    sil_clock_reset();
+    sil_clock_advance_us(us);
 }
 
 void mock_bsp_advance_time_us(uint64_t delta_us) {
@@ -153,7 +153,7 @@ void bsp_init(void) {
 }
 
 uint32_t time_get_ms(void) {
-    return (uint32_t)(g_mock_time_us / 1000ULL);
+    return (uint32_t)(sil_clock_now_us() / 1000ULL);
 }
 
 uint64_t time_get_us(void) {
@@ -162,7 +162,7 @@ uint64_t time_get_us(void) {
 
 void delay_ms(uint32_t ms) {
     if (g_auto_advance_delay) {
-        g_mock_time_us += (uint64_t)ms * 1000ULL;
+        sil_clock_advance_us((uint64_t)ms * 1000ULL);
     }
 }
 
