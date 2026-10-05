@@ -3,6 +3,7 @@ build/
 build-native/
 build-test/
 build-host/
+build-native-coverage/
 bin/
 obj/
 __pycache__/
