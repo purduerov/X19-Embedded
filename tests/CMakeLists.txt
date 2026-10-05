@@ -352,6 +352,14 @@ add_test(
 
 add_target_startup_contract(3 node3_power_slab)
 
+# Test-time drift guard: the CMake test registry must agree with rov.toml.
+add_test(NAME test_registry_consistency
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test_registry_consistency.py)
+set_tests_properties(test_registry_consistency PROPERTIES LABELS "suite:shared")
+add_test(NAME test_suite_manifest
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test_suite_manifest.py)
+set_tests_properties(test_suite_manifest PROPERTIES LABELS "suite:shared")
+
 # Software-in-the-Loop (SIL) Bridge Server (Host Native Only)
 if(NOT CMAKE_CROSSCOMPILING)
     add_executable(sil_bridge_server
