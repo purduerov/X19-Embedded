@@ -1,0 +1,94 @@
+/**
+ * @file dshot.h
+ * @brief Digital DShot & Bidirectional Telemetry (BDShot/EDT) Driver.
+ * @organization Purdue ROV
+ */
+
+#ifndef DSHOT_H
+#define DSHOT_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define DSHOT_MIN_THROTTLE      48U
+#define DSHOT_MAX_THROTTLE      2047U
+#define DSHOT_3D_ZERO_CROSSING  1048U
+#define DSHOT_3D_FORWARD_MIN    1049U
+#define DSHOT_3D_REVERSE_MIN    1047U
+
+/* DShot Special Commands */
+#define DSHOT_CMD_MOTOR_STOP                        0U
+#define DSHOT_CMD_BEEP1                             1U
+#define DSHOT_CMD_BEEP2                             2U
+#define DSHOT_CMD_BEEP3                             3U
+#define DSHOT_CMD_BEEP4                             4U
+#define DSHOT_CMD_BEEP5                             5U
+#define DSHOT_CMD_ESC_INFO                          6U
+#define DSHOT_CMD_SPIN_DIRECTION_1                  7U
+#define DSHOT_CMD_SPIN_DIRECTION_2                  8U
+#define DSHOT_CMD_3D_MODE_OFF                       9U
+#define DSHOT_CMD_3D_MODE_ON                        10U
+#define DSHOT_CMD_SAVE_SETTINGS                     12U
+#define DSHOT_CMD_EXTENDED_TELEMETRY_ENABLE         13U
+#define DSHOT_CMD_EXTENDED_TELEMETRY_DISABLE        14U
+#define DSHOT_CMD_SPIN_DIRECTION_NORMAL             20U
+#define DSHOT_CMD_SPIN_DIRECTION_REVERSED           21U
+
+/* Telemetry Types */
+typedef enum {
+    DSHOT_TELEMETRY_NONE = 0,
+    DSHOT_TELEMETRY_ERPM,
+    DSHOT_TELEMETRY_TEMPERATURE,
+    DSHOT_TELEMETRY_VOLTAGE,
+    DSHOT_TELEMETRY_CURRENT,
+    DSHOT_TELEMETRY_STRESS,
+    DSHOT_TELEMETRY_STATUS,
+    DSHOT_TELEMETRY_DEBUG
+} dshot_telemetry_type_t;
+
+typedef struct {
+    uint32_t erpm;
+    uint32_t rpm;                   /* Mechanical RPM for specified pole pairs */
+    float voltage_v;
+    float current_a;
+    int16_t temperature_c;
+    uint8_t stress_level;           /* Last EDT stress metric [0-255] */
+    uint8_t status_flags;           /* Last EDT status flags: 0x80 alert, 0x40 warning, 0x20 error */
+    uint8_t status_max_stress;      /* Last EDT status max-stress nibble [0-15] */
+    dshot_telemetry_type_t last_type;
+    uint32_t packets_sent;
+    uint32_t telemetry_received;
+    uint32_t telemetry_errors;
+} dshot_telemetry_t;
+
+/**
+ * @brief Prepare 16-bit DShot packet from 11-bit throttle value, telemetry request, and CRC.
+ */
+uint16_t dshot_prepare_packet(uint16_t value, bool telemetry, bool invert_crc);
+
+/**
+ * @brief Decode 21-bit GCR telemetry into 16-bit telemetry frame.
+ * @param raw_21_bits 21-bit sampled GCR stream.
+ * @param out_telemetry_16 Pointer to destination 16-bit word.
+ * @return true if GCR and CRC are valid, false otherwise.
+ */
+bool dshot_decode_telemetry_frame(uint32_t raw_21_bits, uint16_t *out_telemetry_16);
+
+/**
+ * @brief Parse a valid 16-bit telemetry frame into telemetry struct.
+ * @param frame_16 Decoded 16-bit telemetry word.
+ * @param motor_pole_pairs Number of motor pole pairs (7 for T200).
+ * @param telem Pointer to telemetry state struct to update.
+ * @return Parsed telemetry type.
+ */
+dshot_telemetry_type_t dshot_parse_telemetry(uint16_t frame_16, uint8_t motor_pole_pairs, dshot_telemetry_t *telem);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* DSHOT_H */
