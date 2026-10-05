@@ -74,8 +74,9 @@ The X19 SIL framework enables testing **100% of subsea STM32 microcontroller fir
 ### Fast CTest Unit & Multi-Node Suite
 ```powershell
 cd X19-Embedded
-cmake --build build --target test_multi_node_bus sil_bridge_server
-ctest --test-dir build --output-on-failure
+cmake -B build-native -G Ninja
+cmake --build build-native --target test_multi_node_bus sil_bridge_server
+ctest --test-dir build-native --output-on-failure
 ```
 
 ### Full Multi-Process SIL Test with X19-Core ZMQ
@@ -185,7 +186,7 @@ For automated continuous integration, long-term stability runs, and rapid batch 
 
 ```powershell
 # Run 10,000 cycles (100 seconds of virtual simulation time) at maximum CPU speed
-./build/tests/sil_bridge_server --fast-forward 10000
+./build-native/tests/sil_bridge_server --fast-forward 10000
 ```
 
 ---
@@ -281,7 +282,7 @@ Run it first, against a fresh engine. That is why `--auto` puts it first, why th
 
 ### 7.4a A check can fail for a reason that is not the vehicle
 
-Every check measures on the **engine's virtual clock**, not on wall time. The engine advances simulated time by 10 ms per 10 ms of real sleep, so on a loaded or virtualised host the simulation can run several times slower than real time. A check that needs N telemetry frames therefore has to wait N frame-periods of *simulated* time, and the tools compute that budget from the clock the frames actually carry rather than from how long the wall has been.
+Every check measures on the **engine's virtual clock**, not on wall time. On `rov.py test` and CI the engine runs in the default **`--logical`** mode, advancing simulated time by `dt` per CPU step with no real-time sleep, so the simulation never runs slower than the host. In **`--realtime`** mode the engine advances simulated time by 10 ms per 10 ms of real sleep instead, and on a loaded or virtualised host the simulation *can* run several times slower than real time — so the guidance below applies to `--realtime` runs and to any tool that budgets checks against wall time rather than the frames' `sim_time_ms`: a check that needs N telemetry frames therefore has to wait N frame-periods of *simulated* time, and the tools compute that budget from the clock the frames actually carry rather than from how long the wall has been.
 
 This matters when a check **fails**: a frame-count shortfall on a host running at a fraction of real time says the host was too slow, not that the Power Slab or the Pi Shield is unhealthy. Read the failure text — it names which clock the window was measured on. Before blaming a node for a telemetry-count failure, re-run the same command on an idle machine and compare.
 
