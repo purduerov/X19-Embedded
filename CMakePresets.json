@@ -5,13 +5,15 @@
     {"name": "sil-debug", "displayName": "Host SIL (Debug)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/sil-debug", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}},
     {"name": "sil-release", "displayName": "Host SIL (Release)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/sil-release", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}},
     {"name": "arm-c542-debug", "displayName": "ARM STM32C542 Nodes (Debug)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/arm-c542-debug", "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}},
-    {"name": "arm-c542-release", "displayName": "ARM STM32C542 Nodes (Release)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/arm-c542-release", "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}}
+    {"name": "arm-c542-release", "displayName": "ARM STM32C542 Nodes (Release)", "generator": "Ninja", "binaryDir": "${sourceDir}/build/arm-c542-release", "toolchainFile": "${sourceDir}/cmake/arm-none-eabi.cmake", "cacheVariables": {"CMAKE_BUILD_TYPE": "Release"}},
+    {"name": "coverage", "displayName": "Host SIL (Coverage)", "generator": "Ninja", "binaryDir": "${sourceDir}/build-native-coverage", "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_C_FLAGS": "--coverage -fprofile-arcs -ftest-coverage"}}
   ],
   "buildPresets": [
     {"name": "sil-debug", "displayName": "Build Host SIL (Debug)", "configurePreset": "sil-debug"},
     {"name": "sil-release", "displayName": "Build Host SIL (Release)", "configurePreset": "sil-release"},
     {"name": "arm-c542-debug", "displayName": "Build ARM Nodes (Debug)", "configurePreset": "arm-c542-debug"},
-    {"name": "arm-c542-release", "displayName": "Build ARM Nodes (Release)", "configurePreset": "arm-c542-release"}
+    {"name": "arm-c542-release", "displayName": "Build ARM Nodes (Release)", "configurePreset": "arm-c542-release"},
+    {"name": "coverage", "displayName": "Build Host SIL (Coverage)", "configurePreset": "coverage"}
   ],
   "testPresets": [
     {
@@ -29,6 +31,17 @@
       "name": "sil-release",
       "displayName": "Test Host SIL (Release)",
       "configurePreset": "sil-release",
+      "filter": {
+        "exclude": {
+          "name": "^target_"
+        }
+      },
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "coverage",
+      "displayName": "Test Host SIL (Coverage)",
+      "configurePreset": "coverage",
       "filter": {
         "exclude": {
           "name": "^target_"

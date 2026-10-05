@@ -222,14 +222,15 @@ Example output:
 ```
 
 #### 8. `rov test` - Native Host SIL Verification
-Compiles and executes all 25 host Software-in-the-Loop unit and simulation test suites:
+Compiles and executes the host Software-in-the-Loop test suite:
 
 ```bash
-# Run all 25 test suites:
+# Run the full host SIL suite:
 python rov.py test
 
-# Filter tests by regex pattern:
+# Filter by name, run a single node, or one suite:
 python rov.py test -R "pwm|safety"
+python rov.py test --node control_board
 ```
 
 #### 9. `rov check` - Environment & Toolchain Doctor
@@ -289,16 +290,16 @@ Developers can compile and execute the shared application logic, protocol code, 
 
 ```powershell
 # Configure host build tree
-cmake -B build -G Ninja
+cmake -B build-native -G Ninja
 
 # Build all mock libraries, drivers, node applications, and unit tests
-cmake --build build
+cmake --build build-native
 
 # Run the host-side logic, protocol, and driver regression suite
-ctest --test-dir build -E "^target_" --output-on-failure
+ctest --test-dir build-native -E "^target_" --output-on-failure
 
 # Run target startup and board-I/O readiness checks (expected to fail until implemented)
-ctest --test-dir build -R "^target_" --output-on-failure
+ctest --test-dir build-native -R "^target_" --output-on-failure
 ```
 
 The `target_*` acceptance checks compile each node's real `main.c` and `bsp.c` against a strict fake HAL. They check startup peripheral initialization, GPIO setup, CAN bring-up, actuator outputs, and live power-sensor values. These checks are intentionally red while target firmware integration is incomplete; their assertion output identifies the missing contract. The 25 host-side CTest executables exercise application logic with mocked hardware and are not evidence that target firmware is ready.
