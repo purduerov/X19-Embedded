@@ -417,6 +417,17 @@ Examples:
     # 6. Test
     test_p = subparsers.add_parser("test", help="Execute Host SIL CTest test suites")
     test_p.add_argument("-R", "--regex", help="Filter test suite by name regex")
+    test_p.add_argument("--node", choices=["pi_shield", "control_board", "power_slab", "all"],
+                        help="Only run tests labelled node:<node>")
+    test_p.add_argument("--suite", choices=["app", "driver", "shared", "integration", "safety", "power",
+                                            "fuzz", "burnin", "bsp", "services"],
+                        help="Only run tests labelled suite:<suite>")
+    test_p.add_argument("-k", "--filter",
+                        help="Unity case-name substring, applied via the ROV_TEST_FILTER env var")
+    test_p.add_argument("--target", action="store_true",
+                        help="Run the target_* readiness contracts instead of the host SIL suite")
+    test_p.add_argument("--preset", default=None, help="Optional CMakePresets build preset")
+    test_p.add_argument("--dry-run", action="store_true", help="Print the resolved commands without running them")
 
     # 7. Devices
     subparsers.add_parser("devices", help="List connected ST-Link probes and serial COM ports")
@@ -506,12 +517,38 @@ Examples:
         open_monitor(port, args.baud)
 
     elif args.command == "test":
-        print("\033[1;32m=== Building & Executing Host SIL CTest Test Suites ===\033[0m")
-        run_cmd(["cmake", "--preset", "sil-debug"], cwd=REPO_ROOT)
-        run_cmd(["cmake", "--build", "--preset", "sil-debug"], cwd=REPO_ROOT)
-        cmd = ["ctest", "--preset", "sil-debug"]
+        build_dir = "build-native"
+        cmd = ["ctest", "--test-dir", build_dir, "--output-on-failure"]
         if args.regex:
-            cmd.extend(["-R", args.regex])
+            cmd += ["-R", args.regex]
+        if args.node and args.node != "all":
+            cmd += ["-L", f"node:{args.node}"]
+        if args.suite:
+            cmd += ["-L", f"suite:{args.suite}"]
+        if args.target:
+            cmd += ["-R", "^target_"]
+        else:
+            cmd += ["-E", "^target_"]
+
+        if args.filter:
+            os.environ["ROV_TEST_FILTER"] = args.filter
+
+        if args.preset:
+            build_cmds = [["cmake", "--preset", args.preset], ["cmake", "--build", "--preset", args.preset]]
+        else:
+            build_cmds = [["cmake", "-B", build_dir, "-G", "Ninja"], ["cmake", "--build", build_dir]]
+
+        if args.dry_run:
+            for c in build_cmds:
+                print(" ".join(c))
+            print(" ".join(cmd))
+            if args.filter:
+                print(f"(env ROV_TEST_FILTER={args.filter})")
+            return
+
+        print("\033[1;32m=== Building & Executing Host SIL CTest Test Suites ===\033[0m")
+        for c in build_cmds:
+            run_cmd(c, cwd=REPO_ROOT)
         run_cmd(cmd, cwd=REPO_ROOT)
 
     elif args.command == "devices":
