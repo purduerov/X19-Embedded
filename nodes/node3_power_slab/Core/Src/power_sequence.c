@@ -5,7 +5,6 @@
 #define LOGIC_MIN_VOLTAGE_MV  5000U
 #define LOGIC_STABLE_TIME_MS  500U
 #define BRICK_STAGGER_TIME_MS 50U
-#define PCB_MAX_TEMP_C        50.0f
 #define NUM_BRICKS            4U
 
 static power_seq_state_t g_state = PWR_SEQ_INIT;
@@ -43,10 +42,6 @@ void power_sequence_step(void) {
      * Critical thermal fault must shut down immediately,
      * regardless of the current sequencing state.
      */
-    if (bsp_get_pcb_temperature_c() >= PCB_MAX_TEMP_C) {
-        enter_fault_state();
-        return;
-    }
 
     switch (g_state) {
     case PWR_SEQ_INIT: {

@@ -199,6 +199,12 @@ void bsp_power_brick_enable(uint8_t brick_idx) {
     }
 }
 
+void bsp_power_brick_disable(uint8_t brick_idx) {
+    if (brick_idx < MOCK_NUM_POWER_BRICKS) {
+        mock_power_brick_enabled[brick_idx] = false;
+    }
+}
+
 void bsp_power_brick_disable_all(void) {
     for (uint8_t i = 0U; i < MOCK_NUM_POWER_BRICKS; i++) {
         mock_power_brick_enabled[i] = false;

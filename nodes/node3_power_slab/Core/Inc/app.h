@@ -13,6 +13,7 @@ extern "C" {
 
 void node3_app_init(void);
 void node3_app_step(void);
+void node3_app_request_thermal_clear(void);
 void app_main(void);
 
 #ifdef __cplusplus

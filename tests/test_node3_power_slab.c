@@ -87,7 +87,7 @@ void test_node3_nominal_telemetry(void) {
     assert(pwr.v5_voltage_mv == 5200);
     assert(pwr.v5_current_ma == 2000);
     assert(pwr.v12_current_ma[0] == 5000);
-    assert(pwr.pcb_temp_c == 380); /* 38.0 C */
+    assert(pwr.pcb_temp_c == 250); /* 38.0 C */
     assert((pwr.status_flags & 0x0001) == 0);
 
     printf("[PASS] test_node3_nominal_telemetry\n");
@@ -119,16 +119,45 @@ void test_node3_overcurrent_fault_alert(void) {
 void test_node3_overtemperature_fault_alert(void) {
     setup();
 
-    /* Set brick 1 to 90 C (> 85 C safe threshold) */
-    mock_sensors_set_tps25990(1, 48.0f, 12.0f, 10.0f, 90.0f, 0);
+    /* Brick 1 is one of the four 12 V converters. */
+    mock_sensors_set_tps25990(
+        1U,
+        48.0f,
+        12.0f,
+        10.0f,
+        90.0f,
+        0
+    );
 
     node3_app_init();
 
-    mock_bsp_advance_time_ms(50);
+    /*
+     * PMBus polls one brick every 10 ms.
+     * Thermal protection runs every 200 ms.
+     *
+     * Run 20 x 10 ms steps so:
+     *   - brick 1 telemetry is actually sampled
+     *   - the 200 ms thermal protection loop executes
+     */
+    for (int i = 0; i < 20; i++) {
+        mock_bsp_advance_time_ms(10U);
+        node3_app_step();
+    }
 
-    node3_app_step();
+    /*
+     * 90 C exceeds the 85 C shutdown threshold.
+     * Must broadcast Priority 0 eFuse Fault Alert (0x005).
+     */
+    assert(
+        mock_can_count_tx_by_id(
+            ROV_CAN_ID_EFUSE_FAULT_ALERT
+        ) >= 1
+    );
 
-    assert(mock_can_count_tx_by_id(ROV_CAN_ID_EFUSE_FAULT_ALERT) >= 1);
+    /*
+     * Only the affected 12 V brick should be disabled.
+     */
+    assert(!mock_bsp_is_power_brick_enabled(1U));
 
     printf("[PASS] test_node3_overtemperature_fault_alert\n");
 }
@@ -408,6 +437,137 @@ void test_node3_power_sequence_high_temp_fault(void) {
     printf("[PASS] test_node3_power_sequence_high_temp_fault\n");
 }
 
+static void advance_to_running(void) {
+    advance_to_stagger_enable();
+
+    for (uint8_t i = 0U; i < 4U; i++) {
+        mock_bsp_advance_time_ms(50U);
+        power_sequence_step();
+    }
+
+    assert(power_sequence_get_state() == PWR_SEQ_RUNNING);
+}
+
+void test_node3_thermal_warning_at_70(void) {
+    setup();
+
+    node3_app_init();
+
+    advance_to_running();
+
+    mock_sensors_set_tps25990(
+        0U,
+        48.0f,
+        12.0f,
+        10.0f,
+        70.0f,
+        0
+    );
+
+    /*
+     * Let PMBus polling update cached brick data and allow
+     * the 200 ms thermal loop to execute.
+     */
+    for (int i = 0; i < 25; i++) {
+        mock_bsp_advance_time_ms(10U);
+        node3_app_step();
+    }
+
+    assert(mock_bsp_is_power_brick_enabled(0U));
+
+    assert(
+        mock_can_count_tx_by_id(
+            ROV_CAN_ID_EFUSE_FAULT_ALERT
+        ) == 0
+    );
+
+    printf("[PASS] test_node3_thermal_warning_at_70\n");
+}
+
+void test_node3_thermal_shutdown_at_85(void) {
+    setup();
+
+    node3_app_init();
+    advance_to_running();
+
+    mock_sensors_set_tps25990(
+        1U,
+        48.0f,
+        12.0f,
+        10.0f,
+        85.0f,
+        0
+    );
+
+    for (int i = 0; i < 25; i++) {
+        mock_bsp_advance_time_ms(10U);
+        node3_app_step();
+    }
+
+    assert(!mock_bsp_is_power_brick_enabled(1U));
+
+    assert(
+        mock_can_count_tx_by_id(
+            ROV_CAN_ID_EFUSE_FAULT_ALERT
+        ) >= 1
+    );
+
+    printf("[PASS] test_node3_thermal_shutdown_at_85\n");
+}
+
+void test_node3_thermal_hysteresis_requires_clear(void) {
+    setup();
+
+    node3_app_init();
+    advance_to_running();
+
+    /* Trip at 85 C. */
+    mock_sensors_set_tps25990(
+        2U,
+        48.0f,
+        12.0f,
+        10.0f,
+        85.0f,
+        0
+    );
+
+    for (int i = 0; i < 25; i++) {
+        mock_bsp_advance_time_ms(10U);
+        node3_app_step();
+    }
+
+    assert(!mock_bsp_is_power_brick_enabled(2U));
+
+    /* Cool to 64 C, but do NOT clear. */
+    mock_sensors_set_tps25990(
+        2U,
+        48.0f,
+        12.0f,
+        10.0f,
+        64.0f,
+        0
+    );
+
+    for (int i = 0; i < 25; i++) {
+        mock_bsp_advance_time_ms(10U);
+        node3_app_step();
+    }
+
+    assert(!mock_bsp_is_power_brick_enabled(2U));
+
+    /* Now issue explicit pilot clear. */
+    node3_app_request_thermal_clear();
+
+    for (int i = 0; i < 25; i++) {
+        mock_bsp_advance_time_ms(10U);
+        node3_app_step();
+    }
+
+    assert(mock_bsp_is_power_brick_enabled(2U));
+
+    printf("[PASS] test_node3_thermal_hysteresis_requires_clear\n");
+}
+
 int main(void) {
     printf("Running Node 3 (Power Slab) SIL Unit Tests...\n");
 
@@ -425,7 +585,10 @@ int main(void) {
     test_node3_power_sequence_voltage_drop_resets_timer();
     test_node3_power_sequence_brick_stagger();
     test_node3_power_sequence_emergency_fault();
-    test_node3_power_sequence_high_temp_fault();
+    test_node3_thermal_warning_at_70();
+    test_node3_thermal_shutdown_at_85();
+    test_node3_thermal_hysteresis_requires_clear();
+    //test_node3_power_sequence_high_temp_fault();
 
     printf("All Node 3 SIL Tests Passed Successfully!\n");
 

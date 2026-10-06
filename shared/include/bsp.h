@@ -95,7 +95,11 @@ bool bsp_is_emergency_brake_tripped(void);
  * @param brick_idx Brick index (0 to 3).
  */
 void bsp_power_brick_enable(uint8_t brick_idx);
-
+/**
+ * @brief Disable one 12 V converter brick.
+ * @param brick_idx Brick index (0 to 3).
+ */
+void bsp_power_brick_disable(uint8_t brick_idx);
 /**
  * @brief Immediately disable all 12 V converter bricks.
  */
