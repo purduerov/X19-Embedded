@@ -14,29 +14,29 @@
 extern "C" {
 #endif
 
-#define DSHOT_MIN_THROTTLE      48U
-#define DSHOT_MAX_THROTTLE      2047U
-#define DSHOT_3D_ZERO_CROSSING  1048U
-#define DSHOT_3D_FORWARD_MIN    1049U
-#define DSHOT_3D_REVERSE_MIN    1047U
+#define DSHOT_MIN_THROTTLE     48U
+#define DSHOT_MAX_THROTTLE     2047U
+#define DSHOT_3D_ZERO_CROSSING 1048U
+#define DSHOT_3D_FORWARD_MIN   1049U
+#define DSHOT_3D_REVERSE_MIN   1047U
 
 /* DShot Special Commands */
-#define DSHOT_CMD_MOTOR_STOP                        0U
-#define DSHOT_CMD_BEEP1                             1U
-#define DSHOT_CMD_BEEP2                             2U
-#define DSHOT_CMD_BEEP3                             3U
-#define DSHOT_CMD_BEEP4                             4U
-#define DSHOT_CMD_BEEP5                             5U
-#define DSHOT_CMD_ESC_INFO                          6U
-#define DSHOT_CMD_SPIN_DIRECTION_1                  7U
-#define DSHOT_CMD_SPIN_DIRECTION_2                  8U
-#define DSHOT_CMD_3D_MODE_OFF                       9U
-#define DSHOT_CMD_3D_MODE_ON                        10U
-#define DSHOT_CMD_SAVE_SETTINGS                     12U
-#define DSHOT_CMD_EXTENDED_TELEMETRY_ENABLE         13U
-#define DSHOT_CMD_EXTENDED_TELEMETRY_DISABLE        14U
-#define DSHOT_CMD_SPIN_DIRECTION_NORMAL             20U
-#define DSHOT_CMD_SPIN_DIRECTION_REVERSED           21U
+#define DSHOT_CMD_MOTOR_STOP                 0U
+#define DSHOT_CMD_BEEP1                      1U
+#define DSHOT_CMD_BEEP2                      2U
+#define DSHOT_CMD_BEEP3                      3U
+#define DSHOT_CMD_BEEP4                      4U
+#define DSHOT_CMD_BEEP5                      5U
+#define DSHOT_CMD_ESC_INFO                   6U
+#define DSHOT_CMD_SPIN_DIRECTION_1           7U
+#define DSHOT_CMD_SPIN_DIRECTION_2           8U
+#define DSHOT_CMD_3D_MODE_OFF                9U
+#define DSHOT_CMD_3D_MODE_ON                 10U
+#define DSHOT_CMD_SAVE_SETTINGS              12U
+#define DSHOT_CMD_EXTENDED_TELEMETRY_ENABLE  13U
+#define DSHOT_CMD_EXTENDED_TELEMETRY_DISABLE 14U
+#define DSHOT_CMD_SPIN_DIRECTION_NORMAL      20U
+#define DSHOT_CMD_SPIN_DIRECTION_REVERSED    21U
 
 /* Telemetry Types */
 typedef enum {
@@ -52,13 +52,13 @@ typedef enum {
 
 typedef struct {
     uint32_t erpm;
-    uint32_t rpm;                   /* Mechanical RPM for specified pole pairs */
+    uint32_t rpm; /* Mechanical RPM for specified pole pairs */
     float voltage_v;
     float current_a;
     int16_t temperature_c;
-    uint8_t stress_level;           /* Last EDT stress metric [0-255] */
-    uint8_t status_flags;           /* Last EDT status flags: 0x80 alert, 0x40 warning, 0x20 error */
-    uint8_t status_max_stress;      /* Last EDT status max-stress nibble [0-15] */
+    uint8_t stress_level;      /* Last EDT stress metric [0-255] */
+    uint8_t status_flags;      /* Last EDT status flags: 0x80 alert, 0x40 warning, 0x20 error */
+    uint8_t status_max_stress; /* Last EDT status max-stress nibble [0-15] */
     dshot_telemetry_type_t last_type;
     uint32_t packets_sent;
     uint32_t telemetry_received;
@@ -86,6 +86,40 @@ bool dshot_decode_telemetry_frame(uint32_t raw_21_bits, uint16_t *out_telemetry_
  * @return Parsed telemetry type.
  */
 dshot_telemetry_type_t dshot_parse_telemetry(uint16_t frame_16, uint8_t motor_pole_pairs, dshot_telemetry_t *telem);
+
+#define DSHOT_CMD_REPEAT_COUNT 10U
+
+typedef enum { DSHOT_CMD_STATE_IDLE = 0, DSHOT_CMD_STATE_SENDING } dshot_cmd_state_t;
+
+typedef struct {
+    dshot_cmd_state_t state;
+    uint16_t command_frame;
+    uint8_t repeat_count;
+} dshot_cmd_queue_t;
+
+/**
+ * @brief Initialize a non-blocking DShot command queue.
+ */
+void dshot_cmd_queue_init(dshot_cmd_queue_t *queue);
+
+/**
+ * @brief Request transmission of a DShot special command (1..47).
+ * Prepares the frame with Telemetry bit = 1 and sets repeat counter to 10.
+ * @return true if queued, false if another command is currently in flight.
+ */
+bool dshot_cmd_request(dshot_cmd_queue_t *queue, uint8_t cmd_code);
+
+/**
+ * @brief Get the next 16-bit frame to transmit for this motor cycle.
+ * If a command is active, returns the command frame and decrements repeat counter.
+ * Otherwise returns the normal packed throttle frame.
+ */
+uint16_t dshot_cmd_get_frame(dshot_cmd_queue_t *queue, uint16_t throttle, bool telemetry);
+
+/**
+ * @brief Convert raw eRPM period in microseconds to mechanical motor RPM (7 pole pairs for T200).
+ */
+uint32_t dshot_erpm_period_to_rpm(uint32_t period_us, uint8_t pole_pairs);
 
 #ifdef __cplusplus
 }

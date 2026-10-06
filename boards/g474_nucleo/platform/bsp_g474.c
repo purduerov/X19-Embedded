@@ -80,7 +80,7 @@ void bsp_init(void) {
 }
 
 int __io_putchar(int ch) {
-    uint32_t timeout = 10000000;
+    uint32_t timeout = 5000;
     while (!(LPUART1->ISR & USART_ISR_TXE) && --timeout) {
     }
     if (timeout > 0) {
