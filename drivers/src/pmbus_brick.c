@@ -20,6 +20,39 @@ __attribute__((weak)) bool mock_sensors_get_tps25990(uint8_t index, float *v_in,
     return false;
 }
 
+static const float pmbus_pow2_lut[32] = {1.52587890625e-05f,
+                                         3.0517578125e-05f,
+                                         6.103515625e-05f,
+                                         0.0001220703125f,
+                                         0.000244140625f,
+                                         0.00048828125f,
+                                         0.0009765625f,
+                                         0.001953125f,
+                                         0.00390625f,
+                                         0.0078125f,
+                                         0.015625f,
+                                         0.03125f,
+                                         0.0625f,
+                                         0.125f,
+                                         0.25f,
+                                         0.5f,
+                                         1.0f,
+                                         2.0f,
+                                         4.0f,
+                                         8.0f,
+                                         16.0f,
+                                         32.0f,
+                                         64.0f,
+                                         128.0f,
+                                         256.0f,
+                                         512.0f,
+                                         1024.0f,
+                                         2048.0f,
+                                         4096.0f,
+                                         8192.0f,
+                                         16384.0f,
+                                         32768.0f};
+
 float pmbus_linear11_to_float(uint16_t raw_value) {
     int16_t exponent = (int16_t)((int8_t)((raw_value >> 11) & 0x1F));
     if (exponent > 15) {
@@ -29,13 +62,7 @@ float pmbus_linear11_to_float(uint16_t raw_value) {
     if (mantissa > 1023) {
         mantissa -= 2048;
     }
-    float result = (float)mantissa;
-    if (exponent >= 0) {
-        result *= (float)(1 << exponent);
-    } else {
-        result /= (float)(1 << (-exponent));
-    }
-    return result;
+    return (float)mantissa * pmbus_pow2_lut[exponent + 16];
 }
 
 rov_status_t pmbus_brick_init(pmbus_brick_dev_t *dev, uint8_t pmbus_addr) {
@@ -155,6 +182,10 @@ bool pmbus_status_has_thermal_fault(uint16_t status_word) {
 }
 
 float pmbus_linear16_to_float(uint16_t raw_value, int8_t exponent) {
+    if (exponent >= -16 && exponent <= 15) {
+        return (float)raw_value * pmbus_pow2_lut[exponent + 16];
+    }
+
     float result = (float)raw_value;
 
     if (exponent >= 0) {
