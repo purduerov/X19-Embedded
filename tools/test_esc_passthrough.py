@@ -77,16 +77,48 @@ def main():
         s.write(msp_frame(104, 0))
         print("RX:", read_all(s, 0.5).hex())
 
-        print("TX set 4way passthrough (245)")
+        print(">>> POWER-CYCLE THE ESC NOW (unplug and replug the battery) <<<")
+        import time
+
+        print("TX set 4way passthrough (245) -- ARMED window starts now")
         s.write(msp_frame(245, 0))
         print("RX:", read_all(s, 0.5).hex())
 
-        # Firmware holds the line in reset + boot-settle for ~1.3s before it
-        # will answer any 4-way command, so wait that out first.
-        print("Waiting 2.0s for ESC reset + boot settle...")
-        import time
+        # The firmware blocks for the whole ~20 s arm window, so anything sent
+        # during it is dropped (LPUART has no FIFO). Wait for the explicit
+        # "window closed" banner rather than guessing with sleep(), otherwise we
+        # parse banner text as 4-way frames and get nonsense diagnostics.
 
-        time.sleep(2.0)
+        # The firmware blocks for the whole ~20 s arm window, so anything sent
+        # during it is dropped (LPUART has no FIFO). Wait for the explicit
+        # "window closed" banner rather than guessing with sleep(), otherwise we
+        # parse banner text as 4-way frames and get nonsense diagnostics.
+        s.reset_input_buffer()
+        s.timeout = 1.0
+        t_end = time.time() + 40
+        armed = False
+        closed = False
+        while time.time() < t_end and not closed:
+            chunk = s.read(4096)
+            if not chunk:
+                continue
+            text = chunk.decode("ascii", "replace")
+            if "ARMED" in text:
+                armed = True
+                print("   ", text.strip().splitlines()[0])
+            if "window closed" in text:
+                closed = True
+                print("   ", [l for l in text.splitlines() if "closed" in l][0])
+                break
+
+        if not armed:
+            print("    WARNING: no ARMED banner seen")
+        if not closed:
+            print("    WARNING: never saw 'window closed'; aborting")
+            return
+
+        # drain any trailing banner bytes before sending real commands
+        s.reset_input_buffer()
 
         print("TX cmd_InterfaceTestAlive (0x30)")
         s.write(fourway_frame(0x30, []))
@@ -97,6 +129,9 @@ def main():
         s.write(fourway_frame(0x37, [0, 0]))
         r = read_all(s, 2.0)
         print("RX:", r.hex(), "| ack =", hex(r[5]) if len(r) > 5 else "n/a")
+        if len(r) >= 21:
+            lvl = r[9:21].decode("ascii", "replace")
+            print("  line levels (12 samples):", lvl)
         if len(r) >= 9:
             p = r[5:9]
             edges = (p[0] << 8) | p[1]

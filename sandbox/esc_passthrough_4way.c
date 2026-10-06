@@ -22,11 +22,28 @@
 /* -------------------- Settings -------------------- */
 #define PASSTHROUGH_MOTOR_INDEX  0U    /* internal motor index 0 */
 #define MOTOR_BITBANG_BAUD       19200U /* 4-way BLHeli timing */
-#define PASSTHROUGH_BREAK_MS     300U
-#define PASSTHROUGH_SETTLE_MS    1000U
+/* LOW break is a C2/Atmel bootloader trick; SiLabs BLHeli_S/Bluejay do not
+   need it and go quiet while the line is held low. Set nonzero only if a
+   future ESC family requires it. */
+#define PASSTHROUGH_BREAK_MS     0U
+#define PASSTHROUGH_SETTLE_MS    20U
 
 /* -------------------- LPUART1 (VCP to PC) -------------------- */
 static UART_HandleTypeDef hlpuart1;
+
+/*
+ * Count how many times the ESC signal line actually moved, observed
+ * CONTINUOUSLY for the whole handshake.
+ *
+ * A fixed sampling window can miss the reply entirely: the ESC answers within
+ * a millisecond or two of the last handshake byte, so a window that starts too
+ * late reports zero edges even when the ESC did respond.
+ */
+static volatile uint32_t s_line_edges = 0U;
+
+static void esc_watch_enable(void) {
+    s_line_edges = 0U;
+}
 
 /* -------------------- MSP state -------------------- */
 typedef enum {
@@ -104,7 +121,67 @@ static void bb_uart_write_byte(uint8_t b) {
     bit_time += period;
     while ((int32_t)(DWT->CYCCNT - bit_time) < 0) {}
 
+    /*
+     * Stay in push-pull HIGH between bytes instead of releasing to input.
+     * The internal pull-up is only ~40k, which is weak; a solidly driven HIGH
+     * is what the ESC needs to recognise as a valid idle line.
+     */
+    __enable_irq();
+}
+
+/* Release the line so the ESC can drive its reply. */
+static void bb_uart_release(void) {
     PA8_Input();
+}
+
+/*
+ * High-resolution transition counter.
+ *
+ * Polls IDR as fast as the CPU allows and counts real level changes. At 19200
+ * baud a bit is ~52 us, so even a crude loop resolves it easily. This replaces
+ * an earlier snapshot that sampled every ~4 ms and therefore could never have
+ * observed a single bit, which is why it always reported the line as HIGH.
+ */
+static uint32_t bb_count_edges(uint32_t window_cycles) {
+    __disable_irq();
+    uint32_t t_end = DWT->CYCCNT + window_cycles;
+    uint32_t prev = pin_level();
+    uint32_t edges = 0U;
+    while ((int32_t)(t_end - DWT->CYCCNT) > 0) {
+        uint32_t now = pin_level();
+        if (now != prev) {
+            edges++;
+            prev = now;
+        }
+    }
+    __enable_irq();
+    return edges;
+}
+
+/*
+ * Sample the line at roughly half a bit period across a short window, so the
+ * host can see the actual waveform.
+ *
+ * The earlier version sampled every ~4 ms, which is ~75 bit times at 19200 baud
+ * and therefore could never have observed a single transition. That is why it
+ * always reported a flat HIGH line and told us nothing.
+ */
+static uint8_t s_capture[12];
+
+static void esc_capture_line(uint32_t window_cycles) {
+    __disable_irq();
+    /* Half a bit per sample, so 12 samples span ~6 bit times (a whole byte). */
+    uint32_t step = BB_UART_PERIOD_CYCLES() / 2U;
+    if (step == 0U) {
+        step = 1U;
+    }
+    (void)window_cycles;
+    uint32_t t = DWT->CYCCNT;
+    for (uint8_t i = 0; i < sizeof(s_capture); i++) {
+        while ((int32_t)(DWT->CYCCNT - t) < 0) {}
+        s_capture[i] = (pin_level() != 0U) ? 'H' : 'L';
+        t += step;
+    }
     __enable_irq();
 }
 
@@ -116,22 +193,37 @@ static int bb_uart_read_byte(uint8_t *out, uint32_t timeout_cycles) {
     __disable_irq();
 
     uint32_t t0 = DWT->CYCCNT;
+    uint32_t prev = pin_level();
     while (pin_level() != 0U) {
+        /* Count real transitions only; counting loop iterations would report a
+         * huge number for a line that simply sits idle. */
+        uint32_t now = pin_level();
+        if (now != prev) {
+            s_line_edges++;
+            prev = now;
+        }
         if ((int32_t)(DWT->CYCCNT - (t0 + timeout_cycles)) >= 0) {
             __enable_irq();
             return -1;
         }
     }
+    s_line_edges++;
 
     uint32_t period = BB_UART_PERIOD_CYCLES();
     uint32_t bits = 0;
 
     /*
-     * Sample data bit 0 at the MIDDLE of its cell: 0.5T (26 us) after the
-     * leading edge of the start bit. Betaflight confirms the start bit at 0.75T
-     * and then steps one full BIT_TIME per data bit.
+     * Sample data bit 0 at the centre of ITS cell, not the start bit's.
+     *
+     * Timing: the start bit occupies 0 -> T. Data bit 0 occupies T -> 2T, so
+     * its centre is 1.5T after the leading edge. Sampling at 0.5T lands inside
+     * the start bit and shifts the whole byte by one position.
+     *
+     * Betaflight's suart_getc_ does the equivalent by confirming the start bit
+     * at START_BIT_TIME (0.75T) and then stepping a full BIT_TIME per data bit,
+     * which puts its first data sample at 0.75T + 1.0T = 1.75T.
      */
-    uint32_t t = DWT->CYCCNT + (period / 2U);
+    uint32_t t = DWT->CYCCNT + period + (period / 2U);
     while ((int32_t)(DWT->CYCCNT - t) < 0) {}
 
     for (int i = 0; i < 8; i++) {
@@ -187,19 +279,24 @@ static uint8_t bb_uart_write_sample_byte(uint8_t b) {
     uint32_t bit_time = DWT->CYCCNT;
     uint8_t sampled = 0U;
 
-    /* start bit (LOW) */
+    /* start bit (LOW), and wait out the cell so the first data bit lands on a
+       cell boundary rather than mid-cell. */
     PA8_TxLow();
     bit_time += period;
     while ((int32_t)(DWT->CYCCNT - bit_time) < 0) {}
 
     /* data bits, LSB first; sample at the centre of each cell */
     for (int i = 0; i < 8; i++) {
-        uint32_t centre = bit_time + (period / 2U);
+        /* Drive the bit at the START of its cell, THEN sample at the centre.
+           The previous order sampled before driving, which reads the previous
+           bit: 0x55 came back as 0xAA, a one-bit shift. */
+        if (b & (1U << i)) PA8_TxHigh(); else PA8_TxLow();
+        bit_time += period;
+
+        uint32_t centre = bit_time - (period / 2U);
         while ((int32_t)(DWT->CYCCNT - centre) < 0) {}
         if (pin_level()) sampled |= (1U << i);
 
-        if (b & (1U << i)) PA8_TxHigh(); else PA8_TxLow();
-        bit_time += period;
         while ((int32_t)(DWT->CYCCNT - bit_time) < 0) {}
     }
 
@@ -232,27 +329,53 @@ static void esc_bitbang_selftest(void) {
     s_selftest = 1U;
 }
 
+/*
+ * Put the signal line into the idle state the ESC expects, then settle.
+ *
+ * IMPORTANT: do NOT pulse the line LOW by default. A LOW break is the C2/Atmel
+ * bootloader trick; a SiLabs BLHeli_S/Bluejay ESC is already listening on that
+ * line and does not reboot from it, so holding it low just keeps it silent.
+ * Betaflight's esc4wayInit() likewise only parks the motor lines HIGH.
+ */
 static void esc_line_break_release(void) {
+#if PASSTHROUGH_BREAK_MS
+    /* Only for ESC families that genuinely need a break to re-enter
+       bootloader mode. Off by default for BLHeli_S / Bluejay. */
     PA8_Output();
-
-    /* break: hold the signal low so the ESC reboots */
     PA8_TxLow();
     HAL_Delay(PASSTHROUGH_BREAK_MS);
+#endif
 
-    /* release: stop driving, let the pull-up hold the line idle high */
-    PA8_Input();
+    /* Idle high, driven strongly: low output impedance beats the wire's
+       capacitance and gives the ESC a clean reference to talk against. */
     PA8_Output();
     PA8_TxHigh();
     HAL_Delay(PASSTHROUGH_SETTLE_MS);
 
-    /* back to receive-capable idle so the ESC can drive the line */
+    /* Release so the ESC can pull the line low for its reply. */
     PA8_Input();
 }
+
+
 
 /* -------------------- VCP byte forwarding in passthrough -------------------- */
 static void vcp_write(uint8_t b) {
     while (!(LPUART1->ISR & USART_ISR_TXE)) {}
     LPUART1->TDR = b;
+}
+
+/*
+ * Direct LPUART banner writer.
+ *
+ * Do NOT use printf here: __io_putchar is defined in the platform BSP, which
+ * this sandbox file never calls, and stdout is never set unbuffered, so printf
+ * output never reaches COM6. Write the bytes ourselves.
+ */
+static void vcp_puts(const char *s) {
+    for (; *s != '\0'; s++) {
+        if (*s == '\n') vcp_write('\r');
+        vcp_write((uint8_t)*s);
+    }
 }
 
 static bool vcp_read_blocking(uint8_t *b) {
@@ -415,30 +538,14 @@ static uint8_t bl_get_ack(uint32_t timeout_cycles) {
 static uint8_t s_diag[4] = {0, 0, 0, 0};
 
 /*
- * Count how many times the line actually moved during a fixed observation
- * window after our boot handshake. If this is 0 the ESC never drove the line,
- * which means it is not in bootloader/listening mode at all. If it is
- * non-zero but the byte reads still fail, the problem is sampling, not
- * signalling.
+ * Count how many times the line actually moved, observed CONTINUOUSLY while we
+ * are talking to the ESC.
+ *
+ * The previous version sampled only in a fixed window after TX, which can miss
+ * the reply entirely: the ESC answers within a millisecond or two of the last
+ * handshake byte, so a window that starts too late reports zero edges even when
+ * the ESC did respond. Now the counter is armed for the whole exchange.
  */
-static uint32_t s_line_edges = 0U;
-
-static uint32_t esc_count_edges(uint32_t window_cycles) {
-    __disable_irq();
-    uint32_t t_end = DWT->CYCCNT + window_cycles;
-    uint32_t prev = pin_level();
-    uint32_t edges = 0U;
-    while ((int32_t)(t_end - DWT->CYCCNT) > 0) {
-        uint32_t now = pin_level();
-        if (now != prev) {
-            edges++;
-            prev = now;
-        }
-    }
-    __enable_irq();
-    return edges;
-}
-
 static bool bl_connect(uint8_t *device_info) {
     static const uint8_t boot_init[17] = {
         0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -446,44 +553,51 @@ static bool bl_connect(uint8_t *device_info) {
         0xF4, 0x7D
     };
 
-    bl_send_buf(boot_init, sizeof(boot_init));
+    /* Betaflight's Connect() retries three times before giving up; the ESC may be
+       still booting or mid-startup-melody on the first pass. */
+    for (uint8_t attempt = 0; attempt < 3U; attempt++) {
+        esc_watch_enable();
 
-    /* Observe the line before we try to decode: did the ESC drive anything? */
-    s_line_edges = esc_count_edges(SystemCoreClock / 10U); /* ~100 ms */
+        bl_send_buf(boot_init, sizeof(boot_init));
 
-    uint8_t info[9] = {0};
-    s_diag[0] = 0U;
-    s_diag[1] = 0U;
-    s_diag[2] = 0U;
-    s_diag[3] = 0U;
+        /*
+         * Let the ESC drive and count real transitions over ~4 ms, which is
+         * plenty for it to answer. If this is zero the line genuinely never
+         * moved, independent of any decode logic.
+         */
+        bb_uart_release();
+        s_line_edges = bb_count_edges(SystemCoreClock / 250U); /* ~4 ms */
 
-    /* read the "471x" reply one byte at a time so we can see how far we get */
-    uint16_t got = 0U;
-    for (; got < 8U; got++) {
-        if (bb_uart_read_byte(&info[got], BB_UART_PERIOD_CYCLES() * 400U) != 0) {
-            s_diag[2] = (uint8_t)got; /* stopped at this index */
-            s_diag[3] = 1U;            /* timeout */
-            return false;
+        uint8_t info[9] = {0};
+
+        uint16_t got = 0U;
+        for (; got < 8U; got++) {
+            if (bb_uart_read_byte(&info[got], BB_UART_PERIOD_CYCLES() * 400U) != 0) {
+                break;
+            }
         }
+
+        for (uint8_t i = 0; i < 8U; i++) {
+            s_diag[i] = info[i];
+        }
+        s_diag[2] = (uint8_t)got;
+        s_diag[3] = (got == 8U) ? 2U : 1U; /* 2 = full read, 1 = timeout */
+
+        if (got == 8U && info[0] == '4' && info[1] == '7' && info[2] == '1') {
+            if (device_info != (void *)0) {
+                device_info[0] = info[6]; /* signature lo */
+                device_info[1] = info[5]; /* signature hi */
+                device_info[2] = info[3]; /* boot version */
+                device_info[3] = 1U;      /* interfaceMode: SiLabs */
+            }
+            return true;
+        }
+
+        /* Give the line back to the idle state between attempts. */
+        esc_line_break_release();
     }
 
-    for (uint8_t i = 0; i < 8U; i++) {
-        s_diag[i] = info[i];
-    }
-    s_diag[2] = 8U;
-    s_diag[3] = 2U; /* full read */
-
-    if (info[0] != '4' || info[1] != '7' || info[2] != '1') {
-        return false;
-    }
-
-    if (device_info != (void *)0) {
-        device_info[0] = info[6]; /* signature lo */
-        device_info[1] = info[5]; /* signature hi */
-        device_info[2] = info[3]; /* boot version */
-        device_info[3] = 1U;      /* interfaceMode: SiLabs */
-    }
-    return true;
+    return false;
 }
 
 /* -------------------- 4-way frame handling -------------------- */
@@ -571,6 +685,14 @@ static void fourway_handle(uint8_t cmd, uint16_t address, const uint8_t *in,
                 out[n++] = (uint8_t)(s_line_edges & 0xFFU);
                 out[n++] = s_diag[2];
                 out[n++] = s_diag[3];
+                /*
+                 * Only snapshot the line now that we know we are not going to
+                 * read it: sampling here must not eat the ESC's reply.
+                 */
+                esc_capture_line(0U);
+                for (uint8_t i = 0; i < 12U && n < out_cap; i++) {
+                    out[n++] = s_capture[i];
+                }
             }
         }
         break;
@@ -632,6 +754,24 @@ static void fourway_handle(uint8_t cmd, uint16_t address, const uint8_t *in,
 }
 
 static void passthru_loop(void) {
+    /*
+     * Park the line HIGH first and hold it. The ESC needs to boot while we are
+     * already idling correctly, so give the operator a window to power-cycle it
+     * before we attempt the handshake.
+     */
+    {
+        PA8_Output();
+        PA8_TxHigh();
+        vcp_puts("\r\n*** ARMED: PA8 idle HIGH. POWER-CYCLE THE ESC NOW. ***\r\n");
+        for (int i = 20; i > 0; i--) {
+            vcp_puts("ARMED: idle HIGH, 20 s left. Power-cycle the ESC NOW.\r\n");
+            for (uint32_t ms = 0; ms < 1000U; ms++) {
+                HAL_Delay(1);
+            }
+        }
+        vcp_puts("ARMED window closed, attempting handshake...\r\n");
+    }
+
     esc_line_break_release();
 
     for (;;) {
@@ -705,11 +845,8 @@ void app_main(void) {
     hlpuart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
     HAL_UART_Init(&hlpuart1);
 
-    /* DEBUG: print ready marker before MSP parser */
-    for (const char *p = "READY\r\n"; *p; p++) {
-        while (!(LPUART1->ISR & USART_ISR_TXE)) {}
-        LPUART1->TDR = *p;
-    }
+    /* Banner so the host can confirm the firmware is alive and in MSP mode. */
+    vcp_puts("READY\r\n");
 
     /* prepare PA8 as half-duplex signal pin */
     gpio.Pin = GPIO_PIN_8;
