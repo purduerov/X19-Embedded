@@ -15,11 +15,6 @@ add_library(g474_platform STATIC
     platform/platform_can.c
     platform/platform_gpio.c
     platform/platform_pwm.c
-    Core/Src/stm32g4xx_it.c
-    Core/Src/stm32g4xx_hal_msp.c
-    Core/Src/sysmem.c
-    Core/Src/syscalls.c
-    startup_stm32g474xx.s
 )
 
 target_include_directories(g474_platform PUBLIC
@@ -43,7 +38,12 @@ target_compile_options(g474_platform PUBLIC -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -m
 # Helper function to generate an executable combining G474 platform + node app sources
 function(add_g474_node_executable TARGET_NAME)
     add_executable(${TARGET_NAME}
-        Core/Src/main.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/startup_stm32g474xx.s
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/main.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/stm32g4xx_it.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/stm32g4xx_hal_msp.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/syscalls.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sysmem.c
         ${ARGN}
     )
     target_include_directories(${TARGET_NAME} BEFORE PRIVATE
@@ -99,11 +99,17 @@ target_include_directories(g474_node3_power_slab.elf PRIVATE
 )
 
 # 4. R&D / Sandbox Target
+if(NOT DEFINED SANDBOX_FILE OR SANDBOX_FILE STREQUAL "")
+    set(SANDBOX_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../sandbox/sandbox.c")
+endif()
+get_filename_component(SANDBOX_FILE_ABS "${SANDBOX_FILE}" ABSOLUTE)
+
 add_g474_node_executable(g474_sandbox.elf
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../sandbox/sandbox.c"
+    "${SANDBOX_FILE_ABS}"
 )
+get_filename_component(SANDBOX_DIR "${SANDBOX_FILE_ABS}" DIRECTORY)
 target_include_directories(g474_sandbox.elf PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../sandbox"
+    "${SANDBOX_DIR}"
 )
 
 # 5. Diagnostic I2C Scanner

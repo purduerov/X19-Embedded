@@ -18,11 +18,6 @@ add_library(f411_platform STATIC
     Core/Src/gpio.c
     Core/Src/can.c
     Core/Src/usart.c
-    Core/Src/stm32f4xx_it.c
-    Core/Src/stm32f4xx_hal_msp.c
-    Core/Src/sysmem.c
-    Core/Src/syscalls.c
-    startup_stm32f446xx.s
 )
 
 target_include_directories(f411_platform PUBLIC
@@ -46,7 +41,12 @@ target_compile_options(f411_platform PUBLIC -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -m
 # Helper function to generate an executable combining F411 platform + node app.c
 function(add_f411_node_executable TARGET_NAME)
     add_executable(${TARGET_NAME}
-        Core/Src/main.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/startup_stm32f446xx.s
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/main.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/stm32f4xx_it.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/stm32f4xx_hal_msp.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/syscalls.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/sysmem.c
         ${ARGN}
     )
     target_include_directories(${TARGET_NAME} BEFORE PRIVATE
@@ -99,8 +99,17 @@ target_include_directories(f411_node3_power_slab.elf PRIVATE
 )
 
 # 4. R&D / Sandbox Target
+if(NOT DEFINED SANDBOX_FILE OR SANDBOX_FILE STREQUAL "")
+    set(SANDBOX_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../sandbox/sandbox.c")
+endif()
+get_filename_component(SANDBOX_FILE_ABS "${SANDBOX_FILE}" ABSOLUTE)
+
 add_f411_node_executable(f411_sandbox.elf
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../sandbox/sandbox.c"
+    "${SANDBOX_FILE_ABS}"
+)
+get_filename_component(SANDBOX_DIR "${SANDBOX_FILE_ABS}" DIRECTORY)
+target_include_directories(f411_sandbox.elf PRIVATE
+    "${SANDBOX_DIR}"
 )
 
 # Backwards-compatible aliases

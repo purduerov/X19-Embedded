@@ -13,6 +13,17 @@
  *   - GND: Any Nucleo GND pin
  */
 
+#if defined(ROV_UNIT_TEST) || defined(X19_UNIT_TEST)
+
+#include "bsp.h"
+#include <stdio.h>
+
+void app_main(void) {
+    printf("[Host SIL] Sandbox runs only on embedded target (STM32G474RE).\r\n");
+}
+
+#else
+
 #include "bsp.h"
 #include "dshot.h"
 #include "stm32g4xx_hal.h"
@@ -20,17 +31,17 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define DSHOT_BAUD_KHZ    300U /* 300 kHz (DShot300) */
-#define MOTOR_POLE_PAIRS  7U   /* BlueRobotics T200 thruster: 14 poles = 7 pole pairs */
-#define DSHOT_CAPTURE_RX  0U   /* 1 = run per-frame telemetry capture after TX */
+#define DSHOT_BAUD_KHZ          300U /* 300 kHz (DShot300) */
+#define MOTOR_POLE_PAIRS        7U   /* BlueRobotics T200 thruster: 14 poles = 7 pole pairs */
+#define DSHOT_CAPTURE_RX        0U   /* 1 = run per-frame telemetry capture after TX */
 
 static uint32_t s_dshot_t_bit = 567U;
-static uint32_t s_dshot_t1h   = 425U;
-static uint32_t s_dshot_t0h   = 213U;
+static uint32_t s_dshot_t1h = 425U;
+static uint32_t s_dshot_t0h = 213U;
 
 /* GCR bit timing at 375 kHz (5/4 of 300k): 2.667 us per bit */
-#define GCR_BIT_CYCLES  453U
-#define GCR_HALF_CYCLES 226U
+#define GCR_BIT_CYCLES          453U
+#define GCR_HALF_CYCLES         226U
 
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim8;
@@ -94,10 +105,13 @@ static void dshot_init(uint32_t baud_khz) {
     /* Start in Input mode (High-Z with Pull-Up) */
     GPIOA->MODER = (GPIOA->MODER & ~GPIOA_MODER_PINS_MASK) | GPIOA_MODER_INPUT_MODE;
 
+    /* Enable ART accelerator (prefetch buffer, instruction cache, data cache) */
+    FLASH->ACR |= FLASH_ACR_PRFTEN | FLASH_ACR_ICEN | FLASH_ACR_DCEN;
+
     uint32_t sysclk = SystemCoreClock; /* 170,000,000 Hz */
     s_dshot_t_bit = sysclk / (baud_khz * 1000U);
-    s_dshot_t1h   = (s_dshot_t_bit * 3U) / 4U; /* 75% active low */
-    s_dshot_t0h   = (s_dshot_t_bit * 3U) / 8U; /* 37.5% active low */
+    s_dshot_t1h = (s_dshot_t_bit * 3U) / 4U; /* 75% active low */
+    s_dshot_t0h = (s_dshot_t_bit * 3U) / 8U; /* 37.5% active low */
 
     /* Telemetry back-channel runs at 5/4 x the DShot bitrate */
     s_gcr_bit_cycles = sysclk / ((baud_khz * 1000U * 5U) / 4U);
@@ -108,7 +122,7 @@ static void dshot_init(uint32_t baud_khz) {
  */
 static void dshot_send_frame(uint16_t packet) {
     const uint32_t pin_mask_a = GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 | GPIO_PIN_11;
-    const uint32_t drive_low_a  = pin_mask_a << 16;
+    const uint32_t drive_low_a = pin_mask_a << 16;
     const uint32_t drive_high_a = pin_mask_a;
 
     __disable_irq();
@@ -117,31 +131,43 @@ static void dshot_send_frame(uint16_t packet) {
     GPIOA->BSRR = drive_high_a;
     GPIOA->MODER = (GPIOA->MODER & ~GPIOA_MODER_PINS_MASK) | GPIOA_MODER_OUTPUT_MODE;
 
-    uint32_t bit_start = DWT->CYCCNT;
-    for (int i = 15; i >= 0; i--) {
-        uint32_t t_low = (packet & (1U << i)) ? s_dshot_t1h : s_dshot_t0h;
+    /* Precompute 16 pulse low-widths so bit-bang loop does zero arithmetic */
+    uint32_t t_low[16];
+    for (int i = 0; i < 16; i++) {
+        t_low[i] = (packet & (1U << (15 - i))) ? s_dshot_t1h : s_dshot_t0h;
+    }
 
-        /* Wait until start of bit window */
-        while ((int32_t)(DWT->CYCCNT - bit_start) < 0) {}
+    /* Synchronize first bit on a clean future deadline so bit 0 (MSB) has identical timing */
+    uint32_t bit_start = DWT->CYCCNT + 60U;
+    while ((int32_t)(DWT->CYCCNT - bit_start) < 0) {
+    }
 
+    for (int i = 0; i < 16; i++) {
         /* Active LOW pulse (falling edge) */
         GPIOA->BSRR = drive_low_a;
 
         /* Wait for low duration */
-        uint32_t low_end = bit_start + t_low;
-        while ((int32_t)(DWT->CYCCNT - low_end) < 0) {}
+        uint32_t low_end = bit_start + t_low[i];
+        while ((int32_t)(DWT->CYCCNT - low_end) < 0) {
+        }
 
         /* Return HIGH (rising edge) */
         GPIOA->BSRR = drive_high_a;
 
         bit_start += s_dshot_t_bit;
+        if (i < 15) {
+            while ((int32_t)(DWT->CYCCNT - bit_start) < 0) {
+            }
+        }
     }
 
     /* Wait for 16th bit period to end */
-    while ((int32_t)(DWT->CYCCNT - bit_start) < 0) {}
+    while ((int32_t)(DWT->CYCCNT - bit_start) < 0) {
+    }
 
-    /* 2. Keep pin actively driven HIGH in Push-Pull mode (immune to motor noise) */
+    /* Release pin to Input mode (High-Z with Pull-Up) so ESC can transmit telemetry without collision */
     GPIOA->BSRR = drive_high_a;
+    GPIOA->MODER = (GPIOA->MODER & ~GPIOA_MODER_PINS_MASK);
 
     __enable_irq();
 
@@ -205,14 +231,12 @@ restore:
  * @brief Stream a constant throttle value for duration_ms at exact 1000.0 Hz via DWT.
  */
 static void dshot_print_telemetry(void) {
-    printf("   [Telemetry] eRPM=%lu RPM=%lu V=%.2f I=%.1fA T=%dC stress=%u status=0x%02X maxstress=%u last=%d rx=%lu err=%lu raw=0x%05lX\r\n",
-           (unsigned long)s_telemetry.erpm, (unsigned long)s_telemetry.rpm,
-           (double)s_telemetry.voltage_v, (double)s_telemetry.current_a,
-           (int)s_telemetry.temperature_c, (unsigned)s_telemetry.stress_level,
-           (unsigned)s_telemetry.status_flags, (unsigned)s_telemetry.status_max_stress,
-           (int)s_telemetry.last_type,
-           (unsigned long)s_telemetry.telemetry_received,
-           (unsigned long)s_telemetry.telemetry_errors,
+    printf("   [Telemetry] eRPM=%lu RPM=%lu V=%.2f I=%.1fA T=%dC stress=%u status=0x%02X maxstress=%u last=%d rx=%lu "
+           "err=%lu raw=0x%05lX\r\n",
+           (unsigned long)s_telemetry.erpm, (unsigned long)s_telemetry.rpm, (double)s_telemetry.voltage_v,
+           (double)s_telemetry.current_a, (int)s_telemetry.temperature_c, (unsigned)s_telemetry.stress_level,
+           (unsigned)s_telemetry.status_flags, (unsigned)s_telemetry.status_max_stress, (int)s_telemetry.last_type,
+           (unsigned long)s_telemetry.telemetry_received, (unsigned long)s_telemetry.telemetry_errors,
            (unsigned long)s_last_raw21);
     printf("   [Edges] n=%lu:", (unsigned long)s_dbg_n);
     for (uint32_t i = 0; i < s_dbg_n && i < 20U; i++) {
@@ -229,7 +253,13 @@ static void dshot_hold(uint16_t value, uint32_t duration_ms) {
     for (uint32_t ms = 0; ms < duration_ms; ms++) {
         next_tick += frame_cycles;
         dshot_send_frame(packet);
-        while ((int32_t)(DWT->CYCCNT - next_tick) < 0) {}
+
+        if ((int32_t)(DWT->CYCCNT - next_tick) > 0) {
+            next_tick = DWT->CYCCNT + frame_cycles;
+        } else {
+            while ((int32_t)(DWT->CYCCNT - next_tick) < 0) {
+            }
+        }
     }
 }
 
@@ -245,14 +275,18 @@ static void dshot_ramp(uint16_t start_val, uint16_t end_val, uint32_t duration_m
 
         uint16_t throttle = start_val;
         if (duration_ms > 0) {
-            throttle = (uint16_t)(start_val +
-                ((int32_t)(end_val - start_val) * (int32_t)ms) / (int32_t)duration_ms);
+            throttle = (uint16_t)(start_val + ((int32_t)(end_val - start_val) * (int32_t)ms) / (int32_t)duration_ms);
         }
 
         uint16_t packet = dshot_prepare_packet(throttle, false, true);
         dshot_send_frame(packet);
 
-        while ((int32_t)(DWT->CYCCNT - next_tick) < 0) {}
+        if ((int32_t)(DWT->CYCCNT - next_tick) > 0) {
+            next_tick = DWT->CYCCNT + frame_cycles;
+        } else {
+            while ((int32_t)(DWT->CYCCNT - next_tick) < 0) {
+            }
+        }
     }
 }
 
@@ -299,38 +333,26 @@ void app_main(void) {
         dshot_hold(0, 1000);
     }
 
+#define MOTOR_SPIN_TARGET 2000U /* Forward-Only mode: 48 min, 2047 max. 2000 = ~100% full power */
+
     printf("\r\n[Step 5] ESC is ARMED! Starting Continuous Motion Loop...\r\n");
-    uint32_t cycle = 1;
+    printf(">> Ramping 48 -> %u (100%% max power) and holding for 15.0s (no UART stalls)...\r\n", MOTOR_SPIN_TARGET);
 
     while (1) {
-        printf("\r\n======================================================\r\n");
-        printf(">>> [Cycle %lu] Starting Smooth Max-Speed Profile <<<\r\n", (unsigned long)cycle);
-        printf("======================================================\r\n");
-
-        /* Phase 1: Smooth Forward Ramp to MAX SPEED (1048 -> 2000 over 3.0 seconds) */
-        printf(">> [Phase 1: Ramp Up] Accelerating smoothly 0%% -> 100%% (Throttle 1048 -> 2000, 3.0s)...\r\n");
         led_toggle();
-        dshot_ramp(1048, 2000, 3000);
-        dshot_print_telemetry();
 
-        /* Phase 2: Hold at MAX SPEED (2000) for 2.5 seconds */
-        printf(">> [Phase 2: MAX SPEED HOLD] Throttle 2000 (100%% Full Power) for 2.5 seconds...\r\n");
-        led_toggle();
-        dshot_hold(2000, 2500);
-        dshot_print_telemetry();
+        /* Phase 1: Smooth Forward Ramp to max speed (48 -> 2000 over 3.0s) */
+        dshot_ramp(48, MOTOR_SPIN_TARGET, 3000);
 
-        /* Phase 3: Smooth Ramp Down from Max Speed (2000 -> 1048 over 3.0 seconds) */
-        printf(">> [Phase 3: Ramp Down] Decelerating smoothly 100%% -> 0%% (Throttle 2000 -> 1048, 3.0s)...\r\n");
-        led_toggle();
-        dshot_ramp(2000, 1048, 3000);
-        dshot_print_telemetry();
+        /* Phase 2: Sustained Hold at max speed (2000) for 15.0 seconds */
+        dshot_hold(MOTOR_SPIN_TARGET, 15000);
 
-        /* Phase 4: Gentle Rest at Neutral (1048) for 1.5 seconds (stays armed) */
-        printf(">> [Phase 4: Neutral Rest] Throttle 1048 (Motor Stopped, Armed) for 1.5s...\r\n");
-        led_toggle();
-        dshot_hold(1048, 1500);
-        dshot_print_telemetry();
+        /* Phase 3: Smooth Ramp Down from max speed (2000 -> 48 over 3.0s) */
+        dshot_ramp(MOTOR_SPIN_TARGET, 48, 3000);
 
-        cycle++;
+        /* Phase 4: Gentle Rest at 0 for 2.0s (stays armed) */
+        dshot_hold(0, 2000);
     }
 }
+
+#endif /* !ROV_UNIT_TEST */

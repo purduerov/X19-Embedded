@@ -84,6 +84,62 @@ def find_stm32programmer_cli(required: bool = True) -> str | None:
     return None
 
 
+def find_cubemx(required: bool = True) -> str | None:
+    """Find STM32CubeMX executable across system PATH and standard ST installation directories."""
+    found = shutil.which("STM32CubeMX") or shutil.which("STM32CubeMX.exe")
+    if found:
+        return found
+
+    candidates = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/STM32CubeMX/STM32CubeMX.exe",
+        Path(r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeMX\STM32CubeMX.exe"),
+        Path(r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeMX\STM32CubeMX.exe"),
+        Path("/Applications/STMicroelectronics/STM32CubeMX.app/Contents/MacOs/STM32CubeMX"),
+        Path("/Applications/STM32CubeMX.app/Contents/MacOs/STM32CubeMX"),
+        Path("/usr/local/STMicroelectronics/STM32CubeMX/STM32CubeMX"),
+        Path("/opt/STMicroelectronics/STM32CubeMX/STM32CubeMX"),
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+
+    if required:
+        sys.exit(
+            "Error: 'STM32CubeMX' could not be found.\n"
+            "Please ensure STM32CubeMX is installed."
+        )
+    return None
+
+
+def generate_cubemx(target: str = "all") -> None:
+    cubemx = find_cubemx(required=True)
+    ioc_map = {
+        "g474": REPO_ROOT / "boards/g474_nucleo/g474_nucleo.ioc",
+        "f411": REPO_ROOT / "boards/f411_nucleo/f411_nucleo.ioc",
+        "pi_shield": REPO_ROOT / "nodes/node1_pi_shield/node1_pi_shield.ioc",
+        "control_board": REPO_ROOT / "nodes/node2_control_board/node2_control_board.ioc",
+        "power_slab": REPO_ROOT / "nodes/node3_power_slab/node3_power_slab.ioc",
+        "testing_and_rnd": REPO_ROOT / "nodes/testing_and_rnd/testing_and_rnd.ioc",
+    }
+
+    targets = list(ioc_map.keys()) if target in ("all", None) else [target]
+    for t in targets:
+        ioc_path = ioc_map.get(t)
+        if not ioc_path or not ioc_path.is_file():
+            print(f"Skipping unknown or missing target: {t}")
+            continue
+        print(f"\033[1;36m=== Regenerating CubeMX Project for {t} ({ioc_path.name}) ===\033[0m")
+        script_file = REPO_ROOT / f".cubemx_gen_{t}.tmp"
+        try:
+            # STM32CubeMX CLI accepts script commands
+            script_file.write_text(f"config load {ioc_path.resolve()}\nproject generate\nexit\n", encoding="utf-8")
+            run_cmd([cubemx, "-q", str(script_file.resolve())], cwd=ioc_path.parent)
+            print(f"\033[1;32m[SUCCESS] Regenerated {t}\033[0m\n")
+        finally:
+            if script_file.is_file():
+                script_file.unlink()
+
+
 def run_cmd(cmd: list[str], cwd: Path = REPO_ROOT) -> None:
     display = " ".join(cmd)
     print(f"\033[1;34m>>> Running:\033[0m {display}")
@@ -137,19 +193,14 @@ def build_target(node: str, board: str, profile: str = "debug", custom_file: str
     # If building sandbox target, re-configure CMake with the active SANDBOX_FILE definition
     if node == "sandbox" and file_path:
         cmake_cfg = ["cmake"]
-        if board in ("g474", "g431"):
-            cmake_cfg.extend(["-S", str(REPO_ROOT / "nodes/node2_control_board"), "-B", str(build_dir)])
-        elif board == "host":
+        if board == "host":
             cmake_cfg.extend(["--preset", "sil-debug"])
         else:
             cmake_cfg.extend(["-S", str(REPO_ROOT), "-B", str(build_dir)])
         cmake_cfg.append(f"-DSANDBOX_FILE={file_path}")
         run_cmd(cmake_cfg, cwd=REPO_ROOT)
     elif not (build_dir / "CMakeCache.txt").exists():
-        if board in ("g474", "g431"):
-            run_cmd(["cmake", "--preset", preset_name], cwd=REPO_ROOT / "nodes/node2_control_board")
-        else:
-            run_cmd(["cmake", "--preset", preset_name], cwd=REPO_ROOT)
+        run_cmd(["cmake", "--preset", preset_name], cwd=REPO_ROOT)
 
     # Build target
     cmd = ["cmake", "--build", str(build_dir)]
@@ -205,6 +256,32 @@ def get_stlink_probes() -> list[dict]:
     if "sn" in current_probe:
         probes.append(current_probe)
     return probes
+
+
+def detect_connected_board(probes: list[dict] | None = None) -> tuple[str | None, str | None, str | None]:
+    """Detect board key (e.g. g474, f411) from connected ST-Link hardware probes.
+    Returns (board_key, probe_sn, board_name).
+    """
+    if probes is None:
+        probes = get_stlink_probes()
+    if not probes:
+        return None, None, None
+    board_str = probes[0].get("board", "").upper()
+    sn = probes[0].get("sn")
+    raw_name = probes[0].get("board", "Unknown Target")
+    if "G474" in board_str:
+        return "g474", sn, raw_name
+    elif "F411" in board_str:
+        return "f411", sn, raw_name
+    elif "F446" in board_str:
+        return "f446", sn, raw_name
+    elif "F401" in board_str:
+        return "f401", sn, raw_name
+    elif "G431" in board_str:
+        return "g431", sn, raw_name
+    elif "C542" in board_str or "C5" in board_str:
+        return "stm32c5", sn, raw_name
+    return None, sn, raw_name
 
 
 def match_serial_port(probe_sn: str | None = None) -> str | None:
@@ -328,7 +405,14 @@ def open_monitor(port: str, baud: int) -> None:
         ser.dtr = True
         ser.rts = True
         ser.reset_input_buffer()
-    except serial.SerialException as e:
+    except (serial.SerialException, PermissionError) as e:
+        err_msg = str(e)
+        if "PermissionError" in err_msg or "Access is denied" in err_msg or "Resource temporarily unavailable" in err_msg:
+            sys.exit(
+                f"\033[1;31mError: Port '{port}' is busy or access is denied.\033[0m\n"
+                f"Another program (such as esc-configurator.com in your browser, STM32CubeProgrammer, or another terminal) is currently holding this port.\n"
+                f"Please disconnect or close the other program and re-run this command."
+            )
         sys.exit(f"Failed to open port {port}: {e}")
 
     try:
@@ -372,14 +456,14 @@ Examples:
 
     # 1. Scan (Zero-code automated I2C bus scanner)
     scan_p = subparsers.add_parser("scan", help="Build, flash, and monitor zero-code I2C bus scanner on connected dev board")
-    scan_p.add_argument("-b", "--board", default=default_board, help=f"Target dev board (f411, f446, f401, g474, g431) (default: {default_board})")
+    scan_p.add_argument("-b", "--board", default=None, help=f"Target dev board (f411, f446, f401, g474, g431) (auto-detected if omitted, default: {default_board})")
     scan_p.add_argument("-s", "--serial-number", help="Target ST-Link serial number")
     scan_p.add_argument("--baud", type=int, default=default_baud, help=f"Serial baud rate (default: {default_baud})")
     scan_p.add_argument("--port", help="Explicit serial COM port (auto-detected if omitted)")
 
     # 2. Sandbox (Zero-boilerplate developer scratchpad / single-file test)
     sandbox_p = subparsers.add_parser("sandbox", help="Build, flash, and monitor developer sandbox or custom scratch C file")
-    sandbox_p.add_argument("-b", "--board", default=default_board, help=f"Target board (f411, f446, f401, g474, g431, host) (default: {default_board})")
+    sandbox_p.add_argument("-b", "--board", default=None, help=f"Target board (f411, f446, f401, g474, g431, host) (auto-detected if omitted, default: {default_board})")
     sandbox_p.add_argument("-f", "--file", help="Custom scratch C file containing app_main() (default: sandbox/sandbox.c)")
     sandbox_p.add_argument("-s", "--serial-number", help="Target ST-Link serial number")
     sandbox_p.add_argument("--baud", type=int, default=default_baud, help=f"Serial baud rate (default: {default_baud})")
@@ -387,23 +471,23 @@ Examples:
 
     # 3. Build
     build_p = subparsers.add_parser("build", help="Build node or sandbox firmware")
-    build_p.add_argument("-n", "--node", default=default_node, help=f"Target node (default: {default_node})")
-    build_p.add_argument("-b", "--board", default=default_board, help=f"Target board (default: {default_board})")
+    build_p.add_argument("-n", "--node", default=None, help=f"Target node (auto-selected per board if omitted, default: {default_node})")
+    build_p.add_argument("-b", "--board", default=None, help=f"Target board (auto-detected if omitted, default: {default_board})")
     build_p.add_argument("-f", "--file", help="Custom scratch C file containing app_main() to build in sandbox")
     build_p.add_argument("-p", "--profile", default="debug", choices=["debug", "release"])
 
     # 3. Flash
     flash_p = subparsers.add_parser("flash", help="Build and flash firmware to target")
-    flash_p.add_argument("-n", "--node", default=default_node, help=f"Target node (default: {default_node})")
-    flash_p.add_argument("-b", "--board", default=default_board, help=f"Target board (default: {default_board})")
+    flash_p.add_argument("-n", "--node", default=None, help=f"Target node (auto-selected per board if omitted, default: {default_node})")
+    flash_p.add_argument("-b", "--board", default=None, help=f"Target board (auto-detected if omitted, default: {default_board})")
     flash_p.add_argument("-f", "--file", help="Custom scratch C file containing app_main() to flash in sandbox")
     flash_p.add_argument("-s", "--serial-number", help="Target ST-Link serial number")
     flash_p.add_argument("-p", "--profile", default="debug", choices=["debug", "release"])
 
     # 4. Run (Build + Flash + Serial Monitor / Host Execution)
     run_p = subparsers.add_parser("run", help="Build, flash, and open live serial monitor (or run on host)")
-    run_p.add_argument("-n", "--node", default=default_node, help=f"Target node (default: {default_node})")
-    run_p.add_argument("-b", "--board", default=default_board, help=f"Target board (default: {default_board})")
+    run_p.add_argument("-n", "--node", default=None, help=f"Target node (auto-selected per board if omitted, default: {default_node})")
+    run_p.add_argument("-b", "--board", default=None, help=f"Target board (auto-detected if omitted, default: {default_board})")
     run_p.add_argument("-f", "--file", help="Custom scratch C file containing app_main() to run in sandbox")
     run_p.add_argument("-s", "--serial-number", help="Target ST-Link serial number")
     run_p.add_argument("--baud", type=int, default=default_baud, help=f"Serial baud rate (default: {default_baud})")
@@ -435,7 +519,35 @@ Examples:
     # 8. Check
     subparsers.add_parser("check", help="Verify build tools, ARM cross-compiler, flashing CLI, and Python dependencies")
 
+    # 9. Generate (STM32CubeMX CLI)
+    gen_p = subparsers.add_parser("generate", help="Regenerate peripheral drivers from .ioc files via STM32CubeMX CLI")
+    gen_p.add_argument(
+        "-t", "--target",
+        choices=["all", "g474", "f411", "pi_shield", "control_board", "power_slab", "testing_and_rnd"],
+        default="all",
+        help="Target board or node to regenerate (default: all)"
+    )
+
     args = parser.parse_args()
+
+    # Intelligent Auto-Detection of Board and Node
+    if hasattr(args, "board"):
+        if args.board is None:
+            detected_board, detected_sn, board_name = detect_connected_board()
+            if detected_board:
+                args.board = detected_board
+                print(f"\033[1;36mAuto-detected connected dev board: {args.board} ({board_name})\033[0m")
+            else:
+                args.board = default_board
+
+    if hasattr(args, "node"):
+        if args.node is None:
+            if getattr(args, "board", None) in ("g474", "g431"):
+                args.node = "control_board"
+            elif getattr(args, "board", None) in ("f411", "f446", "f401"):
+                args.node = "pi_shield"
+            else:
+                args.node = default_node
 
     if args.command == "scan":
         print(f"\033[1;36m=== Preparing Hardware I2C Diagnostic Bus Scanner for {args.board} ===\033[0m")
@@ -583,6 +695,9 @@ Examples:
         sys.path.insert(0, str(REPO_ROOT))
         from tools.check_prereqs import main as run_check_prereqs
         sys.exit(run_check_prereqs())
+
+    elif args.command == "generate":
+        generate_cubemx(args.target)
 
 
 if __name__ == "__main__":
