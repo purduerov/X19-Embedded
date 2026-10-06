@@ -20,7 +20,22 @@
 #include <stdio.h>
 
 #define DSHOT_BAUD_KHZ   300U  /* DShot300 */
-#define MOTOR_SPIN_VALUE 2000U /* 100% forward */
+
+/*
+ * 3D / Forward-Reverse throttle map (Bluejay):
+ *   0        = disarmed
+ *   1048     = neutral (armed, motor stopped)
+ *   1049-2000 = forward, 0.1% .. 100%
+ *   48-1047  = reverse, 100% .. 0.1%
+ */
+#define DSHOT_3D_NEUTRAL 1048U
+#define DSHOT_3D_MAX     2000U
+
+/*
+ * Known-good bench value: 2000 (100% forward in 3D mode). 1800 and 1980 also
+ * spun cleanly. Use 2000 as the operating point.
+ */
+#define MOTOR_SPIN_VALUE 2000U
 
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim8;
@@ -162,7 +177,7 @@ void app_main(void) {
     }
     delay_ms(500);
 
-    /* 4. Arm: stream 0-throttle frames for 3 s */
+    /* 4. Arm: stream 0-throttle frames for 3 s (0 = stop/disarmed request) */
     printf("[4] Arming @ throttle=0 for 3s...\r\n");
     for (int i = 3; i > 0; i--) {
         printf("   %d s\r\n", i);
@@ -170,15 +185,20 @@ void app_main(void) {
         spin_hold(0, 1000);
     }
 
-    printf("[5] ARMED - starting spin loop\r\n");
+    printf("[5] ARMED - spin profile at %u\r\n", MOTOR_SPIN_VALUE);
     while (1) {
         printf("RAMP UP\r\n");
-        spin_ramp(1048, MOTOR_SPIN_VALUE, 3000);
+        led_toggle();
+        spin_ramp(DSHOT_3D_NEUTRAL, MOTOR_SPIN_VALUE, 4000);
+
         printf("HOLD %u\r\n", MOTOR_SPIN_VALUE);
-        spin_hold(MOTOR_SPIN_VALUE, 2500);
+        spin_hold(MOTOR_SPIN_VALUE, 5000);
+
         printf("RAMP DOWN\r\n");
-        spin_ramp(MOTOR_SPIN_VALUE, 1048, 3000);
-        printf("REST 1048\r\n");
-        spin_hold(1048, 1500);
+        spin_ramp(MOTOR_SPIN_VALUE, DSHOT_3D_NEUTRAL, 4000);
+
+        /* Neutral rest keeps the ESC armed; dropping to 0 would disarm it. */
+        printf("REST %u\r\n", DSHOT_3D_NEUTRAL);
+        spin_hold(DSHOT_3D_NEUTRAL, 1500);
     }
 }
