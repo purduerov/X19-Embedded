@@ -50,3 +50,11 @@
 ## 2024-05-30 - Optimize PMBus Linear floating-point conversions
 **Learning:** On Cortex-M FPUs, floating-point division is significantly slower (~14 cycles) than multiplication (1 cycle). Bitwise formats with negative exponents (e.g., PMBus Linear11/Linear16) that use conditional branches and division to scale the value are inefficient.
 **Action:** Replace conditional branches and FPU division (`1.0f / (1 << -exp)`) with a precomputed lookup table (LUT) of floating-point powers of two (`mantissa * pmbus_pow2_lut[exponent + 16]`) to achieve O(1) execution time.
+
+## 2026-10-06 - Fixing target firmware cross-compilation errors
+**Learning:** Adding stub mock definitions for hardware setup functions (`HAL_Init`, `SystemClock_Config`, `MX_GPIO_Init`, etc.) into `tests/hardware/fakes/fake_hal.c` allows the target startup tests to successfully link when mocking the hardware abstractions, resolving undefined reference linker errors (`undefined reference to HAL_Init`) during CTest host compilation.
+**Action:** Always provide empty mock definitions for auto-generated ST HAL setup functions in `fake_hal.c` to ensure that host-based testing of target entrypoint files (`main.c`) does not fail during linking.
+
+## 2026-10-06 - Fixing target firmware cross-compilation errors
+**Learning:** Adding stub mock definitions for hardware setup functions (`HAL_Init`, `SystemClock_Config`, `MX_GPIO_Init`, etc.) into `tests/hardware/fakes/fake_hal.c` allows the target startup tests to successfully link when mocking the hardware abstractions, resolving undefined reference linker errors (`undefined reference to HAL_Init`) during CTest host compilation.
+**Action:** Always provide empty mock definitions for auto-generated ST HAL setup functions in `fake_hal.c` to ensure that host-based testing of target entrypoint files (`main.c`) does not fail during linking.
