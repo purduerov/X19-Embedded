@@ -1,13 +1,13 @@
 /**
  * @file spin_only.c
- * @brief Bare-minimum T200 bench spin test on NUCLEO-G474RE.
+ * @brief Bare-minimum T200 bench spin test on NUCLEO-G474RE (CPU BIT-BANGED).
+ *
+ * NOTE: This is a direct CPU cycle-timed bit-banging (DWT CYCCNT) baseline driver.
+ * It does not use hardware timers or DMA. It serves as a known-good electrical
+ * and ESC baseline for comparison against hardware timer / DMA implementations.
  *
  * Sends continuous DShot300 frames on PA8 (TIM1_CH1 / Arduino D7),
  * arms the Bluejay ESC, and runs a simple ramp-up -> hold -> ramp-down loop.
- *
- * No telemetry capture, no EDT, no decoding. This file exists to isolate
- * "does the motor spin when the link is clean" from the more elaborate
- * instrumented firmware in sandbox.c.
  *
  * Pinout on NUCLEO-G474RE:
  *   PA8  (Arduino D7)  ESC signal
@@ -39,7 +39,6 @@ void app_main(void) {
  *   1049-2000 = forward, 0.1% .. 100%
  *   48-1047  = reverse, 100% .. 0.1%
  */
-#define DSHOT_3D_NEUTRAL 1048U
 #define DSHOT_3D_MAX     2000U
 
 /*
@@ -235,23 +234,23 @@ void app_main(void) {
 
     /* Target operating throttle in Forward-Only mode:
      * 48 = minimum spin, 2047 = maximum (100%).
-     * 500 = ~23% power, 600 = ~28% power, 800 = ~38% power. */
-    const uint16_t spin_target = 600U;
+     * 1800 = ~88% power (avoids 1900+ high-throttle ESC saturation/jitter). */
+    const uint16_t spin_target = 1800U;
 
     printf("[5] ARMED! Starting Continuous Motion Loop...\r\n");
-    printf(">> Ramping 48 -> %u (~28%% power) and holding for 15.0s...\r\n", spin_target);
+    printf(">> Ramping 48 -> %u (~88%% power) over 4.0s and holding for 15.0s...\r\n", spin_target);
 
     while (1) {
         led_toggle();
 
-        /* Phase 1: Smooth Ramp Up (48 -> target over 2.0s) */
-        spin_ramp(48, spin_target, 2000);
+        /* Phase 1: Smooth Ramp Up (48 -> 1800 over 4.0s) */
+        spin_ramp(48, spin_target, 4000);
 
         /* Phase 2: Sustained Hold at target for 15.0s */
         spin_hold(spin_target, 15000);
 
-        /* Phase 3: Smooth Ramp Down (target -> 48 over 2.0s) */
-        spin_ramp(spin_target, 48, 2000);
+        /* Phase 3: Smooth Ramp Down (1800 -> 48 over 3.0s) */
+        spin_ramp(spin_target, 48, 3000);
 
         /* Phase 4: Rest at 0 (stopped, armed) for 2.0s */
         spin_hold(0, 2000);

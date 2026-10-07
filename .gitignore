@@ -41,3 +41,4 @@ nodes/*/.vscode/
 *.tmp
 *.ioc.bak
 .aider*
+.vibe-wise/
