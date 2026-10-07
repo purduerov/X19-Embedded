@@ -280,4 +280,35 @@ To achieve continuous 1 kHz DShot frame streaming with zero CPU overhead:
 - In `HAL_TIM_PWM_PulseFinishedCallback()`, the timer channel DMA is halted via `HAL_TIM_PWM_Stop_DMA()`, and `TIM1->CCR1` is clamped to `0`.
 - This ensures the output line remains in the low idle state throughout the inter-frame interval.
 
+---
+
+## 11. ESC Configuration & 4-Way Serial Passthrough
+
+To configure Bluejay / BLHeli ESC parameters (such as enabling 3D Bidirectional Mode, reversing motor direction, or adjusting PWM frequency) directly from a browser via [esc-configurator.com](https://esc-configurator.com):
+
+### Authoritative Project & Binaries
+- **Source Location**: [`tools/esc_passthrough/Core/Src/esc_passthrough.c`](file:///C:/Users/aman/Documents/Engineering/ROV/Embedded/X19-Embedded/tools/esc_passthrough/Core/Src/esc_passthrough.c)
+- **Precompiled Binary**: [`tools/esc_passthrough/Debug/esc_passthrough.elf`](file:///C:/Users/aman/Documents/Engineering/ROV/Embedded/X19-Embedded/tools/esc_passthrough/Debug/esc_passthrough.elf)
+- **STM32CubeMX Configuration**: `tools/esc_passthrough/esc_passthrough.ioc`
+
+### Flashing Procedure
+To flash the passthrough firmware to the NUCLEO-G474RE bench board without attaching a serial monitor:
+```powershell
+& "C:\ST\STM32CubeCLT_1.22.0\STM32CubeProgrammer\bin\STM32_Programmer_CLI.EXE" -c port=SWD sn=0025002B3235511337333439 mode=UR reset=HWrst -d "tools\esc_passthrough\Debug\esc_passthrough.elf" -v -rst
+```
+
+### Usage Instructions
+1. Ensure the ESC is powered by the 12.0 V bench supply.
+2. In Chrome or Edge, open [esc-configurator.com](https://esc-configurator.com).
+3. Click **Connect** and select the ST-Link Virtual COM Port (e.g. `COM6`).
+4. Click **Read Settings**.
+5. Make required parameter modifications (e.g., set Motor Direction to **3D / Bidirectional**), then click **Save / Flash**.
+6. Disconnect from the browser tool before re-flashing operational firmware.
+
+### Architecture Notes & Troubleshooting
+- **Protocol Emulation**: Implements Betaflight MSP V1 (`MSP_SET_PASSTHROUGH` function `245`) over LPUART1 (ST-Link VCP) bridging to the BLHeli 4-way 19200 baud 1-wire UART on `PA8`.
+- **Zero-Banner Binary Transport**: Must never print ASCII strings or banners over the VCP link. WebSerial apps expect strict binary framing; ASCII banners cause communication timeouts and COM port sharing errors.
+- **Historical Note**: Prior prototype implementations (`sandbox/esc_passthrough_4way.c` and `sandbox/esc_passthrough.c`) were deleted because they contained blocking delay loops and ASCII logging that corrupted binary 4-way framing. `tools/esc_passthrough/` is the sole verified passthrough implementation.
+
+
 
