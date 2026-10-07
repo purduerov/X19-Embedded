@@ -233,3 +233,51 @@ To achieve continuous 1 kHz DShot frame streaming with zero CPU overhead:
    - Configured via `HAL_DMAEx_ConfigMuxRequestGenerator(&hdma_tim1_ch1, &sRequestGenConfig)`.
 3. **Execution**: The hardware DMAMUX Request Generator autonomous triggers the DMA transfer on every TIM6 tick. Application code simply updates throttle values in RAM buffer without software delay loops or interrupt servicing.
 
+---
+
+## 10. Bench Verification, Physical ESC Tuning & Slew-Rate Dynamics
+
+### Hardware Bench Test Configuration
+- **Host MCU**: NUCLEO-G474RE (STM32G474RET6, Cortex-M4 @ 170 MHz).
+- **Physical Output Pin**: `PA8` (TIM1 Channel 1 via `GPIO_AF6_TIM1`).
+- **DMA Request**: `DMA1_Channel1` mapped to `DMA_REQUEST_TIM1_CH1` (Request ID 42U).
+- **ESC / Firmware**: BLHeli_S hardware flashed with Bluejay ESC firmware (Forward-Only mode).
+- **Thruster**: Blue Robotics T200 sensorless brushless DC motor.
+- **Power Supply**: 12.0 V bench power supply.
+
+### Verified Physical Findings
+
+#### 1. Push-Pull GPIO Configuration (`GPIO_MODE_AF_PP`)
+- The signal pin must always be configured as `GPIO_MODE_AF_PP` with an internal pull-down (`GPIO_PULLDOWN`).
+- Open-drain mode (`GPIO_MODE_AF_OD`) combined with the internal ~40 kΩ pull-up resistor produces an RC rise time exceeding 4.0 µs. This exceeds the total DShot bit duration (3.33 µs for DShot300), attenuating all pulses to near-zero amplitude and preventing the ESC from receiving any frames.
+
+#### 2. Power Supply Current Limit & Brownout Power-Cycling
+- When the bench power supply was set to a 6 A limit, high throttle acceleration triggered instantaneous current spikes exceeding 6 A.
+- This caused the 12 V rail to sag below the ESC reset threshold (~6 V). The ESC power-cycled, emitted reboot beeps, re-armed, spun briefly, and tripped again.
+- Setting the bench supply current limit to 9 A eliminated power-rail brownout, enabling full throttle profiling.
+
+#### 3. Steady-State Current vs Dynamic Inrush
+- In air (unloaded thruster):
+  - Throttle `350` (~15%): draws **0.10 A**.
+  - Throttle `1000` (~50%): draws **0.30 A**.
+  - Throttle `2047` (100% full speed): draws **0.60 A**.
+- Because steady-state current is minimal in air, failure to run at high throttle is never steady-state current overload—it is driven entirely by dynamic acceleration slew rate ($d\omega/dt$).
+
+#### 4. Sensorless Commutation Desync ($d\omega/dt$ Slew Rate)
+- The T200 thruster is a sensorless BLDC motor relying on back-EMF (BEMF) zero-crossing detection on the un-driven stator winding during PWM off-time.
+- Demanding instantaneous full throttle (`2047`) or jumping throttle over short 1-second intervals accelerates the stator's rotating magnetic field faster than the mechanical rotor and magnet assembly can physically accelerate against rotor inertia.
+- When the rotor lags behind the electrical field, the BEMF zero-crossing window is missed. The ESC loses commutation lock ("desync"), resulting in violent stuttering, high acoustic harshness, and stalling.
+- By contrast, stepping through a graduated ladder (`1000 -> 1200 -> 1400 -> 1600 -> 1700 -> 1800 -> 1850 -> 1900 -> 1950 -> 2000 -> 2047`) holding 2.5 seconds at each plateau allows the rotor to lock phase perfectly, achieving stable 100% speed (`2047`) at 0.60 A with zero jitter.
+- **Production Rule**: All vehicle thruster setpoints must pass through a slew-rate limiter (maximum acceleration: 500–800 DShot throttle units per second) to prevent commutation desync in both air and water.
+
+#### 5. Prohibition of Blocking UART I/O During Acceleration
+- Any `printf` call over UART at 115200 baud blocks the CPU for ~87 µs per character (~1.8 ms for a 20-character line).
+- Blocking UART output inside an active ramp loop starves the 1 kHz DShot stream, inserting multi-millisecond gaps in the frame cadence.
+- Frame dropouts during active motor acceleration disrupt the ESC's internal digital throttle filter. Firmware must never execute blocking serial transmissions inside active ramp loops.
+
+#### 6. Zero-Glitch DMA Parking
+- The DMA transmit buffer consists of 17 halfwords: 16 DShot bit timings followed by one trailing `0`.
+- In `HAL_TIM_PWM_PulseFinishedCallback()`, the timer channel DMA is halted via `HAL_TIM_PWM_Stop_DMA()`, and `TIM1->CCR1` is clamped to `0`.
+- This ensures the output line remains in the low idle state throughout the inter-frame interval.
+
+

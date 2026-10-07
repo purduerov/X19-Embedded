@@ -195,6 +195,29 @@ static void MX_TIM1_Init(void) {
     HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 }
 
+static void hold_speed(uint16_t speed, uint32_t duration_ms) {
+    for (uint32_t i = 0; i < duration_ms; i++) {
+        dshot_send_ref_speed(speed);
+        led_toggle();
+    }
+}
+
+static void ramp_speed(uint16_t from, uint16_t to) {
+    if (from < to) {
+        for (uint16_t s = from; s <= to; s += 2) {
+            dshot_send_ref_speed(s);
+            dshot_send_ref_speed(s);
+            led_toggle();
+        }
+    } else {
+        for (uint16_t s = from; s >= to; s -= 2) {
+            dshot_send_ref_speed(s);
+            dshot_send_ref_speed(s);
+            led_toggle();
+        }
+    }
+}
+
 void app_main(void) {
     bsp_init();
 
@@ -226,24 +249,24 @@ void app_main(void) {
     printf("[4] dshot_set_spin_direction(NORMAL)...\r\n");
     dshot_set_spin_direction(DSHOT_SPIN_DIRECTION_NORMAL);
 
-    printf("[5] Spinning! Ramping up and holding...\r\n");
+    static const uint16_t test_speeds[] = {1000, 1200, 1400, 1600, 1700, 1800, 1850, 1900, 1950, 2000, 2047};
+    size_t num_speeds = sizeof(test_speeds) / sizeof(test_speeds[0]);
 
-    /* Smooth ramp from 100 to 350 (safe bench test within 6A power supply limit) */
-    uint16_t target_speed = 350;
+    printf("[5] Stepping through speed ladder (1000 -> 2047)...\r\n");
+    uint16_t cur_speed = 48;
 
-    for (uint16_t s = 100; s <= target_speed; s += 2) {
-        dshot_send_ref_speed(s);
-        led_toggle();
+    for (size_t i = 0; i < num_speeds; i++) {
+        uint16_t target = test_speeds[i];
+        ramp_speed(cur_speed, target);
+        cur_speed = target;
+        printf(">>> [STEP %u/%u] Speed: %u (holding 2.5s)\r\n", (unsigned int)(i + 1), (unsigned int)num_speeds,
+               target);
+        hold_speed(target, 2500);
     }
 
-    printf("[6] Holding steady at speed %u...\r\n", target_speed);
-    uint32_t loop_count = 0;
+    printf("[6] Finished ladder. Holding steady at %u...\r\n", cur_speed);
     while (1) {
-        dshot_send_ref_speed(target_speed);
+        dshot_send_ref_speed(cur_speed);
         led_toggle();
-        loop_count++;
-        if ((loop_count % 500) == 0) {
-            printf("[RUN] sent=%lu, err=%lu\r\n", (unsigned long)s_frames_sent, (unsigned long)s_errors);
-        }
     }
 }
