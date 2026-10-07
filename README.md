@@ -368,6 +368,7 @@ Target-only startup, pin, FDCAN, and hardware sensor integration blockers are tr
 | `test_driver_bmi270` | Driver Layer | BMI270 initialization and inertial data conversion through mocked sensor registers. |
 | `test_driver_ina237` | Driver Layer | INA237 voltage, current, power, and status conversions. |
 | `test_driver_tmp1075` | Driver Layer | TMP1075 temperature-register conversion and edge handling. |
+| `test_driver_dshot` | Driver Layer | DShot / BDShot ESC protocol and telemetry decoder driver. |
 | `test_driver_pmbus_brick` | Driver Layer | PMBus brick command, telemetry, and status decoding. |
 | `test_mock_physics` | SIL Plant Model | Buoyancy, motion, orientation, thruster load, and sensor synchronization. |
 | `test_node1_pi_shield` | Node 1 App | Sealed enclosure vacuum decay, humidity spike ($>80\%$), floor leak probe contact, 10 Hz telemetry, instant `0x001` E-Stop broadcast. |

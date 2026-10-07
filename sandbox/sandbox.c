@@ -23,7 +23,6 @@ void app_main(void) {
 #else
 
 #include "bsp.h"
-#include "dshot_dma.h"
 #include "stm32g4xx_hal.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -81,9 +80,9 @@ void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim) {
 
 /**
  * @brief Initialize TIM1 Channel 1 (PA8) and DMA1 Channel 1 with DMAMUX for DShot.
+ * Bit timing is selected at compile time by DSHOT_USE_300.
  */
-void dshot_dma_init(dshot_speed_t speed) {
-    (void)speed;
+static void dshot_dma_init(void) {
 
     /* 1. Enable Peripheral Clocks */
     __HAL_RCC_DMAMUX1_CLK_ENABLE();
@@ -164,7 +163,7 @@ void dshot_dma_init(dshot_speed_t speed) {
 /**
  * @brief Transmit 16-bit DShot packet via DMA PWM.
  */
-bool dshot_dma_write(uint16_t throttle, bool telemetry) {
+static bool dshot_dma_write(uint16_t throttle, bool telemetry) {
     if (throttle > 2047) {
         throttle = 2047;
     }
@@ -202,7 +201,7 @@ bool dshot_dma_write(uint16_t throttle, bool telemetry) {
     return true;
 }
 
-bool dshot_dma_is_busy(void) {
+static inline bool dshot_dma_is_busy(void) {
     return s_dma_in_progress;
 }
 
@@ -227,7 +226,7 @@ void app_main(void) {
     DWT->CYCCNT = 0;
 
     /* Initialize DShot HAL DMA */
-    dshot_dma_init(DSHOT_USE_300 ? DSHOT_SPEED_300 : DSHOT_SPEED_150);
+    dshot_dma_init();
     printf("[DSHOT DMA] Driver initialized. Starting arming sequence...\r\n");
 
     /* Arming Phase: Stream throttle 0 at 1 kHz for 1.5 seconds */
@@ -266,8 +265,8 @@ void app_main(void) {
 
         /* Status log every 500 ms */
         if ((loop_count % 500) == 0) {
-            printf("[THROTTLE: %4u / 2047 (%.1f%%)] Sent: %lu | Timeouts: %lu\r\n", current_throttle,
-                   (float)current_throttle * 100.0f / 2047.0f, s_frames_sent, s_dma_timeouts);
+            printf("[THROTTLE: %4u / 2047 (%u%%)] Sent: %lu | Timeouts: %lu\r\n", current_throttle,
+                   (unsigned int)((uint32_t)current_throttle * 100U / 2047U), s_frames_sent, s_dma_timeouts);
         }
 
         loop_count++;

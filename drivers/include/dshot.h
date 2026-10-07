@@ -14,11 +14,13 @@
 extern "C" {
 #endif
 
-#define DSHOT_MIN_THROTTLE     48U
-#define DSHOT_MAX_THROTTLE     2047U
-#define DSHOT_3D_ZERO_CROSSING 1048U
-#define DSHOT_3D_FORWARD_MIN   1049U
-#define DSHOT_3D_REVERSE_MIN   1047U
+#define DSHOT_MIN_THROTTLE 48U
+#define DSHOT_MAX_THROTTLE 2047U
+#define DSHOT_VALUE_MASK   0x07FFU /* 11-bit throttle/command field */
+#define DSHOT_3D_NEUTRAL   1048U   /* 3D mode: armed, motor stopped */
+
+/* eRPM period reported by the ESC when the motor is stopped (mantissa 0x1FF, exponent 7). */
+#define DSHOT_ERPM_PERIOD_STOPPED 65408U
 
 /* DShot Special Commands */
 #define DSHOT_CMD_MOTOR_STOP                 0U
@@ -60,13 +62,13 @@ typedef struct {
     uint8_t status_flags;      /* Last EDT status flags: 0x80 alert, 0x40 warning, 0x20 error */
     uint8_t status_max_stress; /* Last EDT status max-stress nibble [0-15] */
     dshot_telemetry_type_t last_type;
-    uint32_t packets_sent;
-    uint32_t telemetry_received;
-    uint32_t telemetry_errors;
 } dshot_telemetry_t;
 
 /**
  * @brief Prepare 16-bit DShot packet from 11-bit throttle value, telemetry request, and CRC.
+ * @param value Throttle (48..2047) or special command (1..47); masked to 11 bits.
+ * @param telemetry Telemetry request bit.
+ * @param invert_crc true for bidirectional DShot (BDShot), false for unidirectional.
  */
 uint16_t dshot_prepare_packet(uint16_t value, bool telemetry, bool invert_crc);
 
@@ -81,7 +83,7 @@ bool dshot_decode_telemetry_frame(uint32_t raw_21_bits, uint16_t *out_telemetry_
 /**
  * @brief Parse a valid 16-bit telemetry frame into telemetry struct.
  * @param frame_16 Decoded 16-bit telemetry word.
- * @param motor_pole_pairs Number of motor pole pairs (7 for T200).
+ * @param motor_pole_pairs Number of motor pole pairs (7 for T200); 0 leaves rpm at 0.
  * @param telem Pointer to telemetry state struct to update.
  * @return Parsed telemetry type.
  */
@@ -95,17 +97,19 @@ typedef struct {
     dshot_cmd_state_t state;
     uint16_t command_frame;
     uint8_t repeat_count;
+    bool invert_crc; /* CRC polarity applied to every frame this queue emits */
 } dshot_cmd_queue_t;
 
 /**
  * @brief Initialize a non-blocking DShot command queue.
+ * @param invert_crc true when the ESC runs bidirectional DShot (inverted CRC).
  */
-void dshot_cmd_queue_init(dshot_cmd_queue_t *queue);
+void dshot_cmd_queue_init(dshot_cmd_queue_t *queue, bool invert_crc);
 
 /**
  * @brief Request transmission of a DShot special command (1..47).
- * Prepares the frame with Telemetry bit = 1 and sets repeat counter to 10.
- * @return true if queued, false if another command is currently in flight.
+ * Prepares the frame with Telemetry bit = 1 and sets repeat counter to DSHOT_CMD_REPEAT_COUNT.
+ * @return true if queued; false if the code is invalid or another command is still in flight.
  */
 bool dshot_cmd_request(dshot_cmd_queue_t *queue, uint8_t cmd_code);
 
@@ -118,6 +122,7 @@ uint16_t dshot_cmd_get_frame(dshot_cmd_queue_t *queue, uint16_t throttle, bool t
 
 /**
  * @brief Convert raw eRPM period in microseconds to mechanical motor RPM (7 pole pairs for T200).
+ * @return 0 if period_us or pole_pairs is 0.
  */
 uint32_t dshot_erpm_period_to_rpm(uint32_t period_us, uint8_t pole_pairs);
 

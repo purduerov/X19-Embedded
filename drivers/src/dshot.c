@@ -11,21 +11,18 @@ static const uint8_t s_gcr_decode_table[32] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF
                                                0x0B, 0xFF, 0x0D, 0x0E, 0x0F, 0xFF, 0xFF, 0x02, 0x03, 0xFF, 0x05,
                                                0x06, 0x07, 0xFF, 0x00, 0x08, 0x01, 0xFF, 0x04, 0x0C, 0xFF};
 
-uint16_t dshot_prepare_packet(uint16_t value, bool telemetry, bool invert_crc) {
-    uint16_t packet = (uint16_t)((value << 5) | (telemetry ? (1U << 4) : 0U));
+/* XOR of the three nibbles of a 12-bit payload; shared by command and telemetry frames. */
+static uint16_t dshot_checksum(uint16_t payload_12) {
+    return (uint16_t)((payload_12 ^ (payload_12 >> 4) ^ (payload_12 >> 8)) & 0x0FU);
+}
 
-    uint16_t csum = 0U;
-    uint16_t csum_data = packet >> 4;
-    for (int i = 0; i < 3; i++) {
-        csum ^= csum_data;
-        csum_data >>= 4;
-    }
+uint16_t dshot_prepare_packet(uint16_t value, bool telemetry, bool invert_crc) {
+    uint16_t payload = (uint16_t)(((value & DSHOT_VALUE_MASK) << 1) | (telemetry ? 1U : 0U));
+    uint16_t csum = dshot_checksum(payload);
     if (invert_crc) {
-        csum = ~csum;
+        csum = (uint16_t)(~csum & 0x0FU);
     }
-    csum &= 0x0FU;
-    packet |= csum;
-    return packet;
+    return (uint16_t)((payload << 4) | csum);
 }
 
 bool dshot_decode_telemetry_frame(uint32_t raw_21_bits, uint16_t *out_telemetry_16) {
@@ -49,15 +46,7 @@ bool dshot_decode_telemetry_frame(uint32_t raw_21_bits, uint16_t *out_telemetry_
     uint16_t frame = (uint16_t)((n3 << 12) | (n2 << 8) | (n1 << 4) | n0);
 
     /* 3. Check 4-bit CRC (uninverted on telemetry back-channel) */
-    uint16_t csum = 0U;
-    uint16_t csum_data = frame >> 4;
-    for (int i = 0; i < 3; i++) {
-        csum ^= csum_data;
-        csum_data >>= 4;
-    }
-    csum &= 0x0FU;
-
-    if (csum != (frame & 0x0FU)) {
+    if (dshot_checksum((uint16_t)(frame >> 4)) != (frame & 0x0FU)) {
         return false;
     }
 
@@ -119,14 +108,12 @@ dshot_telemetry_type_t dshot_parse_telemetry(uint16_t frame_16, uint8_t motor_po
         uint16_t mantissa = data & 0x01FFU;
         uint32_t period_us = (uint32_t)mantissa << exponent;
 
-        if (period_us > 0U) {
-            telem->erpm = 60000000UL / period_us;
-            if (motor_pole_pairs > 0U) {
-                telem->rpm = telem->erpm / (uint32_t)motor_pole_pairs;
-            }
-        } else {
+        if (period_us == 0U || period_us >= DSHOT_ERPM_PERIOD_STOPPED) {
             telem->erpm = 0U;
             telem->rpm = 0U;
+        } else {
+            telem->erpm = 60000000UL / period_us;
+            telem->rpm = dshot_erpm_period_to_rpm(period_us, motor_pole_pairs);
         }
 
         telem->last_type = DSHOT_TELEMETRY_ERPM;
@@ -134,28 +121,36 @@ dshot_telemetry_type_t dshot_parse_telemetry(uint16_t frame_16, uint8_t motor_po
     }
 }
 
-void dshot_cmd_queue_init(dshot_cmd_queue_t *queue) {
+void dshot_cmd_queue_init(dshot_cmd_queue_t *queue, bool invert_crc) {
     if (queue == (void *)0) {
         return;
     }
     queue->state = DSHOT_CMD_STATE_IDLE;
     queue->command_frame = 0;
     queue->repeat_count = 0;
+    queue->invert_crc = invert_crc;
 }
 
 bool dshot_cmd_request(dshot_cmd_queue_t *queue, uint8_t cmd_code) {
     if (queue == (void *)0 || cmd_code == 0 || cmd_code >= 48) {
         return false;
     }
+    /* Do not cut a command short: settings commands need every repeat to take effect. */
+    if (queue->state == DSHOT_CMD_STATE_SENDING) {
+        return false;
+    }
     /* Command frame requires Telemetry bit = 1 */
-    queue->command_frame = dshot_prepare_packet(cmd_code, true, false);
+    queue->command_frame = dshot_prepare_packet(cmd_code, true, queue->invert_crc);
     queue->repeat_count = DSHOT_CMD_REPEAT_COUNT;
     queue->state = DSHOT_CMD_STATE_SENDING;
     return true;
 }
 
 uint16_t dshot_cmd_get_frame(dshot_cmd_queue_t *queue, uint16_t throttle, bool telemetry) {
-    if (queue != (void *)0 && queue->state == DSHOT_CMD_STATE_SENDING) {
+    if (queue == (void *)0) {
+        return dshot_prepare_packet(throttle, telemetry, false);
+    }
+    if (queue->state == DSHOT_CMD_STATE_SENDING) {
         uint16_t frame = queue->command_frame;
         if (queue->repeat_count > 0) {
             queue->repeat_count--;
@@ -165,7 +160,7 @@ uint16_t dshot_cmd_get_frame(dshot_cmd_queue_t *queue, uint16_t throttle, bool t
         }
         return frame;
     }
-    return dshot_prepare_packet(throttle, telemetry, false);
+    return dshot_prepare_packet(throttle, telemetry, queue->invert_crc);
 }
 
 uint32_t dshot_erpm_period_to_rpm(uint32_t period_us, uint8_t pole_pairs) {

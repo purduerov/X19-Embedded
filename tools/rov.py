@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Python 3.11+ tomllib support
@@ -383,7 +384,7 @@ def flash_binary(elf_path: str, probe_sn: str | None = None) -> str:
     return selected_sn
 
 
-def open_monitor(port: str, baud: int) -> None:
+def open_monitor(port: str, baud: int, timeout: float | None = None) -> None:
     if sys.platform == "darwin" and port.startswith("/dev/tty."):
         cu_candidate = port.replace("/dev/tty.", "/dev/cu.")
         if os.path.exists(cu_candidate):
@@ -396,7 +397,8 @@ def open_monitor(port: str, baud: int) -> None:
             print(f"Or install pyserial: pip install pyserial\n")
         sys.exit("Error: 'pyserial' package is required for built-in serial monitor.")
 
-    print(f"\033[1;32m=== Opening Serial Monitor on {port} @ {baud} baud (Ctrl+C to exit) ===\033[0m\n")
+    duration_info = f" (for {timeout}s)" if timeout else " (Ctrl+C to exit)"
+    print(f"\033[1;32m=== Opening Serial Monitor on {port} @ {baud} baud{duration_info} ===\033[0m\n")
     try:
         ser = serial.Serial(port, baud, timeout=0.1)
         # CRITICAL for ST-Link V2/V3 USB CDC on macOS, Linux, and Windows:
@@ -415,8 +417,11 @@ def open_monitor(port: str, baud: int) -> None:
             )
         sys.exit(f"Failed to open port {port}: {e}")
 
+    start_time = time.time()
     try:
         while True:
+            if timeout is not None and (time.time() - start_time) >= timeout:
+                break
             data = ser.read(1024)
             if data:
                 sys.stdout.write(data.decode("utf-8", errors="replace"))
@@ -468,6 +473,7 @@ Examples:
     sandbox_p.add_argument("-s", "--serial-number", help="Target ST-Link serial number")
     sandbox_p.add_argument("--baud", type=int, default=default_baud, help=f"Serial baud rate (default: {default_baud})")
     sandbox_p.add_argument("--port", help="Explicit serial COM port (auto-detected if omitted)")
+    sandbox_p.add_argument("-t", "--timeout", type=float, default=None, help="Monitor timeout in seconds (auto-exits after duration)")
 
     # 3. Build
     build_p = subparsers.add_parser("build", help="Build node or sandbox firmware")
@@ -492,11 +498,13 @@ Examples:
     run_p.add_argument("-s", "--serial-number", help="Target ST-Link serial number")
     run_p.add_argument("--baud", type=int, default=default_baud, help=f"Serial baud rate (default: {default_baud})")
     run_p.add_argument("--port", help="Explicit serial COM port (auto-detected if omitted)")
+    run_p.add_argument("-t", "--timeout", type=float, default=None, help="Monitor timeout in seconds (auto-exits after duration)")
 
     # 5. Monitor
     mon_p = subparsers.add_parser("monitor", help="Open serial monitor")
     mon_p.add_argument("--port", help="Serial port device path (auto-detected if omitted)")
     mon_p.add_argument("--baud", type=int, default=default_baud, help=f"Serial baud rate (default: {default_baud})")
+    mon_p.add_argument("-t", "--timeout", type=float, default=None, help="Monitor timeout in seconds (auto-exits after duration)")
 
     # 6. Test
     test_p = subparsers.add_parser("test", help="Execute Host SIL CTest test suites")
@@ -577,7 +585,7 @@ Examples:
                 for p in serial.tools.list_ports.comports():
                     print(f"  {p.device}: {p.description}")
             sys.exit(1)
-        open_monitor(port, args.baud)
+        open_monitor(port, args.baud, getattr(args, "timeout", None))
 
     elif args.command == "build":
         elf = build_target(args.node, args.board, args.profile, getattr(args, "file", None))
@@ -603,7 +611,7 @@ Examples:
                 for p in serial.tools.list_ports.comports():
                     print(f"  {p.device}: {p.description}")
             sys.exit(1)
-        open_monitor(port, args.baud)
+        open_monitor(port, args.baud, getattr(args, "timeout", None))
 
     elif args.command == "monitor":
         port = args.port
@@ -626,7 +634,7 @@ Examples:
                     for p in ports:
                         print(f"  {p.device}: {p.description}")
             sys.exit("Please specify the port explicitly with: --port <port>")
-        open_monitor(port, args.baud)
+        open_monitor(port, args.baud, getattr(args, "timeout", None))
 
     elif args.command == "test":
         build_dir = "build-native"

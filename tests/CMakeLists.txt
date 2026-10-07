@@ -159,6 +159,11 @@ x19_add_node_test(NAME test_driver_tmp1075 SUITE driver
     LIBS rov_mocks
 )
 
+x19_add_node_test(NAME test_driver_dshot SUITE driver
+    SOURCES test_driver_dshot.c
+    LIBS rov_drivers
+)
+
 x19_add_node_test(NAME test_driver_pmbus_brick SUITE driver
     SOURCES test_driver_pmbus_brick.c
     LIBS rov_mocks
