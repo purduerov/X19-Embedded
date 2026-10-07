@@ -50,3 +50,7 @@
 ## 2026-10-24 - Table-Driven CRC16 CCITT Computation (Update)
 **Learning:** While Python-level precomputed lookup tables (LUT) for CRC calculations avoid bit-by-bit loops, they still suffer from significant interpreter overhead per byte iteration. Using Python's built-in, C-optimized `binascii.crc_hqx(data, 0xFFFF)` performs the exact same CRC16-CCITT calculation natively.
 **Action:** Use `binascii.crc_hqx` for CRC16-CCITT calculations instead of manual Python table-driven loops to achieve an additional ~20x speedup over the table approach.
+
+## 2026-10-24 - CI Compilation Error with Missing HAL Functions
+**Learning:** The project is configured to be hardware-agnostic for testing. Calling ST HAL functions like `HAL_Init()` or `SystemClock_Config()` directly in `main.c` without proper headers or when compiling for the host architecture causes implicit declaration compilation errors and violates the zero-HAL application layer contract.
+**Action:** Ensure `main.c` strictly only calls `app_main()` in the designated user code block, allowing the BSP abstraction to handle hardware setup.

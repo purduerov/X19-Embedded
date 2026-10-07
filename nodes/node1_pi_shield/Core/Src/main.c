@@ -28,22 +28,7 @@ void MX_I2C1_Init(void);
 
 int main(void) {
 
-    /* Initialise the HAL runtime first: SysTick must be running before any
-     * application code reads time_get_ms(), and the HAL state machine must be
-     * reset before any peripheral handle is touched. */
-    HAL_Init();
-
-    /* Configure the PLL and flash latency before any peripheral is clocked. */
-    SystemClock_Config();
-
     /* USER CODE BEGIN 2 */
-
-    /* Peripheral init must complete before app_main() runs, because
-     * node1_app_init() calls bsp_init() and can_init() and then immediately
-     * starts transmitting CAN telemetry and sampling leak probes. */
-    MX_GPIO_Init();
-    MX_FDCAN1_Init();
-    MX_I2C1_Init();
 
     /* Hand over execution to Application Layer (Src/app.c).
      * CubeMX code generation preserves this call, while all
