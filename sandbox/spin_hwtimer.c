@@ -195,6 +195,10 @@ static void MX_TIM1_Init(void) {
     HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 }
 
+#define DSHOT_3D_NEUTRAL 1048U
+#define DSHOT_3D_FWD_MIN 1120U
+#define DSHOT_3D_REV_MIN 976U
+
 static void hold_speed(uint16_t speed, uint32_t duration_ms) {
     for (uint32_t i = 0; i < duration_ms; i++) {
         dshot_send_ref_speed(speed);
@@ -207,10 +211,12 @@ static void ramp_speed(uint16_t from, uint16_t to) {
         for (uint16_t s = from; s <= to; s += 2) {
             dshot_send_ref_speed(s);
             dshot_send_ref_speed(s);
+            dshot_send_ref_speed(s);
             led_toggle();
         }
     } else {
         for (uint16_t s = from; s >= to; s -= 2) {
+            dshot_send_ref_speed(s);
             dshot_send_ref_speed(s);
             dshot_send_ref_speed(s);
             led_toggle();
@@ -222,7 +228,7 @@ void app_main(void) {
     bsp_init();
 
     printf("\r\n======================================================\r\n");
-    printf("  Direct Port of ufnalski/dshot_pwm_dma_l432kc        \r\n");
+    printf("   X19 ROV - Hardware DMA DShot 3D Bidirectional      \r\n");
     printf("======================================================\r\n");
 
     /* Hold PA8 LOW during boot */
@@ -234,39 +240,45 @@ void app_main(void) {
     HAL_GPIO_Init(GPIOA, &gpio);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
 
-    printf("[1] Delay 2000 ms (let motor stop after reset)...\r\n");
+    printf("[1] Delay 2000 ms (let motor settle)...\r\n");
     HAL_Delay(2000);
 
     /* Initialize TIM1 and DMA */
     MX_TIM1_Init();
     printf("[2] Peripheral init done.\r\n");
 
-    /* Arm ESC (1000 frames of 0) */
-    printf("[3] dshot_arm_esc()...\r\n");
-    dshot_arm_esc();
-
-    /* Set Spin Direction Normal */
-    printf("[4] dshot_set_spin_direction(NORMAL)...\r\n");
-    dshot_set_spin_direction(DSHOT_SPIN_DIRECTION_NORMAL);
-
-    static const uint16_t test_speeds[] = {1000, 1200, 1400, 1600, 1700, 1800, 1850, 1900, 1950, 2000, 2047};
-    size_t num_speeds = sizeof(test_speeds) / sizeof(test_speeds[0]);
-
-    printf("[5] Stepping through speed ladder (1000 -> 2047)...\r\n");
-    uint16_t cur_speed = 48;
-
-    for (size_t i = 0; i < num_speeds; i++) {
-        uint16_t target = test_speeds[i];
-        ramp_speed(cur_speed, target);
-        cur_speed = target;
-        printf(">>> [STEP %u/%u] Speed: %u (holding 2.5s)\r\n", (unsigned int)(i + 1), (unsigned int)num_speeds,
-               target);
-        hold_speed(target, 2500);
-    }
-
-    printf("[6] Finished ladder. Holding steady at %u...\r\n", cur_speed);
-    while (1) {
-        dshot_send_ref_speed(cur_speed);
+    /* Arm ESC: In BLHeli_S / Bluejay, arming signal is strictly 0 */
+    printf("[3] Arming ESC (streaming 0 for 2.0s)...\r\n");
+    for (int i = 0; i < 2000; i++) {
+        dshot_send_ref_speed(0);
         led_toggle();
+    }
+    printf("[4] Armed! ESC ready.\r\n");
+
+    /* Continuous Bidirectional Alternating Loop - 100% Full Power Test */
+    while (1) {
+        /* Phase 1: Direction A (48..1047 range, 1047 = 100% Max Forward) */
+        printf(">>> [DIR A] Startup kick to 150 (hold 350ms)...\r\n");
+        hold_speed(150, 350);
+        printf(">>> [DIR A] Ramping 150 -> 1047 (100%% Full Power)...\r\n");
+        ramp_speed(150, 1047);
+        printf(">>> [DIR A] Holding 1047 (MAX POWER) for 10.0s...\r\n");
+        hold_speed(1047, 10000);
+        printf(">>> [DIR A] Decelerating 1047 -> 100...\r\n");
+        ramp_speed(1047, 100);
+        printf(">>> [STOP] Coasting to standstill (hold 0 for 2.5s)...\r\n");
+        hold_speed(0, 2500);
+
+        /* Phase 2: Direction B (1048..2047 range, 2047 = 100% Max Reverse) */
+        printf(">>> [DIR B] Startup kick to 1150 (hold 350ms)...\r\n");
+        hold_speed(1150, 350);
+        printf(">>> [DIR B] Ramping 1150 -> 2047 (100%% Full Power)...\r\n");
+        ramp_speed(1150, 2047);
+        printf(">>> [DIR B] Holding 2047 (MAX POWER) for 10.0s...\r\n");
+        hold_speed(2047, 10000);
+        printf(">>> [DIR B] Decelerating 2047 -> 1100...\r\n");
+        ramp_speed(2047, 1100);
+        printf(">>> [STOP] Coasting to standstill (hold 0 for 2.5s)...\r\n");
+        hold_speed(0, 2500);
     }
 }

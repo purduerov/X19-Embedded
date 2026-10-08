@@ -192,19 +192,43 @@ This pattern allows arbitrary commands (beeps, configuration, direction changes)
 
 ## 7. 3D / Bidirectional Motor Mode (Forward & Reverse)
 
-In ROV thruster operations requiring instantaneous bi-directional thrust without mechanical gearboxes:
+In ROV thruster operations requiring instantaneous bi-directional thrust without mechanical gearboxes, Bluejay ESC firmware is configured in **Forward/Reverse (3D mode)** (via `tools/esc_passthrough` and [esc-configurator.com](https://esc-configurator.com)).
 
-### Throttle Range Mapping
-- **Neutral (Zero Thrust / Stopped)**: **`1048`** (midpoint of 2000-step throttle range).
-- **Reverse Thrust Range**: **`48` to `1047`**
-  - `48`: 100% Full Reverse thrust.
-  - `1047`: Minimum Reverse thrust.
-- **Forward Thrust Range**: **`1049` to `2047`**
-  - `1049`: Minimum Forward thrust.
-  - `2047`: 100% Full Forward thrust.
+### Bluejay 3D Throttle Range Mapping (Verified via `Bluejay.asm` Line 817)
+Bluejay implements the standard 3D bidirectional framing where the 11-bit throttle space is bifurcated:
 
-### 3D Arming Sequence
-During the ~1.5-second boot/arming window, firmware **must continuously stream the Neutral command (`1048`)** at 1000 Hz. Sending `0` (motor stop) holds the ESC in the disarmed state. The sustained neutral stream confirms zero-thrust position to the ESC safety supervisor before non-zero throttle is permitted.
+```assembly
+; Check for bidirectional operation (0=stop, 96-2095->fwd, 2096-4095->rev)
+```
+
+| DShot Packet Value | Throttle Region | Motor Physical Behavior |
+| :--- | :--- | :--- |
+| **`0`** | Disarmed / Motor Stop | Output FETs off; required for arming and true coast stop. |
+| **`1` .. `47`** | DShot Special Commands | Beeps, beacon, telemetry toggles. |
+| **`48`** | Direction A Zero-Idle | Minimum idle floor (0% throttle) in Direction A. |
+| **`49` .. `1046`** | Direction A Active Range | Proportional thrust scaling from 0% up to 100%. |
+| **`1047`** | Direction A Maximum | **100% Full Power Thrust (Direction A / Forward)**. |
+| **`1048`** | Direction B Zero-Idle | Minimum idle floor (0% throttle) in Direction B. |
+| **`1049` .. `2046`** | Direction B Active Range | Proportional thrust scaling from 0% up to 100%. |
+| **`2047`** | Direction B Maximum | **100% Full Power Thrust (Direction B / Reverse)**. |
+
+### Critical 3D Configuration & Command Rules
+
+#### 1. Arming Signal (`0`)
+- In Bluejay (`BLHeli_S.asm` lines 3911–3913), the arming routine specifically inspects that the pulse length equals `0`.
+- Firmware must stream **`0`** at 1000 Hz for at least **1.5 to 2.0 seconds** during initialization to trigger the rising arm chime.
+- Streaming `1048` during arming will NOT arm the ESC (it will sound only a single detection beep).
+
+#### 2. Prohibition of Direction Commands (Command 20 / 21)
+- In 3D Bidirectional Mode, firmware must **never send Command 20 or Command 21**.
+- Sending Command 20 forces the ESC out of bidirectional mode and overrides internal 3D direction branching.
+
+#### 3. Recommended ESC Parameters for T200 Low-Kv Marine Thrusters
+- **Motor Timing**: **`15° (Medium)`** (30° High causes retarding counter-torque and startup stutter on low-Kv motors).
+- **Demag Compensation**: **`Off`** (prevents false power cuts on high-inductance marine motor coils).
+- **Minimum Startup Power (Boost)**: **`1125`** (provides maximum open-loop breakaway torque).
+- **RPM Power Protection (Rampup)**: **`Off`** (prevents low-speed torque throttling).
+- **Brake on Stop**: **`Unchecked`** (prevents destructive regenerative inductive voltage spikes into DC power rails).
 
 ---
 
