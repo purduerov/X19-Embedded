@@ -26,7 +26,6 @@ static bme280_dev_t g_bme280_dev;
 static ina237_dev_t g_ina237_dev;
 
 static uint32_t g_last_telemetry_time = 0;
-static float g_baseline_pressure_hpa = 0.0f;
 static bool g_bme280_valid = false;
 static bool g_ina237_valid = false;
 static bool g_can_ready = false;
@@ -206,13 +205,22 @@ void node1_app_init(void) {
     g_ina237_valid = false;
 
     g_last_telemetry_time = 0;
-    g_baseline_pressure_hpa = 0.0f;
     g_emergency_latched = false;
 
     g_env_telemetry.pressure_hpa = 1013.25f;
     g_env_telemetry.humidity_pct = 30.0f;
     g_env_telemetry.temperature_c = 25.0f;
     g_env_telemetry.leak_flags = 0;
+
+    // Vacuum Decay State Machine Reset 
+    g_vac_state = VAC_STATE_ATMOSPHERIC;
+    g_ambient_pressure_hpa = 0.0f;
+    g_previous_pressure_hpa = 0.0f;
+
+    g_stable_start_time = 0U;
+    g_test_start_time = 0U;
+    g_last_pressure_check_time = 0U;
+    g_last_decay_check_time = 0U;
 }
 
 void node1_update_vacuum_decay(
@@ -224,10 +232,11 @@ void node1_update_vacuum_decay(
             if(g_ambient_pressure_hpa <= 0.0f){
                 g_ambient_pressure_hpa = pressure_hpa; 
             }
-            if(g_ambient_pressure_hpa - pressure_hpa >= 100.0f){
-                g_vac_state = VAC_STATE_PUMPING; 
-                g_previous_pressure_hpa = pressure_hpa; 
-                g_stable_start_time = 0; 
+            if (g_ambient_pressure_hpa - pressure_hpa >= 100.0f) {
+                g_vac_state = VAC_STATE_PUMPING;
+                g_previous_pressure_hpa = pressure_hpa;
+                g_last_pressure_check_time = current_time;
+                g_stable_start_time = 0U;
             }
             break; 
         }
@@ -257,40 +266,38 @@ void node1_update_vacuum_decay(
             break; 
         }
         case VAC_STATE_TESTING: {
-            if(current_time - g_last_decay_check_time >= 10000U){ // 10 seconds 
-                float delta_pressure = pressure_hpa - g_previous_pressure_hpa; 
-                float decay_rate_da_per_min = delta_pressure * 100.0f * 6.0f; 
+            if (current_time - g_last_decay_check_time >= 10000U) {
+                uint32_t elapsed_ms =
+                    current_time - g_last_decay_check_time;
 
-                g_previous_pressure_hpa = pressure_hpa; 
-                g_last_decay_check_time = current_time; 
+                float delta_pressure =
+                    pressure_hpa - g_previous_pressure_hpa;
 
-                if(decay_rate_da_per_min > 170.0f){
-                    g_vac_state = VAC_STATE_FAILED; 
-                    break; 
-                } 
+                float elapsed_minutes =
+                    (float)elapsed_ms / 60000.0f;
+
+                float decay_rate_pa_per_min =
+                    (delta_pressure * 100.0f) / elapsed_minutes;
+
+                g_previous_pressure_hpa = pressure_hpa;
+                g_last_decay_check_time = current_time;
+
+                if (decay_rate_pa_per_min > 170.0f) {
+                    g_vac_state = VAC_STATE_FAILED;
+                    break;
+                }
             }
-            if(current_time - g_last_decay_check_time >= 600000U){ // 10 mins 
-                float delta_pressure = pressure_hpa - g_previous_pressure_hpa; 
-                float decay_rate_da_per_min = delta_pressure * 100.0f * 6.0f; 
 
-                g_previous_pressure_hpa = pressure_hpa; 
-                g_last_decay_check_time = current_time; 
-
-                if(decay_rate_da_per_min <= 170.0f){
-                    g_vac_state = VAC_STATE_PASSED; 
-                    break; 
-                } 
+            if (current_time - g_test_start_time >= 600000U) {
+                g_vac_state = VAC_STATE_PASSED;
             }
-            break; 
+
+            break;
         }
         case VAC_STATE_FAILED: {
             break; 
         }
         case VAC_STATE_PASSED: {
-            break; 
-        }
-        case default: {
-            g_vac_state = VAC_STATE_ATMOSPHERIC; 
             break; 
         }
     }

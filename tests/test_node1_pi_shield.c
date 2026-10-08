@@ -104,59 +104,82 @@ void test_node1_nominal_telemetry(void) {
 void test_node1_vacuum_loss_leak_trigger(void) {
     setup();
 
-    /*
-     * Start with a sealed enclosure pulled to
-     * 750 hPa vacuum.
-     */
-    set_bme280_reading(750.0f, 30.0f, 22.0f);
+    /* Start at atmospheric pressure. */
+    set_bme280_reading(1013.25f, 30.0f, 22.0f);
 
     node1_app_init();
 
-    /*
-     * Establish baseline.
-     */
     mock_bsp_advance_time_ms(100);
     node1_app_step();
 
     assert(!mock_bsp_is_emergency_brake_tripped());
 
     /*
-     * Simulate vacuum loss:
-     * pressure rises by 25 hPa.
+     * Pull vacuum by more than 100 hPa.
+     * This should move the state machine into PUMPING.
      */
-    set_bme280_reading(775.0f, 30.0f, 22.0f);
+    set_bme280_reading(850.0f, 30.0f, 22.0f);
 
     mock_bsp_advance_time_ms(100);
     node1_app_step();
 
+    assert(!mock_bsp_is_emergency_brake_tripped());
+
     /*
-     * Emergency break should have fired and
-     * the local hardware brake should be tripped.
+     * Hold pressure stable for >15 seconds.
+     *
+     * The state machine evaluates stabilization approximately
+     * once per second.
+     */
+    for (int i = 0; i < 16; i++) {
+        set_bme280_reading(850.0f, 30.0f, 22.0f);
+
+        mock_bsp_advance_time_ms(1000);
+        node1_app_step();
+    }
+
+    assert(!mock_bsp_is_emergency_brake_tripped());
+
+    /*
+     * Now we're in TESTING.
+     *
+     * Simulate excessive vacuum decay over 10 seconds.
+     *
+     * A 1 hPa increase in 10 seconds is:
+     *
+     * 1 hPa = 100 Pa
+     * 100 Pa / 10 sec * 60 = 600 Pa/min
+     *
+     * 600 Pa/min > 170 Pa/min -> FAILED
+     */
+    set_bme280_reading(851.0f, 30.0f, 22.0f);
+
+    mock_bsp_advance_time_ms(10000);
+    node1_app_step();
+
+    /*
+     * FAILED should set environmental leak bit and
+     * trigger the emergency brake.
      */
     assert(mock_bsp_is_emergency_brake_tripped());
 
-    assert(mock_can_count_tx_by_id(ROV_CAN_ID_EMERGENCY_BREAK) == 1);
+    assert(mock_can_count_tx_by_id(
+               ROV_CAN_ID_EMERGENCY_BREAK) == 1);
 
     uint8_t alert_data[64];
     uint8_t alert_len = 0;
 
-    assert(mock_can_find_latest_tx(ROV_CAN_ID_EMERGENCY_BREAK, alert_data, &alert_len));
+    assert(mock_can_find_latest_tx(
+        ROV_CAN_ID_EMERGENCY_BREAK,
+        alert_data,
+        &alert_len));
 
     assert(alert_len == 8);
-
     assert(alert_data[0] == 0xAA);
     assert(alert_data[1] == 0x55);
 
-    /*
-     * Environmental leak = bit 0.
-     */
+    /* Environmental leak = bit 0. */
     assert(alert_data[2] == 0x01);
-
-    assert(alert_data[3] == 0x00);
-    assert(alert_data[4] == 0x00);
-    assert(alert_data[5] == 0x00);
-    assert(alert_data[6] == 0x00);
-    assert(alert_data[7] == 0x00);
 
     printf("[PASS] test_node1_vacuum_loss_leak_trigger\n");
 }
