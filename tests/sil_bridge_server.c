@@ -338,8 +338,7 @@ int main(int argc, char **argv) {
                                 pkt->len);
                             fflush(stdout);
                             size_t consumed = sizeof(sil_can_packet_t);
-                            memmove(rx_stream_buf, rx_stream_buf + consumed,
-                                    rx_stream_len - consumed);
+                            memmove(rx_stream_buf, rx_stream_buf + consumed, rx_stream_len - consumed);
                             rx_stream_len -= consumed;
                             continue;
                         }
