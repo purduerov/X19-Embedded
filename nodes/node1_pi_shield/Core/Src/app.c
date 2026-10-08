@@ -38,6 +38,28 @@ static bool g_can_ready = false;
 static volatile bool g_emergency_latched = false;
 
 /**
+ * @brief Vacuum Decay States 
+ * 
+ */
+typedef enum{
+    VAC_STATE_ATMOSPHERIC, 
+    VAC_STATE_PUMPING, 
+    VAC_STATE_TESTING, 
+    VAC_STATE_PASSED, 
+    VAC_STATE_FAILED 
+} vacuum_state_t; 
+
+static vacuum_state_t g_vac_state = VAC_STATE_ATMOSPHERIC; 
+
+static float g_ambient_pressure_hpa = 0.0f; // pressure before vacuum is applied 
+static float g_previous_pressure_hpa = 0.0f; // pressure used for stabilization / rate calculation 
+
+static uint32_t g_stable_start_time = 0; // when pressure first become stable 
+static uint32_t g_test_start_time = 0; // when the 10-min vacuum test started 
+static uint32_t g_last_pressure_check_time = 0; 
+static uint32_t g_last_decay_check_time = 0; // last time the 10-second decay calculation performed 
+
+/**
  * @brief Read both physical floor leak probes and construct the protocol
  *        leak bitmask.
  *
@@ -193,6 +215,87 @@ void node1_app_init(void) {
     g_env_telemetry.leak_flags = 0;
 }
 
+void node1_update_vacuum_decay(
+    float pressure_hpa, // current pressure reading 
+    uint32_t current_time 
+){
+    switch(g_vac_state){
+        case VAC_STATE_ATMOSPHERIC: {
+            if(g_ambient_pressure_hpa <= 0.0f){
+                g_ambient_pressure_hpa = pressure_hpa; 
+            }
+            if(g_ambient_pressure_hpa - pressure_hpa >= 100.0f){
+                g_vac_state = VAC_STATE_PUMPING; 
+                g_previous_pressure_hpa = pressure_hpa; 
+                g_stable_start_time = 0; 
+            }
+            break; 
+        }
+        case VAC_STATE_PUMPING: {
+            if(current_time - g_last_pressure_check_time >= 1000U){ // time elapsed at least 1 second 
+                float delta_pressure = fabsf(pressure_hpa - g_previous_pressure_hpa); 
+                float rate_hpa_per_second = delta_pressure / ((float)(current_time - g_last_pressure_check_time) / 1000.0f); 
+
+                g_previous_pressure_hpa = pressure_hpa; 
+                g_last_pressure_check_time = current_time; 
+
+                if(rate_hpa_per_second < 0.1f){
+                    if(g_stable_start_time == 0U){
+                        g_stable_start_time = current_time; 
+                    }
+                    if(current_time - g_stable_start_time >= 15000U){
+                        g_vac_state = VAC_STATE_TESTING; 
+
+                        g_test_start_time = current_time; 
+                        g_last_decay_check_time = current_time; 
+                        g_previous_pressure_hpa = pressure_hpa; 
+                    }
+                } else{
+                    g_stable_start_time = 0U; 
+                }
+            }
+            break; 
+        }
+        case VAC_STATE_TESTING: {
+            if(current_time - g_last_decay_check_time >= 10000U){ // 10 seconds 
+                float delta_pressure = pressure_hpa - g_previous_pressure_hpa; 
+                float decay_rate_da_per_min = delta_pressure * 100.0f * 6.0f; 
+
+                g_previous_pressure_hpa = pressure_hpa; 
+                g_last_decay_check_time = current_time; 
+
+                if(decay_rate_da_per_min > 170.0f){
+                    g_vac_state = VAC_STATE_FAILED; 
+                    break; 
+                } 
+            }
+            if(current_time - g_last_decay_check_time >= 600000U){ // 10 mins 
+                float delta_pressure = pressure_hpa - g_previous_pressure_hpa; 
+                float decay_rate_da_per_min = delta_pressure * 100.0f * 6.0f; 
+
+                g_previous_pressure_hpa = pressure_hpa; 
+                g_last_decay_check_time = current_time; 
+
+                if(decay_rate_da_per_min <= 170.0f){
+                    g_vac_state = VAC_STATE_PASSED; 
+                    break; 
+                } 
+            }
+            break; 
+        }
+        case VAC_STATE_FAILED: {
+            break; 
+        }
+        case VAC_STATE_PASSED: {
+            break; 
+        }
+        case default: {
+            g_vac_state = VAC_STATE_ATMOSPHERIC; 
+            break; 
+        }
+    }
+}
+
 void node1_app_step(void) {
     uint32_t current_time = time_get_ms();
 
@@ -212,10 +315,8 @@ void node1_app_step(void) {
         g_ina237_valid = (ina237_read_power(&g_ina237_dev) == ROV_OK) && isfinite(g_ina237_dev.bus_voltage_v) &&
                          isfinite(g_ina237_dev.shunt_current_a);
 
-        /* Track the lowest valid pressure so a vacuum applied after startup is detectable. */
-        if (g_bme280_valid && g_bme280_dev.pressure_hpa > 0.0f &&
-            (g_baseline_pressure_hpa <= 0.0f || g_bme280_dev.pressure_hpa < g_baseline_pressure_hpa)) {
-            g_baseline_pressure_hpa = g_bme280_dev.pressure_hpa;
+        if(g_bme280_valid){
+            node1_update_vacuum_decay(g_bme280_dev.pressure_hpa, current_time); 
         }
 
         uint8_t leak_bits = 0;
@@ -236,9 +337,8 @@ void node1_app_step(void) {
          * more than the configured threshold, report an environmental
          * leak using bit 0.
          */
-        if (g_bme280_valid && g_baseline_pressure_hpa > 0.0f &&
-            (g_bme280_dev.pressure_hpa - g_baseline_pressure_hpa) >= ROV_LEAK_PRESSURE_DROP_THRESHOLD_HPA) {
-            leak_bits |= 0x01;
+        if(g_vac_state == VAC_STATE_FAILED){
+            leak_bits |= 0x01; 
         }
 
         /*
