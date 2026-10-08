@@ -1,0 +1,10 @@
+using "platforms/cpus/stm32f4.repl"
+
+UserLED: Miscellaneous.LED @ gpioPortA
+
+gpioPortA:
+    5 -> UserLED@0
+
+sysbus:
+    init:
+        Tag <0xE0042000 0x4> "DBGMCU_IDCODE" 0x10006469

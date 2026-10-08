@@ -1,0 +1,21 @@
+# ==============================================================================
+# X19 ROV - Multi-Node Virtual CAN Network Simulation
+# Boots Node 1 and Node 2 concurrently on a synchronized virtual CAN bus.
+# ==============================================================================
+
+# 1. Create the shared virtual CAN network hub
+emulation CreateCANHub "rovCanBus"
+
+# 2. Instantiate Node 1 (Pi Shield)
+mach create "Node1_Pi_Shield"
+machine LoadPlatformDescription @sim/renode/nucleo_f411re.repl
+sysbus LoadELF @build/arm-c542-debug/boards/f411_nucleo/f411_node1_pi_shield.elf
+connector Connect sysbus.can1 rovCanBus
+
+# 3. Instantiate Node 2 (Control Board)
+mach create "Node2_Control_Board"
+machine LoadPlatformDescription @sim/renode/nucleo_g474re.repl
+sysbus LoadELF @build/arm-c542-debug/boards/f411_nucleo/f411_node2_control_board.elf
+connector Connect sysbus.can1 rovCanBus
+
+showAnalyzer sysbus.usart2
