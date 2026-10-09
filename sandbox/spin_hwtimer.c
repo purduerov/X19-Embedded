@@ -36,11 +36,11 @@ extern TIM_HandleTypeDef htim1;
 static DMA_HandleTypeDef hdma_tim1_ch1;
 static DMA_HandleTypeDef hdma_tim1_ch2;
 
-/* 17-halfword TX buffer (16 bits + 1 trailing clamp) - 32-bit aligned for AHB/DMA */
-static uint16_t dshot_dmabuffer_ccr[17] __attribute__((aligned(4)));
+/* 17-halfword TX buffer (16 bits + 1 trailing clamp) */
+static uint16_t dshot_dmabuffer_ccr[17];
 
-/* Telemetry RX capture buffer - 32-bit aligned for AHB/DMA */
-static uint16_t s_telem_raw_timestamps[TELEM_BUF_SIZE] __attribute__((aligned(4)));
+/* Telemetry RX capture buffer (edge timestamps captured from TIM1_CH2 indirect on PA8) */
+static uint16_t s_telem_raw_timestamps[TELEM_BUF_SIZE];
 static dshot_telemetry_t s_latest_telemetry = {0};
 static uint32_t s_frames_sent = 0;
 static uint32_t s_telem_received = 0;
@@ -144,29 +144,69 @@ static bool decode_telemetry_edges(const uint16_t *timestamps, uint16_t count, d
         bit_idx++;
     }
 
+    static const uint8_t s_gcr_table[32] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x09, 0x0A,
+                                            0x0B, 0xFF, 0x0D, 0x0E, 0x0F, 0xFF, 0xFF, 0x02, 0x03, 0xFF, 0x05,
+                                            0x06, 0x07, 0xFF, 0x00, 0x08, 0x01, 0xFF, 0x04, 0x0C, 0xFF};
+
+    uint32_t candidates[8];
+    candidates[0] = bits & 0xFFFFFU;
+    candidates[1] = (bits >> 1) & 0xFFFFFU;
+    candidates[2] = (~bits) & 0xFFFFFU;
+    candidates[3] = ((~bits) >> 1) & 0xFFFFFU;
+
+    for (int c = 0; c < 4; c++) {
+        uint32_t rev = 0;
+        for (int b = 0; b < 20; b++) {
+            if (candidates[c] & (1U << b))
+                rev |= (1U << (19 - b));
+        }
+        candidates[4 + c] = rev;
+    }
+
     uint16_t frame_16 = 0;
-    if (dshot_decode_telemetry_frame(bits & 0xFFFFFU, &frame_16) ||
-        dshot_decode_telemetry_frame((~bits) & 0xFFFFFU, &frame_16)) {
-        dshot_telemetry_type_t t = dshot_parse_telemetry(frame_16, 7U, out_telem);
-        if (t == DSHOT_TELEMETRY_ERPM)
-            s_erpm_frames++;
-        else if (t == DSHOT_TELEMETRY_VOLTAGE)
-            s_volt_frames++;
-        else if (t == DSHOT_TELEMETRY_CURRENT)
-            s_curr_frames++;
-        else if (t == DSHOT_TELEMETRY_TEMPERATURE)
-            s_temp_frames++;
-        else
-            s_other_frames++;
-        return true;
+    for (int c = 0; c < 8; c++) {
+        uint32_t raw = candidates[c] ^ (candidates[c] >> 1);
+        uint8_t n0 = s_gcr_table[raw & 0x1FU];
+        uint8_t n1 = s_gcr_table[(raw >> 5) & 0x1FU];
+        uint8_t n2 = s_gcr_table[(raw >> 10) & 0x1FU];
+        uint8_t n3 = s_gcr_table[(raw >> 15) & 0x1FU];
+        if (n0 == 0xFF || n1 == 0xFF || n2 == 0xFF || n3 == 0xFF)
+            continue;
+        uint8_t csum = (n3 ^ n2 ^ n1 ^ n0) & 0x0F;
+        if (csum == 0x0F || csum == 0x00) {
+            frame_16 = (uint16_t)((n3 << 12) | (n2 << 8) | (n1 << 4) | n0);
+            dshot_telemetry_type_t t = dshot_parse_telemetry(frame_16, 7U, out_telem);
+            if (t == DSHOT_TELEMETRY_ERPM)
+                s_erpm_frames++;
+            else if (t == DSHOT_TELEMETRY_VOLTAGE)
+                s_volt_frames++;
+            else if (t == DSHOT_TELEMETRY_CURRENT)
+                s_curr_frames++;
+            else if (t == DSHOT_TELEMETRY_TEMPERATURE)
+                s_temp_frames++;
+            else
+                s_other_frames++;
+            return true;
+        }
     }
 
     return false;
 }
 
-/* Transmit 1 DShot frame and harvest returned telemetry (non-blocking, zero busy-wait delays) */
-void dshot_step(uint16_t _motor_speed) {
-    /* Read captured telemetry from previous cycle (DMA reception completed in ~150us) */
+/* Transmit 1 DShot frame and collect returned telemetry */
+void dshot_send_ref_speed(uint16_t _motor_speed) {
+    TIM1->ARR = DSHOT_TIM_ARR;
+    TIM1->CNT = 0;
+    dshot_prepare_dmabuffer(dshot_dmabuffer_ccr, _motor_speed, true);
+    HAL_StatusTypeDef st = HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_1, (uint32_t *)dshot_dmabuffer_ccr, 17);
+    if (st == HAL_OK) {
+        s_frames_sent++;
+    }
+
+    /* Wait 1 ms cycle (covers 56us TX + 30us deadtime + 60us RX) */
+    HAL_Delay(1);
+
+    /* Read captured telemetry from TIM1 Channel 2 DMA */
     uint16_t remaining = __HAL_DMA_GET_COUNTER(&hdma_tim1_ch2);
     uint16_t edges = TELEM_BUF_SIZE - remaining;
     s_last_edges = edges;
@@ -174,6 +214,7 @@ void dshot_step(uint16_t _motor_speed) {
         s_max_edges = edges;
     }
     HAL_TIM_IC_Stop_DMA(&htim1, TIM_CHANNEL_2);
+    /* Re-enable timer counter so it keeps running freely */
     __HAL_TIM_ENABLE(&htim1);
 
     if (edges >= 10) {
@@ -182,15 +223,6 @@ void dshot_step(uint16_t _motor_speed) {
         } else {
             s_telem_crc_errors++;
         }
-    }
-
-    /* Transmit new DShot packet */
-    TIM1->ARR = DSHOT_TIM_ARR;
-    TIM1->CNT = 0;
-    dshot_prepare_dmabuffer(dshot_dmabuffer_ccr, _motor_speed, true);
-    HAL_StatusTypeDef st = HAL_TIM_PWM_Start_DMA(&htim1, TIM_CHANNEL_1, (uint32_t *)dshot_dmabuffer_ccr, 17);
-    if (st == HAL_OK) {
-        s_frames_sent++;
     }
 }
 
@@ -303,43 +335,37 @@ static void MX_TIM1_Init(void) {
 #define DSHOT_3D_REV_MIN 976U
 
 static void hold_speed(uint16_t speed, uint32_t duration_ms) {
-    uint32_t start = HAL_GetTick();
-    uint32_t last_update = start;
-    uint32_t count = 0;
-    while ((HAL_GetTick() - start) < duration_ms) {
-        uint32_t now = HAL_GetTick();
-        if (now != last_update) {
-            last_update = now;
-            dshot_step(speed);
-            led_toggle();
-            count++;
-            if ((count % 500) == 0) {
-                printf("  [TELEM] RPM: %5lu | eRPM: %6lu | V: %4.1fV | I: %4.1fA | T: %2dC | Frames[eRPM:%lu, V:%lu, "
-                       "I:%lu, T:%lu]\r\n",
-                       (unsigned long)s_latest_telemetry.rpm, (unsigned long)s_latest_telemetry.erpm,
-                       (double)s_latest_telemetry.voltage_v, (double)s_latest_telemetry.current_a,
-                       (int)s_latest_telemetry.temperature_c, (unsigned long)s_erpm_frames,
-                       (unsigned long)s_volt_frames, (unsigned long)s_curr_frames, (unsigned long)s_temp_frames);
-            }
+    for (uint32_t i = 0; i < duration_ms; i++) {
+        dshot_send_ref_speed(speed);
+        led_toggle();
+        if ((i % 500) == 0 && i > 0) {
+            float err_pct = (s_telem_received + s_telem_crc_errors > 0)
+                                ? ((float)s_telem_crc_errors / (float)(s_telem_received + s_telem_crc_errors)) * 100.0f
+                                : 0.0f;
+            printf("  [TELEM] RPM: %5lu | eRPM: %6lu | V: %4.1fV | I: %4.1fA | T: %2dC | Frames[eRPM:%lu, V:%lu, "
+                   "I:%lu, T:%lu]\r\n",
+                   (unsigned long)s_latest_telemetry.rpm, (unsigned long)s_latest_telemetry.erpm,
+                   (double)s_latest_telemetry.voltage_v, (double)s_latest_telemetry.current_a,
+                   (int)s_latest_telemetry.temperature_c, (unsigned long)s_erpm_frames, (unsigned long)s_volt_frames,
+                   (unsigned long)s_curr_frames, (unsigned long)s_temp_frames);
         }
     }
 }
 
 static void ramp_speed(uint16_t from, uint16_t to) {
-    int step = (from < to) ? 2 : -2;
-    uint16_t s = from;
-    uint32_t last_tick = HAL_GetTick();
-    while (1) {
-        uint32_t now = HAL_GetTick();
-        if (now != last_tick) {
-            last_tick = now;
-            dshot_step(s);
+    if (from < to) {
+        for (uint16_t s = from; s <= to; s += 2) {
+            dshot_send_ref_speed(s);
+            dshot_send_ref_speed(s);
+            dshot_send_ref_speed(s);
             led_toggle();
-            if (s == to)
-                break;
-            s = (uint16_t)(s + step);
-            if ((step > 0 && s > to) || (step < 0 && s < to))
-                s = to;
+        }
+    } else {
+        for (uint16_t s = from; s >= to; s -= 2) {
+            dshot_send_ref_speed(s);
+            dshot_send_ref_speed(s);
+            dshot_send_ref_speed(s);
+            led_toggle();
         }
     }
 }
@@ -369,7 +395,10 @@ void app_main(void) {
 
     /* Arm ESC: In BLHeli_S / Bluejay, arming signal is strictly 0 */
     printf("[3] Arming ESC (streaming 0 for 2.0s)...\r\n");
-    hold_speed(0, 2000);
+    for (int i = 0; i < 2000; i++) {
+        dshot_send_ref_speed(0);
+        led_toggle();
+    }
     printf("[4] Armed! ESC ready.\r\n");
 
     /* Enable Extended DShot Telemetry (EDT) for voltage/current/temp/stress */
@@ -377,7 +406,10 @@ void app_main(void) {
     for (int i = 0; i < 15; i++) {
         dshot_send_command(DSHOT_CMD_EXTENDED_TELEMETRY_ENABLE);
     }
-    hold_speed(0, 200);
+    for (int i = 0; i < 200; i++) {
+        dshot_send_ref_speed(0);
+        led_toggle();
+    }
 
     /* Continuous Bidirectional Alternating Loop - 100% Full Power Test */
     while (1) {
