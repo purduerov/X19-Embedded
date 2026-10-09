@@ -9,6 +9,7 @@ add_library(rov_drivers STATIC
     src/tmp1075.c
     src/tps25990.c
     src/pmbus_brick.c
+    src/dshot.c
 )
 
 add_library(x19_drivers ALIAS rov_drivers)

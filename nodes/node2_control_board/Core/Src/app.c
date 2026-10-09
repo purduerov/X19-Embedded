@@ -9,6 +9,7 @@
  */
 
 #include "app.h"
+#include "actuator_service.h"
 #include "bmi270.h"
 #include "bsp.h"
 #include "can_interface.h"
@@ -18,6 +19,7 @@
 #include "rov_pwm_ramp.h"
 #include "rov_safety.h"
 #include "rov_timesync.h"
+#include "safety_service.h"
 #include <math.h>
 #include <string.h>
 
@@ -42,13 +44,13 @@ static void node2_force_pwm_neutral(void) {
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
         g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
-        bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
+        pwm_set_pulse_us((uint8_t)i, ROV_PWM_STOP_US);
     }
 }
 
 static void node2_force_neutral(void) {
     node2_force_pwm_neutral();
-    bsp_solenoid_set(0);
+    solenoid_set_mask(0);
 }
 
 void node2_app_init(void) {
@@ -63,19 +65,19 @@ void node2_app_init(void) {
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_target_pwms.pwm_us[i] = ROV_PWM_STOP_US;
         g_active_pwms.pwm_us[i] = ROV_PWM_STOP_US;
-        bsp_pwm_set_us((uint8_t)i, ROV_PWM_STOP_US);
+        pwm_set_pulse_us((uint8_t)i, ROV_PWM_STOP_US);
     }
 
     g_esc_arming_start_ms = time_get_ms();
     g_esc_state = ESC_STATE_ARMING;
 
-    bsp_solenoid_set(0);
+    solenoid_set_mask(0);
 
     if (!g_can_ready) {
         g_esc_state = ESC_STATE_DISARMED;
         g_safety_state.emergency_break_active = true;
         node2_force_neutral();
-        bsp_emergency_brake_trip();
+        safety_emergency_trip();
         return;
     }
 
@@ -91,7 +93,7 @@ void node2_app_step(void) {
 
     if (!g_can_ready) {
         node2_force_neutral();
-        bsp_emergency_brake_trip();
+        safety_emergency_trip();
         delay_ms(1);
         return;
     }
@@ -112,7 +114,7 @@ void node2_app_step(void) {
             if (rx_len >= 2 && rx_data[0] == 0xAA && rx_data[1] == 0x55) {
                 /* Instant hardware and software shutdown */
                 rov_safety_trigger_emergency_break(&g_safety_state);
-                bsp_emergency_brake_trip();
+                safety_emergency_trip();
                 g_esc_state = ESC_STATE_DISARMED;
 
                 node2_force_neutral();
@@ -120,7 +122,7 @@ void node2_app_step(void) {
         } else if (rx_id == ROV_CAN_ID_EFUSE_FAULT_ALERT) {
             if (rx_len >= 2 && rx_data[0] == 0xEF && rx_data[1] == 0x01) {
                 node2_force_neutral();
-                bsp_emergency_brake_trip();
+                safety_emergency_trip();
                 g_esc_state = ESC_STATE_DISARMED;
                 rov_safety_trigger_emergency_break(&g_safety_state);
             }
@@ -149,7 +151,7 @@ void node2_app_step(void) {
             rov_solenoid_cmd_t sol;
             if (!g_safety_state.emergency_break_active &&
                 rov_can_unpack_solenoid_cmd(rx_data, rx_len, &sol) == ROV_OK) {
-                bsp_solenoid_set(sol.solenoid_mask);
+                solenoid_set_mask(sol.solenoid_mask);
             }
         } else if (rx_id == ROV_CAN_ID_TIME_SYNC_MASTER) {
             rov_time_sync_master_t sync_msg;
@@ -209,7 +211,7 @@ void node2_app_step(void) {
             uint16_t max_step = max_step_u64 > UINT16_MAX ? UINT16_MAX : (uint16_t)max_step_u64;
             for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
                 g_active_pwms.pwm_us[i] = rov_pwm_step_ramp(g_active_pwms.pwm_us[i], g_target_pwms.pwm_us[i], max_step);
-                bsp_pwm_set_us((uint8_t)i, g_active_pwms.pwm_us[i]);
+                pwm_set_pulse_us((uint8_t)i, g_active_pwms.pwm_us[i]);
             }
         }
     }

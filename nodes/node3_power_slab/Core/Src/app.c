@@ -14,6 +14,7 @@
 #include "can_interface.h"
 #include "pmbus_brick.h"
 #include "power_sequence.h"
+#include "power_service.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
@@ -71,7 +72,7 @@ void node3_app_init(void) {
     g_fault_latched = !g_can_ready;
     g_fault_alert_latched = false;
     if (!g_can_ready) {
-        bsp_power_brick_disable_all();
+        power_bricks_disable_all();
         g_power_telemetry.status_flags = 0x0001U;
     }
 }
@@ -94,7 +95,7 @@ void node3_app_step(void) {
          * bricks on a node that cannot report what they are doing.
          */
         power_sequence_emergency_stop();
-        bsp_power_brick_disable_all();
+        power_bricks_disable_all();
         delay_ms(5);
         return;
     }
@@ -161,7 +162,7 @@ void node3_app_step(void) {
             }
         }
 
-        float pcb_temperature_c = bsp_get_pcb_temperature_c();
+        float pcb_temperature_c = power_get_pcb_temperature_c();
         if (!isfinite(pcb_temperature_c)) {
             fault_detected = true;
         } else {
@@ -178,7 +179,7 @@ void node3_app_step(void) {
             }
         }
 
-        if (!bsp_lm74700_status_ok() || bsp_get_logic_voltage_mv() == 0U) {
+        if (!power_lm74700_is_ok() || power_get_logic_voltage_mv() == 0U) {
             fault_detected = true;
         }
 
@@ -217,7 +218,7 @@ void node3_app_step(void) {
              * action. The sequencer's FAULT state is latched until reset.
              */
             power_sequence_emergency_stop();
-            bsp_power_brick_disable_all();
+            power_bricks_disable_all();
 
             /* Broadcast Priority 0 eFuse Fault Alert (0x005) once per fault. */
             if (!g_fault_alert_latched) {

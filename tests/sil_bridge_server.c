@@ -61,15 +61,8 @@ typedef int socket_t;
 #define CLOSE_SOCKET(s)      close(s)
 #endif
 
-/* Forward declarations of node lifecycle functions */
-extern void node1_app_init(void);
-extern void node1_app_step(void);
-
-extern void node2_app_init(void);
-extern void node2_app_step(void);
-
-extern void node3_app_init(void);
-extern void node3_app_step(void);
+/* Centralised node lifecycle table (init/step for all vehicle nodes) */
+#include "harness/sil_vehicle.h"
 
 #define SIL_BRIDGE_DEFAULT_PORT  8765
 #define SIL_CAN_ID_OUTPUT_STATUS 0x7FEU     /* SIL-only snapshot of mocked BSP outputs */
@@ -120,10 +113,13 @@ static bool send_sil_frame(socket_t sock, uint32_t id, const uint8_t *data, uint
     return send(sock, (const char *)&packet, (int)sizeof(packet), 0) == (int)sizeof(packet);
 }
 
+typedef enum { SIL_MODE_LOGICAL, SIL_MODE_REALTIME } sil_scheduler_mode_t;
+
 int main(int argc, char **argv) {
     int port = SIL_BRIDGE_DEFAULT_PORT;
     int max_cycles = 0;   /* 0 = run indefinitely */
     int fast_forward = 0; /* 0 = disabled; > 0 = run N cycles headless and exit */
+    static sil_scheduler_mode_t s_mode = SIL_MODE_LOGICAL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -132,6 +128,10 @@ int main(int argc, char **argv) {
             max_cycles = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--fast-forward") == 0 && i + 1 < argc) {
             fast_forward = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--logical") == 0) {
+            s_mode = SIL_MODE_LOGICAL;
+        } else if (strcmp(argv[i], "--realtime") == 0) {
+            s_mode = SIL_MODE_REALTIME;
         }
     }
 
@@ -167,21 +167,23 @@ int main(int argc, char **argv) {
         mock_physics_reset();
         mock_physics_set_enabled(true);
 
-        mock_can_set_current_node(ROV_NODE_PI_SHIELD);
-        node1_app_init();
-        mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
-        node2_app_init();
-        mock_can_set_current_node(ROV_NODE_POWER_SLAB);
-        node3_app_init();
+        for (int i = 0; i < sil_vehicle_node_count(); i++) {
+            const sil_node_t *node = sil_vehicle_node(i);
+            if (node->init) {
+                mock_can_set_current_node(node->can_node_id);
+                node->init();
+            }
+        }
 
         for (int ff = 0; ff < fast_forward; ff++) {
             mock_bsp_advance_time_ms(10);
-            mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
-            node2_app_step();
-            mock_can_set_current_node(ROV_NODE_PI_SHIELD);
-            node1_app_step();
-            mock_can_set_current_node(ROV_NODE_POWER_SLAB);
-            node3_app_step();
+            for (int i = 0; i < sil_vehicle_node_count(); i++) {
+                const sil_node_t *node = sil_vehicle_node(i);
+                if (node->step) {
+                    mock_can_set_current_node(node->can_node_id);
+                    node->step();
+                }
+            }
 
             if ((ff + 1) % 10000 == 0) {
                 printf("[FF] Cycle %d / %d | SimTime=%u ms | PWMs: [%u, %u, %u, %u, %u, %u, %u, %u]\n", ff + 1,
@@ -274,16 +276,16 @@ int main(int argc, char **argv) {
     mock_bme280_set_reading(SIL_BME280_I2C_ADDR, SIL_BME280_PRESSURE_HPA, SIL_BME280_HUMIDITY_PCT, SIL_BME280_TEMP_C);
 
     mock_physics_reset();
-    mock_physics_set_enabled(true); /* Run 6-DOF physics plant model in real-time mode */
+    mock_physics_set_enabled(true); /* Run 6-DOF physics model in real-time mode */
 
-    mock_can_set_current_node(ROV_NODE_PI_SHIELD);
-    node1_app_init();
-
-    mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
-    node2_app_init();
-
-    mock_can_set_current_node(ROV_NODE_POWER_SLAB);
-    node3_app_init();
+    /* Initialize all vehicle nodes from the central SIL_NODES table */
+    for (int i = 0; i < sil_vehicle_node_count(); i++) {
+        const sil_node_t *node = sil_vehicle_node(i);
+        if (node->init) {
+            mock_can_set_current_node(node->can_node_id);
+            node->init();
+        }
+    }
 
     socket_t client_fd = INVALID_SOCKET;
     uint32_t cycle_count = 0;
@@ -385,16 +387,15 @@ int main(int argc, char **argv) {
         }
 
         /* 3. Step Node 2 (Control Board): Process CAN commands, execute 1kHz ramp, stream 0x200 */
-        mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
-        node2_app_step();
+        /* Step all vehicle nodes from the central SIL_NODES table */
+        for (int i = 0; i < sil_vehicle_node_count(); i++) {
+            const sil_node_t *node = sil_vehicle_node(i);
+            if (node->step) {
+                mock_can_set_current_node(node->can_node_id);
+                node->step();
+            }
+        }
 
-        /* 4. Step Node 1 (Pi Shield): Evaluate environmental sensors, stream 0x210, leak safety */
-        mock_can_set_current_node(ROV_NODE_PI_SHIELD);
-        node1_app_step();
-
-        /* 5. Step Node 3 (Power Slab): Evaluate PMBus converter telemetry, stream 0x300 */
-        mock_can_set_current_node(ROV_NODE_POWER_SLAB);
-        node3_app_step();
 
         /* SIL-only feedback lets integration tests inspect actual mocked outputs. */
         if (!IS_INVALID_SOCKET(client_fd)) {
@@ -484,8 +485,8 @@ int main(int argc, char **argv) {
             break;
         }
 
-        /* Sleep 10 ms to throttle host CPU to true 100 Hz wall clock */
-        platform_sleep_ms(10);
+        /* Sleep 10 ms to throttle host CPU to true 100 Hz wall clock (skipped in LOGICAL mode) */
+        if (s_mode == SIL_MODE_REALTIME) { platform_sleep_ms(10); }
     }
 
     printf("SIL Bridge: Server exiting after %u cycles.\n", cycle_count);

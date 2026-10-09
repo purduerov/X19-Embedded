@@ -3,6 +3,7 @@ build/
 build-native/
 build-test/
 build-host/
+build-native-coverage/
 bin/
 obj/
 __pycache__/
@@ -40,3 +41,4 @@ nodes/*/.vscode/
 *.tmp
 *.ioc.bak
 .aider*
+.vibe-wise/

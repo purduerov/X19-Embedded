@@ -13,10 +13,12 @@
 #include "bme280.h"
 #include "bsp.h"
 #include "can_interface.h"
+#include "env_service.h"
 #include "ina237.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
+#include "safety_service.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -44,7 +46,7 @@ static volatile bool g_emergency_latched = false;
  * Bit 1 (0x02): floor leak probe 0
  * Bit 2 (0x04): floor leak probe 1
  *
- * bsp_leak_probe_read() returns true when water is detected, so the
+ * leak_probe_is_wet() returns true when water is detected, so the
  * application layer does not need to know the electrical polarity of
  * the physical GPIO.
  *
@@ -53,11 +55,11 @@ static volatile bool g_emergency_latched = false;
 static uint8_t node1_get_floor_leak_bits(void) {
     uint8_t leak_bits = 0;
 
-    if (bsp_leak_probe_read(0)) {
+    if (leak_probe_is_wet(0)) {
         leak_bits |= 0x02;
     }
 
-    if (bsp_leak_probe_read(1)) {
+    if (leak_probe_is_wet(1)) {
         leak_bits |= 0x04;
     }
 
@@ -82,7 +84,7 @@ static void node1_trigger_emergency(uint8_t leak_bits) {
      * Trip the local hardware safety path immediately.
      * This must not depend on successful CAN transmission.
      */
-    bsp_emergency_brake_trip();
+    safety_emergency_trip();
 
     /*
      * Update the software safety state.
@@ -133,7 +135,7 @@ uint8_t node1_i2c_scan(void) {
             uint8_t addr = row + col;
             if (addr < 0x08 || addr > 0x77) {
                 printf("   ");
-            } else if (bsp_i2c_probe(addr)) {
+            } else if (env_probe_i2c(addr)) {
                 printf("%02X ", addr);
                 count++;
             } else {
@@ -147,7 +149,7 @@ uint8_t node1_i2c_scan(void) {
     printf("Scan complete: found %u device(s).\r\n", count);
 
     for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
-        if (bsp_i2c_probe(addr)) {
+        if (env_probe_i2c(addr)) {
             const char *desc = "Unknown device";
             if (addr == 0x76 || addr == 0x77) {
                 desc = "Bosch BME280 (Pressure / Humidity / Temp)";
@@ -173,7 +175,7 @@ void node1_app_init(void) {
     g_can_ready = can_init();
     if (!g_can_ready) {
         /* A node without a verified CAN transport must not report healthy. */
-        bsp_emergency_brake_trip();
+        safety_emergency_trip();
         g_safety_state.emergency_break_active = true;
         g_emergency_latched = true;
     }
@@ -197,7 +199,7 @@ void node1_app_step(void) {
     uint32_t current_time = time_get_ms();
 
     if (!g_can_ready) {
-        bsp_emergency_brake_trip();
+        safety_emergency_trip();
         delay_ms(5);
         return;
     }
