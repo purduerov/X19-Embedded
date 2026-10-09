@@ -58,6 +58,12 @@ static void test_decode_telemetry_frame(void) {
     assert(dshot_decode_telemetry_frame(encode_telemetry_stream(word), &out));
     assert(out == word);
 
+    /* Inverted checksum frame (standard for real-world Bluejay, BLHeli_32, AM32 ESCs). */
+    uint16_t inv_csum = (uint16_t)(~((0x22DU ^ (0x22DU >> 4) ^ (0x22DU >> 8))) & 0x0FU);
+    uint16_t inv_word = (uint16_t)((0x22DU << 4) | inv_csum);
+    assert(dshot_decode_telemetry_frame(encode_telemetry_stream(inv_word), &out));
+    assert(out == inv_word);
+
     /* Corrupt checksum is rejected. */
     uint16_t bad_crc = (uint16_t)(word ^ 0x0001U);
     assert(!dshot_decode_telemetry_frame(encode_telemetry_stream(bad_crc), &out));

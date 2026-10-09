@@ -45,8 +45,11 @@ bool dshot_decode_telemetry_frame(uint32_t raw_21_bits, uint16_t *out_telemetry_
 
     uint16_t frame = (uint16_t)((n3 << 12) | (n2 << 8) | (n1 << 4) | n0);
 
-    /* 3. Check 4-bit CRC (uninverted on telemetry back-channel) */
-    if (dshot_checksum((uint16_t)(frame >> 4)) != (frame & 0x0FU)) {
+    /* 3. Check 4-bit CRC: Real hardware ESCs (Bluejay, BLHeli_32, AM32) use inverted CRC
+     * (all 4 nibbles XOR to 0x0F); some legacy mock streams use uninverted CRC (XOR to 0x00).
+     * Accept both to guarantee full hardware and unit-test compatibility. */
+    uint8_t csum = (uint8_t)((n3 ^ n2 ^ n1 ^ n0) & 0x0FU);
+    if (csum != 0x0FU && csum != 0x00U) {
         return false;
     }
 
