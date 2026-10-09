@@ -102,18 +102,15 @@ static bool decode_telemetry_edges(const uint16_t *timestamps, uint16_t count, d
 
     for (uint16_t i = 0; i < delta_count; i++) {
         deltas[i] = (uint16_t)(timestamps[i + 1] - timestamps[i]);
-        /* Minimum valid bit time: at 170 MHz, 375 kHz is 453 ticks, 300 kHz is 567 ticks */
-        if (deltas[i] > 250 && deltas[i] < min_delta) {
+        /* Identify legitimate 1-bit period (nominally 567 ticks @ 170 MHz for 300 kHz).
+         * Allow ESC RC oscillator drift (+/-15%: 450 to 680 ticks). Filter out noise (< 450). */
+        if (deltas[i] >= 450 && deltas[i] <= 680 && deltas[i] < min_delta) {
             min_delta = deltas[i];
         }
     }
 
-    if (min_delta < 250 || min_delta > 700) {
-        return false;
-    }
-
-    /* Use min_delta as estimated 1-bit period T */
-    uint16_t T = min_delta;
+    /* If a clean 1-bit delta was found in [450, 680], track it. Otherwise, default to nominal 567 ticks. */
+    uint16_t T = (min_delta != 0xFFFF) ? min_delta : 567U;
     uint16_t half_T = T / 2;
 
     /* Reconstruct 21 wire level bits */
@@ -123,8 +120,8 @@ static bool decode_telemetry_edges(const uint16_t *timestamps, uint16_t count, d
 
     for (uint16_t i = 0; i < delta_count && bit_idx < 21; i++) {
         uint16_t dt = deltas[i];
-        if (dt < 200) {
-            continue; /* Skip spurious glitch */
+        if (dt < 300) {
+            continue; /* Skip spurious sub-microsecond ringing glitches */
         }
         uint16_t n = (dt + half_T) / T;
         if (n < 1)
@@ -223,6 +220,8 @@ void dshot_send_ref_speed(uint16_t _motor_speed) {
         } else {
             s_telem_crc_errors++;
         }
+    } else {
+        s_telem_crc_errors++;
     }
 }
 
@@ -288,7 +287,7 @@ static void MX_TIM1_Init(void) {
     sConfigIC.ICPolarity = TIM_ICPOLARITY_BOTHEDGE;
     sConfigIC.ICSelection = TIM_ICSELECTION_INDIRECTTI;
     sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
-    sConfigIC.ICFilter = 2;
+    sConfigIC.ICFilter = 8; /* Hardware filter: 48 clock cycles = ~282 ns glitch rejection at 170 MHz */
     HAL_TIM_IC_ConfigChannel(&htim1, &sConfigIC, TIM_CHANNEL_2);
 
     /* MOE enable */
@@ -342,12 +341,11 @@ static void hold_speed(uint16_t speed, uint32_t duration_ms) {
             float err_pct = (s_telem_received + s_telem_crc_errors > 0)
                                 ? ((float)s_telem_crc_errors / (float)(s_telem_received + s_telem_crc_errors)) * 100.0f
                                 : 0.0f;
-            printf("  [TELEM] RPM: %5lu | eRPM: %6lu | V: %4.1fV | I: %4.1fA | T: %2dC | Frames[eRPM:%lu, V:%lu, "
-                   "I:%lu, T:%lu]\r\n",
+            printf("  [TELEM] RPM: %5lu | eRPM: %6lu | T: %2dC | Edges: %2lu | Err: %4.1f%% | Frames[eRPM:%lu, "
+                   "T:%lu]\r\n",
                    (unsigned long)s_latest_telemetry.rpm, (unsigned long)s_latest_telemetry.erpm,
-                   (double)s_latest_telemetry.voltage_v, (double)s_latest_telemetry.current_a,
-                   (int)s_latest_telemetry.temperature_c, (unsigned long)s_erpm_frames, (unsigned long)s_volt_frames,
-                   (unsigned long)s_curr_frames, (unsigned long)s_temp_frames);
+                   (int)s_latest_telemetry.temperature_c, (unsigned long)s_last_edges, (double)err_pct,
+                   (unsigned long)s_erpm_frames, (unsigned long)s_temp_frames);
         }
     }
 }
