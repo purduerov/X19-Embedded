@@ -58,6 +58,11 @@ static volatile uint32_t s_pulse_cplt_count = 0;
 static volatile uint32_t s_last_edges = 0;
 static volatile uint32_t s_max_edges = 0;
 static volatile HAL_StatusTypeDef s_ic_start_status = HAL_OK;
+static volatile uint32_t s_erpm_frames = 0;
+static volatile uint32_t s_volt_frames = 0;
+static volatile uint32_t s_curr_frames = 0;
+static volatile uint32_t s_temp_frames = 0;
+static volatile uint32_t s_other_frames = 0;
 
 /* Callback fired when 16-bit DShot PWM packet transmission completes */
 void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim) {
@@ -170,7 +175,17 @@ static bool decode_telemetry_edges(const uint16_t *timestamps, uint16_t count, d
         uint8_t csum = (n3 ^ n2 ^ n1 ^ n0) & 0x0F;
         if (csum == 0x0F || csum == 0x00) {
             frame_16 = (uint16_t)((n3 << 12) | (n2 << 8) | (n1 << 4) | n0);
-            dshot_parse_telemetry(frame_16, 7U, out_telem);
+            dshot_telemetry_type_t t = dshot_parse_telemetry(frame_16, 7U, out_telem);
+            if (t == DSHOT_TELEMETRY_ERPM)
+                s_erpm_frames++;
+            else if (t == DSHOT_TELEMETRY_VOLTAGE)
+                s_volt_frames++;
+            else if (t == DSHOT_TELEMETRY_CURRENT)
+                s_curr_frames++;
+            else if (t == DSHOT_TELEMETRY_TEMPERATURE)
+                s_temp_frames++;
+            else
+                s_other_frames++;
             return true;
         }
     }
@@ -327,12 +342,12 @@ static void hold_speed(uint16_t speed, uint32_t duration_ms) {
             float err_pct = (s_telem_received + s_telem_crc_errors > 0)
                                 ? ((float)s_telem_crc_errors / (float)(s_telem_received + s_telem_crc_errors)) * 100.0f
                                 : 0.0f;
-            printf("  [TELEM] RPM: %5lu | eRPM: %6lu | V: %4.1fV | I: %4.1fA | T: %2dC | Stress: %3u | Packets: %lu | "
-                   "Err: %.2f%%\r\n",
+            printf("  [TELEM] RPM: %5lu | eRPM: %6lu | V: %4.1fV | I: %4.1fA | T: %2dC | Frames[eRPM:%lu, V:%lu, "
+                   "I:%lu, T:%lu]\r\n",
                    (unsigned long)s_latest_telemetry.rpm, (unsigned long)s_latest_telemetry.erpm,
                    (double)s_latest_telemetry.voltage_v, (double)s_latest_telemetry.current_a,
-                   (int)s_latest_telemetry.temperature_c, (unsigned int)s_latest_telemetry.stress_level,
-                   (unsigned long)s_telem_received, (double)err_pct);
+                   (int)s_latest_telemetry.temperature_c, (unsigned long)s_erpm_frames, (unsigned long)s_volt_frames,
+                   (unsigned long)s_curr_frames, (unsigned long)s_temp_frames);
         }
     }
 }
