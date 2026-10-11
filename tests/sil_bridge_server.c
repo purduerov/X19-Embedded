@@ -337,8 +337,9 @@ int main(int argc, char **argv) {
                                 "SIL Bridge: WARNING: Dropped malformed packet with length %u (exceeds maximum 64)\n",
                                 pkt->len);
                             fflush(stdout);
-                            memmove(rx_stream_buf, rx_stream_buf + 1, rx_stream_len - 1);
-                            rx_stream_len--;
+                            size_t consumed = sizeof(sil_can_packet_t);
+                            memmove(rx_stream_buf, rx_stream_buf + consumed, rx_stream_len - consumed);
+                            rx_stream_len -= consumed;
                             continue;
                         }
 
