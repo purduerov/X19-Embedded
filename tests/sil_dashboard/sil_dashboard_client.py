@@ -311,6 +311,8 @@ class SilDashboardClient:
         self.c_stdout_log = deque(maxlen=150)
         self._last_logged_payload: Dict[int, bytes] = {}
         self._last_logged_time: Dict[int, float] = {}
+        self._last_log_sec: Optional[int] = None
+        self._last_log_ts_str: str = ""
 
         # Live vehicle state
         self.pwms = [1500] * 8
@@ -933,8 +935,16 @@ class SilDashboardClient:
             self._last_logged_time[can_id] = now
 
         name = CAN_ID_MAP.get(can_id, ("UNKNOWN", ""))[0]
+
+        now_ts = time.time()
+        sec = int(now_ts)
+        if sec != self._last_log_sec:
+            self._last_log_sec = sec
+            self._last_log_ts_str = time.strftime("%H:%M:%S", time.localtime(sec))
+        ts_str = self._last_log_ts_str + f".{int(now_ts * 1000) % 1000:03d}"
+
         rec = CanPacketRecord(
-            timestamp=time.strftime("%H:%M:%S") + f".{int(time.time()*1000)%1000:03d}",
+            timestamp=ts_str,
             direction=direction,
             can_id=can_id,
             name=name,
