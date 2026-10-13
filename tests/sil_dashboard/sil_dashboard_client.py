@@ -963,12 +963,14 @@ class SilDashboardClient:
                         continue
 
                     packet_chunk = bytes(buf[:SIL_PACKET_SIZE])
-                    del buf[:SIL_PACKET_SIZE]
+
                     try:
                         can_id, payload = unpack_sil_can_frame(packet_chunk)
                     except ValueError:
+                        del buf[:1]
                         continue
 
+                    del buf[:SIL_PACKET_SIZE]
                     self.frame_count += 1
                     self.last_rx_monotonic[can_id] = time.monotonic()
                     summary = ""
