@@ -1,4 +1,4 @@
-add_executable(node3_power_slab.elf
+add_executable(node3_power_slab.elf EXCLUDE_FROM_ALL
     Core/Src/main.c
     Core/Src/app.c
     Core/Src/bsp.c
