@@ -31,6 +31,17 @@ try:
 except Exception:
     telemetry_pb2 = None
 
+_last_sec = None
+_last_ts_str = ""
+
+def _format_timestamp(now_ts: float) -> str:
+    global _last_sec, _last_ts_str
+    sec = int(now_ts)
+    if sec != _last_sec:
+        _last_sec = sec
+        _last_ts_str = time.strftime("%H:%M:%S", time.localtime(sec))
+    return _last_ts_str
+
 from sil_protocol import (
     CAN_ID_EMERGENCY_BREAK,
     CAN_ID_EFUSE_FAULT_ALERT,
@@ -383,7 +394,7 @@ class SilDashboardClient:
             stripped = line.strip()
             if stripped:
                 with self.lock:
-                    self.c_stdout_log.append(f"[{time.strftime('%H:%M:%S')}] {stripped}")
+                    self.c_stdout_log.append(f"[{_format_timestamp(time.time())}] {stripped}")
 
     def stop_server_process(self):
         self.disconnect()
@@ -933,8 +944,9 @@ class SilDashboardClient:
             self._last_logged_time[can_id] = now
 
         name = CAN_ID_MAP.get(can_id, ("UNKNOWN", ""))[0]
+        now_ts = time.time()
         rec = CanPacketRecord(
-            timestamp=time.strftime("%H:%M:%S") + f".{int(time.time()*1000)%1000:03d}",
+            timestamp=_format_timestamp(now_ts) + f".{int(now_ts * 1000) % 1000:03d}",
             direction=direction,
             can_id=can_id,
             name=name,
