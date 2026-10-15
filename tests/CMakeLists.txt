@@ -96,6 +96,11 @@ x19_add_node_test(NAME test_i2c_recovery SUITE shared
     LIBS rov_shared
 )
 
+x19_add_node_test(NAME test_rov_i2c SUITE shared
+    SOURCES test_rov_i2c.c
+    LIBS rov_shared
+)
+
 x19_add_node_test(NAME test_timesync SUITE shared
     SOURCES test_timesync.c
     LIBS rov_shared rov_mocks
