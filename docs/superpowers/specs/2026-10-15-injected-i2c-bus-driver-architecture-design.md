@@ -104,7 +104,7 @@ transport it received.
 
 ### Bench harness (`bench/`)
 
-- Target-only (Nucleo firmware). No host/USB transport.
+- Nucleo dev board only (F411 / G474). No host/USB transport, no Pi path.
 - `bench_main.c`: generic runner - init the HAL bus, init one sensor, read + print at N Hz.
 - `bench_sensors.c` / `.h`: descriptor table `{name, init(dev,bus), read(dev), print(dev)}`.
 - One firmware, many sensors: replaces writing a bespoke `app_main` per sensor.
@@ -132,7 +132,7 @@ transport it received.
 4. Add `bsp_i2c_bus()` to each node BSP; update the three `app.c` init call sites.
 5. Driver hygiene (independent of transport): remove the `weak mock_*` hook from
    `lsm6dsoxtr.c` and move Madgwick out of that driver to its consumer.
-6. Add `bench/` as a target-only (Nucleo) build target.
+6. Add `bench/` as a Nucleo dev-board build target (F411 / G474).
 7. Delete the `tests/mocks/mock_<sensor>.c` driver-level mocks.
 
 ## Testing
@@ -150,5 +150,5 @@ transport it received.
 - `lsm6dsoxtr_read_raw()` is currently a pure mock passthrough and ignores hardware.
   Step 5 only removes the leak; making that path real is separate SPI work and is
   not claimed here.
-- The bench harness is target-only, so a real-sensor check always requires flashing
-  a Nucleo. Accepted: it keeps the surface at one transport and one new folder.
+- The bench harness is Nucleo-only, so a real-sensor check always requires flashing a
+  dev board. Accepted: it keeps the surface at one transport and one new folder.
