@@ -191,6 +191,17 @@ def build_target(node: str, board: str, profile: str = "debug", custom_file: str
     display_source = f" (source: {file_path})" if file_path else ""
     print(f"\033[1;32m=== Configuring & Building Node: {node} for Board: {board} ({profile}){display_source} ===\033[0m")
 
+    # Validate cache: if building for embedded board, ensure cache was generated with ARM cross-compiler
+    cache_file = build_dir / "CMakeCache.txt"
+    if board != "host" and cache_file.exists():
+        try:
+            cache_text = cache_file.read_text(encoding="utf-8", errors="ignore")
+            if "arm-none-eabi" not in cache_text:
+                print(f"\033[1;33mStale or non-ARM CMake cache detected in {build_dir_rel}. Cleaning cache...\033[0m")
+                shutil.rmtree(build_dir, ignore_errors=True)
+        except Exception:
+            pass
+
     # If building sandbox target, re-configure CMake with the active SANDBOX_FILE definition
     if node == "sandbox" and file_path:
         cmake_cfg = ["cmake", "--preset", preset_name, f"-DSANDBOX_FILE={file_path}"]
