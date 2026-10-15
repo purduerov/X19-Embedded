@@ -153,6 +153,41 @@ def run_cmd(cmd: list[str], cwd: Path = REPO_ROOT) -> None:
         sys.exit(f"\033[1;31mCommand failed with exit code {result.returncode}\033[0m")
 
 
+def clean_stray_parent_cache(build_dir: Path) -> None:
+    """Remove a stray CMake cache written at the preset parent by a raw `cmake -B build`.
+
+    Presets own their build trees under `build/<preset>/`. A cache at the parent pins the
+    compiler for that directory and makes CMake silently ignore a changed toolchain file on
+    every later configure, which is the recurring "stale build" failure. Only a parent
+    directory literally named `build` is touched, so the repo root and non-preset trees
+    (for example `build-native`) are never affected, and the preset subdirectories survive.
+    """
+    parent = build_dir.parent
+    if parent.name != "build" or not (parent / "CMakeCache.txt").exists():
+        return
+
+    print(
+        f"\033[1;33mStray CMake cache at {parent.name}/CMakeCache.txt "
+        f"(written by a raw `cmake -B {parent.name}`). Removing parent-level configure "
+        f"artifacts so presets stay authoritative...\033[0m"
+    )
+    for cache_copy in parent.glob("CMakeCache*.txt"):
+        cache_copy.unlink()
+    for directory in ("CMakeFiles", "Testing"):
+        shutil.rmtree(parent / directory, ignore_errors=True)
+    for name in (
+        "build.ninja",
+        "cmake_install.cmake",
+        "compile_commands.json",
+        "CTestTestfile.cmake",
+        ".ninja_deps",
+        ".ninja_log",
+    ):
+        artifact = parent / name
+        if artifact.exists():
+            artifact.unlink()
+
+
 def build_target(node: str, board: str, profile: str = "debug", custom_file: str | None = None) -> str:
     config = load_config()
 
@@ -181,6 +216,9 @@ def build_target(node: str, board: str, profile: str = "debug", custom_file: str
     preset_name = board_cfg.get("preset", "arm-c542-debug")
     build_dir_rel = board_cfg.get("build_dir", f"build/{preset_name}")
     build_dir = REPO_ROOT / build_dir_rel
+
+    # A raw `cmake -B build` at the preset parent poisons every later configure; clear it.
+    clean_stray_parent_cache(build_dir)
 
     target_key = f"target_{board}"
     binary_key = f"binary_{board}"

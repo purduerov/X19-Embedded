@@ -34,11 +34,11 @@ jobs:
 
       - name: Configure CMake (Cross-Compile)
         run: |
-          cmake -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake
+          cmake --preset arm-c542-debug
 
       - name: Build All STM32 Nodes & Libraries (-Werror)
         run: |
-          cmake --build build --verbose
+          cmake --build --preset arm-c542-debug --verbose
 
       - name: Configure Node 2 STM32G474
         working-directory: nodes/node2_control_board
