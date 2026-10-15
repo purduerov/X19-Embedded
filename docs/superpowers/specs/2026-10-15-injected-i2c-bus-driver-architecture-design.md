@@ -1,4 +1,4 @@
-# Injected I2C Bus for Sensor Drivers - Design
+# Node Architecture: Boundaries, Injected I2C Bus, and Isolated Testing
 
 - Date: 2026-10-15
 - Owner: Purdue ROV Embedded Team
@@ -6,40 +6,59 @@
 
 ## Goal
 
-One I2C sensor-driver source that runs unchanged in three homes - STM32 target
-firmware, host SIL/unit tests, and a Nucleo bench harness - by injecting the bus
-instead of calling `bsp_i2c_mem_read()` directly.
+Establish one node architecture with clean layer boundaries, then make the code
+match it. Two outcomes:
+
+1. A sensor driver runs unchanged in three homes - STM32 target firmware, host
+   tests, and a Nucleo bench - by injecting the I2C bus instead of calling
+   `bsp_i2c_mem_read()` directly.
+2. Every layer has one job, no layer reaches past another, and any single sensor
+   or function can be tested in isolation without touching the rest of the system.
 
 This follows the industry-standard split (Linux `bmp280-core.c` + `bmp280-i2c.c`;
 Zephyr `bme280.c` + `bme280_i2c.c`; Bosch's own `bme280_dev.read/write/delay_ms`
-function pointers). We are not inventing a scheme; we are matching it.
+function pointers). We are matching it, not inventing it.
 
-## Success criteria
-
-- A driver compiles and runs in all three homes with no `#ifdef` selecting the bus.
-- Host tests exercise the **real** driver against a **bus-level** mock.
-- Adding a new I2C sensor is: write `<chip>.c`/`<chip>.h`, link, add a bench descriptor.
-- No vendor HAL call and no `bsp_*` call inside any driver.
-- New surface stays small and enumerated: one contract header (`rov_i2c.h`), one bus
-  mock, one HAL bus shim, and the `bench/` folder.
-
-## Current state (why this change)
+## Current state (why)
 
 - Drivers call the global `bsp_i2c_mem_read()` directly, so a driver only builds
   where that BSP exists. Testing one sensor requires linking the whole BSP.
-- Bench tests are throwaway standalone `app_main`s (`sandbox/test_ms5837.c`,
-  `i2c_scanner.c`); `sandbox.c` bypasses both drivers and `bsp.h` and talks to
-  `stm32g4xx_hal.h` directly.
 - Host tests mock the **driver** (`tests/mocks/mock_bme280.c`), so the real driver
   code path never runs on the host.
-- `drivers/src/lsm6dsoxtr.c` embeds a Madgwick filter and calls a `weak`
-  `mock_sensors_get_imu()` from production code - the driver depends on the mock.
+- `bsp.h` mixes board IO with device functions (`bsp_pmbus_read_word`,
+  `bsp_get_pcb_temperature_c`, `bsp_get_logic_voltage_mv`).
+- `env_service`/`power_service` forward to one driver **and** duplicate its state.
+- `app.c` reaches past services straight into drivers, inconsistently.
+- Three sources of "is the vehicle safe?" (`app.c`, `safety_service`, `bsp`).
+- `bsp.c` wraps real actions in `#if defined(...)` fallbacks that silently return
+  `false`/`0`, so a missing board macro makes the emergency brake a no-op that
+  still "succeeds". The board macros exist today only in
+  `tests/hardware/fakes/main.h`, not in the real node headers.
+- Dual header namespaces (`rov_*.h` and `x19_*.h` forwarders).
 
-## Design
+## The established architecture
 
-### The contract (`shared/include/rov_i2c.h`)
+Each layer gets exactly one job:
 
-One tiny vtable, header-only helpers:
+| Layer | One job | May call |
+| :--- | :--- | :--- |
+| `app.c` | policy + scheduling: loop, cadence, thresholds, decisions, telemetry | services, bsp timing |
+| `services/` | sensor facades (own a driver, expose units) and invariant guards | drivers, bsp |
+| `drivers/` | one chip: bytes to engineering units | the injected bus only |
+| `bsp` (+ `boards/*/platform`) | board hardware: pins, clocks, peripherals, timing | HAL |
+| `shared/` | contracts: protocol, params, safety types, bus | pure |
+| generated (`main.c`, `*_it.c`, `*_msp.c`) | CubeMX startup/interrupt/MSP | HAL |
+| `sandbox/` | free-for-all leaf (throwaway experiments) | anything |
+
+Rules:
+
+1. Nothing calls upward (`app -> services -> drivers -> bus -> bsp -> HAL`).
+2. Drivers never call `bsp_*` or HAL; only the injected bus.
+3. BSP contains no device/register logic.
+4. One owner per piece of state: one safety-state source; no second sensor cache.
+5. `app.c` speaks to services only; it never includes a driver header or names a bus.
+
+## The bus contract (`shared/include/rov_i2c.h`)
 
 ```c
 typedef struct rov_i2c_bus rov_i2c_bus_t;
@@ -56,11 +75,9 @@ rov_status_t rov_i2c_read_u16le(const rov_i2c_bus_t *bus, uint8_t addr, uint8_t 
 rov_status_t rov_i2c_write_u8(const rov_i2c_bus_t *bus, uint8_t addr, uint8_t reg, uint8_t v);
 ```
 
-Helpers are `static inline` in the header, or a tiny `rov_i2c.c` if they grow.
+Helpers are `static inline` in the header.
 
-### Driver shape
-
-Each I2C driver stores the bus and routes all register access through it:
+## Driver shape and boundary rules
 
 ```c
 typedef struct {
@@ -76,79 +93,133 @@ rov_status_t bme280_read_all(bme280_dev_t *dev);
 Internal diff is mechanical: `bsp_i2c_mem_read(addr, R, d, n)` becomes
 `dev->bus->mem_read(dev->bus->ctx, addr, R, d, n)`.
 
-### Driver boundary rules
+Rules:
 
-1. Driver = bytes to engineering units, exactly per the chip datasheet. Stateless
-   and deterministic. No history, no thresholds, no policy.
-2. Configuring the chip's own internal hardware filter (e.g. BME280 IIR register)
-   is datasheet work and stays in the driver. Software filtering does not.
-3. Drivers contain no `bsp_*` or vendor HAL calls.
-4. Drivers contain no reference to any `mock_*` symbol.
+1. Driver = bytes to engineering units, exactly per datasheet. Stateless,
+   deterministic. No history, no thresholds, no policy.
+2. Configuring the chip's own hardware filter (e.g. BME280 IIR register) is
+   datasheet work and stays in the driver. Software filtering does not.
+3. No `bsp_*`, no vendor HAL, and no `mock_*` reference inside a driver.
 
-Test for scope: needs a history of samples -> filter layer; needs a vehicle
-parameter or a decision -> service/app; pure per-sample datasheet transform -> driver.
+Scope test: needs history -> filter layer; needs a vehicle parameter or a decision
+-> service/app; pure per-sample datasheet transform -> driver.
 
-### The three places
-
-Three sensor-driver homes, three builds (the target firmware and the Nucleo bench
-share one transport implementation):
+## The three homes of a driver
 
 | Home / build | Transport implementation | Links |
 | :--- | :--- | :--- |
-| STM32 target firmware | `i2c_bus_hal.c` (wraps `bsp_i2c_mem_*`) | `drivers` lib |
-| Nucleo bench | `i2c_bus_hal.c` (same as target) | `drivers` lib |
-| Host SIL / unit tests | `tests/mocks/i2c_bus_mock.c` (register image + fault flags) | `drivers` lib |
+| STM32 target firmware | `bsp_i2c_bus()` wrapping `bsp_i2c_mem_*` | `rov_drivers` |
+| Nucleo bench | same HAL transport | `rov_drivers` |
+| Host SIL / unit tests | `tests/mocks/i2c_bus_mock.c` (register image + fault flags) | `rov_drivers` |
 
-App code names only `bsp_i2c_bus()` (added to the node BSP) and cannot tell which
-transport it received.
+Services acquire the bus themselves (`bsp_i2c_bus()`), so `app.c` never mentions
+a bus or a transport.
 
-### Bench harness (`bench/`)
+## Overlaps and oversteps to fix
 
-- Nucleo dev board only (F411 / G474). No host/USB transport, no Pi path.
-- `bench_main.c`: generic runner - init the HAL bus, init one sensor, read + print at N Hz.
-- `bench_sensors.c` / `.h`: descriptor table `{name, init(dev,bus), read(dev), print(dev)}`.
-- One firmware, many sensors: replaces writing a bespoke `app_main` per sensor.
+| # | Problem | Fix |
+| :--- | :--- | :--- |
+| 1 | `bsp.h` exposes device fns | move into drivers; services wrap them |
+| 2 | `env_service`/`power_service` duplicate driver state | keep the services; they own the driver, delete the duplicate cache |
+| 3 | `app.c` reaches into drivers | forbidden; route every sensor through a service |
+| 4 | three safety-state copies | single source of truth in `rov_safety` / `safety_service` |
+| 5 | silent `#if defined` fallbacks | fail loud: `#error` when a required board macro is missing |
+| 6 | dual `rov_*` / `x19_*` headers | delete the `x19_*` forwarders |
 
-### Non-goals (deliberately excluded, YAGNI)
+## Isolated testing: composable towers
 
-- No `sensors/` wrapper tree. No filters exist except Madgwick; add a filter module
-  only when a second consumer appears.
-- No `transports/` tree. Each transport lives in its only home (mock in `tests/mocks/`,
-  HAL in the node BSP).
-- No host-PC / USB-to-I2C bench transport. The injected contract makes it a one-file
-  addition later if it is ever wanted, so deferring costs nothing architecturally.
-- No `_template/` folder and no per-driver CMake targets. One `drivers` static
-  library; the linker drops unreferenced objects.
+The layers are separate static libraries, so any test can link a tower of exactly
+the height it needs. Nothing else is compiled into that target, so one broken
+sensor cannot break another target or the node firmwares.
+
+**Mode 1 - Host test, through the tower, no hardware** (runs in CI):
+
+```
+tests/test_env_service.c
+   links: env_service + bme280 + i2c_bus_mock + Unity
+   loads a register image, calls the real service + driver, asserts exact units.
+```
+
+**Mode 2 - Bench, through the tower, real sensor on a Nucleo**:
+
+```c
+/* bench/bench_env.c */
+#include "env_service.h"
+#include "bsp.h"
+#include <stdio.h>
+
+void app_main(void) {
+    bsp_init();
+    env_service_init(bsp_i2c_bus());
+    while (1) {
+        float t, p, h;
+        if (env_read_all(&t, &p, &h) == ROV_OK)
+            printf("BME280  t=%.2fC  p=%.1fhPa  h=%.1f%%\r\n", t, p, h);
+        else
+            printf("BME280 read failed\r\n");
+        delay_ms(500);
+    }
+}
+```
+
+Built with the existing helper (no new machinery):
+
+```cmake
+add_f411_node_executable(f411_bench_env.elf bench/bench_env.c)
+```
+
+Each bench is a separate `.elf` containing only `app -> env_service -> bme280 ->
+bus -> HAL`. It compiles no node `app.c` and no other sensor. The linker drops
+unreferenced objects because the libraries are static.
+
+Why a real sensor still matters: a host test with fake bytes proves the **math**;
+a bench with a real chip proves the **wiring and the chip**. Neither substitutes
+for the other.
+
+## Non-goals (deliberately excluded, YAGNI)
+
+- No `sensors/` wrapper tree; services are the facade.
+- No `transports/` tree; each transport lives in its only home.
+- No host-PC / USB-to-I2C / Pi bench transport. Nucleo dev board only.
+- No `_template/` folder, no per-driver CMake targets, no `bench_sensors` table.
+  One bench source per sensor; one `add_<board>_node_executable` line each.
 - Keep `drivers/include` + `drivers/src` flat.
 - SPI drivers (`bmi270`, `lsm6dsoxtr`), PMBus, `tcan1044`, and DShot are out of
-  scope for the transport migration and are left as-is.
+  scope for the transport migration and left as-is.
 
 ## Migration order
 
-1. Add `shared/include/rov_i2c.h` and the helpers.
-2. Add `tests/mocks/i2c_bus_mock.c`; convert one driver (MS5837) and its test as the
-   proof, including a fault-injection case.
+1. Add `shared/include/rov_i2c.h`.
+2. Add `tests/mocks/i2c_bus_mock.c`; convert one driver (MS5837) and its test,
+   including a fault-injection case, as the proof.
 3. Convert remaining I2C drivers: BME280, INA226, INA237, TMP1075.
-4. Add `bsp_i2c_bus()` to each node BSP; update the three `app.c` init call sites.
-5. Driver hygiene (independent of transport): remove the `weak mock_*` hook from
-   `lsm6dsoxtr.c` and move Madgwick out of that driver to its consumer.
-6. Add `bench/` as a Nucleo dev-board build target (F411 / G474).
-7. Delete the `tests/mocks/mock_<sensor>.c` driver-level mocks.
+4. Add `bsp_i2c_bus()` to the node BSP and the dev-board platform; add services
+   to the tower as facades (own the driver, delete duplicate caches).
+5. Move device functions out of `bsp.h` into drivers; make services wrap them.
+6. Fail-loud board macros (`#error` on missing required macro).
+7. Single safety-state source.
+8. Delete `x19_*` forwarders.
+9. Add `bench/bench_<sensor>.c` per sensor plus the CMake target; add the
+   `rov bench -n <sensor>` CLI command.
+10. Delete the `tests/mocks/mock_<sensor>.c` driver-level mocks.
 
 ## Testing
 
-- Per-driver host test: load a fixed register image captured from the datasheet,
-  run the real driver, assert exact engineering units.
+- Per-service host test: register image from the datasheet, real service +
+  driver, assert exact engineering units.
 - Fault injection via the bus mock (NACK / timeout / short read / corrupt byte):
-  assert the driver returns `ROV_ERROR` and leaves prior output untouched (no stale
-  zero surfaced).
-- Bench run: the same `bench_main.c` flashed to the Nucleo, readings checked over serial.
+  assert the driver/service returns an error and leaves prior output untouched.
+- Bench: each per-sensor tower flashed to a Nucleo, readings checked over serial.
+- Compile-error check: a build missing a required board macro must fail.
 - CI: host unit tests remain blocking; the target acceptance gate stays as-is.
 
 ## Risks and open questions
 
-- `lsm6dsoxtr_read_raw()` is currently a pure mock passthrough and ignores hardware.
-  Step 5 only removes the leak; making that path real is separate SPI work and is
-  not claimed here.
-- The bench harness is Nucleo-only, so a real-sensor check always requires flashing a
-  dev board. Accepted: it keeps the surface at one transport and one new folder.
+- `lsm6dsoxtr_read_raw()` is currently a pure mock passthrough and ignores
+  hardware; step 3 does not cover it (SPI, out of scope). Removing its `weak
+  mock_*` hook is separate driver hygiene.
+- Fail-loud will break the F411/G474/Nucleo bench builds until their board macros
+  are supplied. That is the intent, but it makes board bring-up a prerequisite.
+- Steps 5-8 are boundary cleanups independent of the bus; they can land before or
+  after the bus work, but `app.c` must not be touched by the bus change and the
+  boundary change at the same time.
