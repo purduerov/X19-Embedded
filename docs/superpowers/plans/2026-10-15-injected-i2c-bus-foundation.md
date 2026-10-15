@@ -865,8 +865,12 @@ git commit -m "feat(node1): expose injected I2C bus for the target build"
 
 The spec's remaining migration steps become their own plans, in this order:
 
-1. **Remaining register-addressed drivers** (INA226, INA237, TMP1075) plus the
-   dev-board `platform_i2c.c` adapter, on the Task 1-4 pattern.
+1. **Remaining register-addressed drivers** (INA226, INA237, TMP1075), on the
+   Task 1-4 pattern. The dev-board `platform_i2c.c` adapter was pulled forward
+   into Task 4 after review: node1 `app.c` and `env_service.c` reference the bus
+   and are compiled into the F411/G474 bench targets and the `testing_and_rnd`
+   bench project, so those BSPs must define `bsp_i2c_bus()` or the cross build
+   fails to link.
 2. **MS5837 and the raw transport** — remove its `mock_sensors_get_ms5837` weak
    hook, teach the mock bus the command-addressed transaction, and absorb the SIL
    ripple (`test_driver_ms5837`, `test_services`, the node2 depth path).
