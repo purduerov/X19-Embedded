@@ -20,7 +20,7 @@ void app_main(void) {
     printf("[Host SIL] DShot DMA sandbox requires STM32G474RE hardware target.\r\n");
 }
 
-#else
+#elif defined(STM32G474xx)
 
 #include "bsp.h"
 #include "stm32g4xx_hal.h"
@@ -272,6 +272,19 @@ void app_main(void) {
         loop_count++;
         delay_us(1000); /* 1.0 ms = 1000 Hz frame rate */
     }
+}
+
+#else
+/* The default sandbox placeholder above is an STM32G474RE-only DShot experiment.
+ * Other boards build a no-op so a bare `cmake --build` stays green; pass a
+ * board-appropriate file with `rov.py sandbox -f <file> -b <board>`. */
+#include "bsp.h"
+#include <stdio.h>
+
+void app_main(void) {
+    printf("[Sandbox] the default sandbox/sandbox.c targets the STM32G474RE only. "
+           "Build it on the NUCLEO-G474RE, or pass a file with "
+           "`rov.py sandbox -f <file> -b <board>`.\r\n");
 }
 
 #endif

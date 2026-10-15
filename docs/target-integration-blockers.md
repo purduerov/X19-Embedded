@@ -8,12 +8,14 @@ the required generated hardware integration is not present in this checkout.
 ## Missing generated startup and board configuration
 
 `nodes/node1_pi_shield/Core/Src/main.c` and
-`nodes/node3_power_slab/Core/Src/main.c` currently hand off directly to
-`app_main()`. They do not contain the generated `HAL_Init()`,
-`SystemClock_Config()`, `MX_GPIO_Init()`, `MX_FDCAN1_Init()`, or `MX_I2C1_Init()`
-sequence, and the corresponding startup assembly and linker scripts are also
-absent. Those files must be regenerated or supplied by the board owners before
-a target image can be built or accepted.
+`nodes/node3_power_slab/Core/Src/main.c` call `HAL_Init()`,
+`SystemClock_Config()`, `MX_GPIO_Init()`, `MX_FDCAN1_Init()`, and `MX_I2C1_Init()`,
+but none of those definitions are present in this checkout, and the corresponding
+startup assembly and linker scripts are also absent. The root cross build
+therefore does not build the STM32C542 images by default; set
+`X19_BUILD_NODE1_ROOT` or `X19_BUILD_NODE3_ROOT` to `ON` once the generated files
+land. Those files must be regenerated or supplied by the board owners before a
+target image can be built or accepted.
 
 The Node 1 and Node 3 BSPs also depend on generated pin macros that are absent
 from their checked-in `main.h` files. This change does not guess those pin

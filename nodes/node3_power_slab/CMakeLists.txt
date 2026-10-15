@@ -9,6 +9,7 @@ target_include_directories(node3_power_slab.elf PRIVATE
     Core/Inc
     ../../shared/include
     ../../drivers/include
+    ../../services/include
     "../Shared Library/include"
     "../Hardware Drivers/include"
 )
@@ -16,6 +17,7 @@ target_include_directories(node3_power_slab.elf PRIVATE
 target_link_libraries(node3_power_slab.elf PRIVATE
     rov_shared
     rov_drivers
+    rov_services
 )
 
 target_compile_features(node3_power_slab.elf PUBLIC c_std_11)
