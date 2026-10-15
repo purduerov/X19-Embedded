@@ -193,12 +193,7 @@ def build_target(node: str, board: str, profile: str = "debug", custom_file: str
 
     # If building sandbox target, re-configure CMake with the active SANDBOX_FILE definition
     if node == "sandbox" and file_path:
-        cmake_cfg = ["cmake"]
-        if board == "host":
-            cmake_cfg.extend(["--preset", "sil-debug"])
-        else:
-            cmake_cfg.extend(["-S", str(REPO_ROOT), "-B", str(build_dir)])
-        cmake_cfg.append(f"-DSANDBOX_FILE={file_path}")
+        cmake_cfg = ["cmake", "--preset", preset_name, f"-DSANDBOX_FILE={file_path}"]
         run_cmd(cmake_cfg, cwd=REPO_ROOT)
     elif not (build_dir / "CMakeCache.txt").exists():
         run_cmd(["cmake", "--preset", preset_name], cwd=REPO_ROOT)
