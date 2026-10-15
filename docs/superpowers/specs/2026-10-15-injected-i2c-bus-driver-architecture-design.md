@@ -7,9 +7,8 @@
 ## Goal
 
 One I2C sensor-driver source that runs unchanged in three homes - STM32 target
-firmware, host SIL/unit tests, and a bench harness (host PC over USB-to-I2C and
-as Nucleo firmware) - by injecting the bus instead of calling `bsp_i2c_mem_read()`
-directly.
+firmware, host SIL/unit tests, and a Nucleo bench harness - by injecting the bus
+instead of calling `bsp_i2c_mem_read()` directly.
 
 This follows the industry-standard split (Linux `bmp280-core.c` + `bmp280-i2c.c`;
 Zephyr `bme280.c` + `bme280_i2c.c`; Bosch's own `bme280_dev.read/write/delay_ms`
@@ -22,7 +21,7 @@ function pointers). We are not inventing a scheme; we are matching it.
 - Adding a new I2C sensor is: write `<chip>.c`/`<chip>.h`, link, add a bench descriptor.
 - No vendor HAL call and no `bsp_*` call inside any driver.
 - New surface stays small and enumerated: one contract header (`rov_i2c.h`), one bus
-  mock, one HAL bus shim, one USB bus shim, and the `bench/` folder.
+  mock, one HAL bus shim, and the `bench/` folder.
 
 ## Current state (why this change)
 
@@ -91,32 +90,33 @@ parameter or a decision -> service/app; pure per-sample datasheet transform -> d
 
 ### The three places
 
-Three places, four builds (the target firmware and the Nucleo bench share one
-transport implementation):
+Three sensor-driver homes, three builds (the target firmware and the Nucleo bench
+share one transport implementation):
 
-| Place / build | Transport implementation | Links |
+| Home / build | Transport implementation | Links |
 | :--- | :--- | :--- |
 | STM32 target firmware | `i2c_bus_hal.c` (wraps `bsp_i2c_mem_*`) | `drivers` lib |
 | Nucleo bench | `i2c_bus_hal.c` (same as target) | `drivers` lib |
 | Host SIL / unit tests | `tests/mocks/i2c_bus_mock.c` (register image + fault flags) | `drivers` lib |
-| Host bench (PC) | `bench/i2c_bus_ft232h.c` (USB-to-I2C) | `drivers` lib |
 
 App code names only `bsp_i2c_bus()` (added to the node BSP) and cannot tell which
 transport it received.
 
 ### Bench harness (`bench/`)
 
-- `bench_main.c`: generic runner - build bus, init one sensor, read + print at N Hz.
+- Target-only (Nucleo firmware). No host/USB transport.
+- `bench_main.c`: generic runner - init the HAL bus, init one sensor, read + print at N Hz.
 - `bench_sensors.c` / `.h`: descriptor table `{name, init(dev,bus), read(dev), print(dev)}`.
-- Host build links the FT232H transport; Nucleo build links the HAL transport.
-- Same `bench_main.c` in both; only the linked transport differs.
+- One firmware, many sensors: replaces writing a bespoke `app_main` per sensor.
 
 ### Non-goals (deliberately excluded, YAGNI)
 
 - No `sensors/` wrapper tree. No filters exist except Madgwick; add a filter module
   only when a second consumer appears.
 - No `transports/` tree. Each transport lives in its only home (mock in `tests/mocks/`,
-  USB in `bench/`, HAL in the node BSP).
+  HAL in the node BSP).
+- No host-PC / USB-to-I2C bench transport. The injected contract makes it a one-file
+  addition later if it is ever wanted, so deferring costs nothing architecturally.
 - No `_template/` folder and no per-driver CMake targets. One `drivers` static
   library; the linker drops unreferenced objects.
 - Keep `drivers/include` + `drivers/src` flat.
@@ -132,7 +132,7 @@ transport it received.
 4. Add `bsp_i2c_bus()` to each node BSP; update the three `app.c` init call sites.
 5. Driver hygiene (independent of transport): remove the `weak mock_*` hook from
    `lsm6dsoxtr.c` and move Madgwick out of that driver to its consumer.
-6. Add `bench/` with host and Nucleo build targets.
+6. Add `bench/` as a target-only (Nucleo) build target.
 7. Delete the `tests/mocks/mock_<sensor>.c` driver-level mocks.
 
 ## Testing
@@ -142,7 +142,7 @@ transport it received.
 - Fault injection via the bus mock (NACK / timeout / short read / corrupt byte):
   assert the driver returns `ROV_ERROR` and leaves prior output untouched (no stale
   zero surfaced).
-- Bench run: same `bench_main.c` verified on host (FT232H) and on the Nucleo.
+- Bench run: the same `bench_main.c` flashed to the Nucleo, readings checked over serial.
 - CI: host unit tests remain blocking; the target acceptance gate stays as-is.
 
 ## Risks and open questions
@@ -150,6 +150,5 @@ transport it received.
 - `lsm6dsoxtr_read_raw()` is currently a pure mock passthrough and ignores hardware.
   Step 5 only removes the leak; making that path real is separate SPI work and is
   not claimed here.
-- The FT232H host transport assumes a USB-to-I2C bridge is available on the bench.
-  If a Pi `i2c-dev` path is preferred instead, the transport implementation changes
-  but the contract does not.
+- The bench harness is target-only, so a real-sensor check always requires flashing
+  a Nucleo. Accepted: it keeps the surface at one transport and one new folder.
