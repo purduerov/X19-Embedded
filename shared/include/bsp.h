@@ -16,6 +16,7 @@ extern "C" {
 #endif
 
 #include "rov_types.h"
+#include "rov_i2c.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -200,6 +201,16 @@ rov_status_t bsp_i2c_mem_read(uint8_t addr, uint8_t reg, uint8_t *data, uint16_t
  *
  */
 rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, const uint8_t *data, uint16_t len);
+
+/**
+ * @brief Get the board's I2C transport as an injectable bus.
+ *
+ * Drivers take this as an argument instead of calling bsp_i2c_* directly, so the
+ * same driver source builds against the target HAL or a host mock.
+ *
+ * @return Pointer to a statically allocated bus describing this board's I2C.
+ */
+const rov_i2c_bus_t *bsp_i2c_bus(void);
 
 #ifdef __cplusplus
 }

@@ -16,6 +16,9 @@
 #define MOCK_I2C_NUM_REGS  256
 
 static uint8_t g_mock_i2c_regs[MOCK_I2C_NUM_ADDRS][MOCK_I2C_NUM_REGS];
+static uint8_t g_mock_i2c_ptr[MOCK_I2C_NUM_ADDRS];
+static rov_status_t g_mock_i2c_fault = ROV_OK;
+static bool g_mock_i2c_present[MOCK_I2C_NUM_ADDRS];
 static bool g_mock_led_state = false;
 static uint32_t g_mock_led_toggle_count = 0;
 static uint16_t g_mock_pwm_us[ROV_NUM_THRUSTERS];
@@ -36,6 +39,9 @@ void mock_bsp_reset(void) {
     g_mock_led_toggle_count = 0;
 
     memset(g_mock_i2c_regs, 0, sizeof(g_mock_i2c_regs));
+    memset(g_mock_i2c_ptr, 0, sizeof(g_mock_i2c_ptr));
+    memset(g_mock_i2c_present, 0, sizeof(g_mock_i2c_present));
+    g_mock_i2c_fault = ROV_OK;
 
     for (int i = 0; i < ROV_NUM_THRUSTERS; i++) {
         g_mock_pwm_us[i] = ROV_PWM_STOP_US;
@@ -135,6 +141,16 @@ uint8_t mock_bsp_i2c_get_reg(uint8_t addr, uint8_t reg) {
     }
 
     return g_mock_i2c_regs[addr][reg];
+}
+
+void mock_bsp_i2c_set_fault(rov_status_t status) {
+    g_mock_i2c_fault = status;
+}
+
+void mock_bsp_i2c_set_present(uint8_t addr, bool present) {
+    if (addr < MOCK_I2C_NUM_ADDRS) {
+        g_mock_i2c_present[addr] = present;
+    }
 }
 
 /* ========================================================================== */
@@ -305,6 +321,63 @@ rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, const uint8_t *data, u
     }
 
     return ROV_OK;
+}
+
+static rov_status_t mock_bus_write(void *ctx, uint8_t addr, const uint8_t *data, uint16_t len) {
+    (void)ctx;
+
+    if (addr >= MOCK_I2C_NUM_ADDRS || data == NULL || len == 0U) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
+    if (g_mock_i2c_fault != ROV_OK) {
+        return g_mock_i2c_fault;
+    }
+
+    /* The first byte is the register pointer; the rest are payload bytes. */
+    g_mock_i2c_ptr[addr] = data[0];
+
+    for (uint16_t i = 1U; i < len; i++) {
+        uint8_t reg = (uint8_t)(g_mock_i2c_ptr[addr] + (uint8_t)(i - 1U));
+
+        g_mock_i2c_regs[addr][reg] = data[i];
+    }
+
+    return ROV_OK;
+}
+
+static rov_status_t mock_bus_read(void *ctx, uint8_t addr, uint8_t *data, uint16_t len) {
+    (void)ctx;
+
+    if (addr >= MOCK_I2C_NUM_ADDRS || data == NULL) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
+    if (g_mock_i2c_fault != ROV_OK) {
+        return g_mock_i2c_fault;
+    }
+
+    for (uint16_t i = 0U; i < len; i++) {
+        data[i] = g_mock_i2c_regs[addr][(uint8_t)(g_mock_i2c_ptr[addr] + (uint8_t)i)];
+    }
+
+    return ROV_OK;
+}
+
+static bool mock_bus_probe(void *ctx, uint8_t addr) {
+    (void)ctx;
+
+    if (addr >= MOCK_I2C_NUM_ADDRS) {
+        return false;
+    }
+
+    return g_mock_i2c_present[addr];
+}
+
+const rov_i2c_bus_t *bsp_i2c_bus(void) {
+    static const rov_i2c_bus_t bus = {NULL, mock_bus_write, mock_bus_read, mock_bus_probe};
+
+    return &bus;
 }
 
 bool bsp_i2c_write(uint8_t addr, const uint8_t *data, uint16_t len) {

@@ -193,7 +193,7 @@ For automated continuous integration, long-term stability runs, and rapid batch 
 
 ## 6. Comprehensive CTest Suite (33 Test Targets)
 
-The host SIL suite comprises 33 `test_*` targets testing the test framework itself, shared firmware libraries, hardware drivers, the mock BSP, domain services, plant physics, and cross-node integration:
+The host SIL suite comprises 36 `test_*` targets testing the test framework itself, shared firmware libraries, hardware drivers, the mock BSP, domain services, plant physics, and cross-node integration:
 
 | # | Test Target | Description |
 |---|---|---|
@@ -205,32 +205,34 @@ The host SIL suite comprises 33 `test_*` targets testing the test framework itse
 | 6 | `test_pwm_ramp` | 1 kHz slew-rate limiter and curve shaping |
 | 7 | `test_safety` | Watchdog timeouts and emergency break triggers |
 | 8 | `test_i2c_recovery` | 9-clock bit-bang I2C bus clear routine |
-| 9 | `test_timesync` | Distributed vehicle clock synchronization and time slew |
-| 10 | `test_bsp` | Board support package time, PWM bounds, and emergency brake |
-| 11 | `test_driver_bme280` | BME280 driver against the inverse datasheet model |
-| 12 | `test_driver_ms5837` | MS5837 pressure sensor driver |
-| 13 | `test_driver_ina226` | INA226 power monitor driver |
-| 14 | `test_driver_tcan1044` | TCAN1044 CAN transceiver driver |
-| 15 | `test_driver_tps25990` | TPS25990 eFuse monitor driver |
-| 16 | `test_driver_lsm6dsoxtr` | LSM6DSOXTR IMU driver |
-| 17 | `test_driver_bmi270` | BMI270 IMU driver |
-| 18 | `test_driver_ina237` | INA237 power monitor driver |
-| 19 | `test_driver_tmp1075` | TMP1075 temperature sensor driver |
-| 20 | `test_driver_dshot` | DShot / BDShot ESC protocol and telemetry decoder driver |
-| 21 | `test_driver_pmbus_brick` | PMBus brick driver |
-| 22 | `test_mock_physics` | Closed-loop 6-DOF hydrodynamic physics and closed-loop depth PID hold |
-| 23 | `test_node1_pi_shield` | Pi Shield enclosure pressure, humidity, and leak detection |
-| 24 | `test_node2_control_board` | Control board thruster slew rate, solenoid actuation, and 100 Hz nav stream |
-| 25 | `test_node3_power_slab` | Power slab PMBus telemetry, current monitoring, and 20 Hz power stream |
-| 26 | `test_multi_node_bus` | Full virtual CAN FD bus integration across all 3 nodes and Pi Core |
-| 27 | `test_services` | Domain service interfaces unit tests |
-| 28 | `test_sil_safety` | Tether watchdog SLA, emergency break virtual-time latency, and pneumatics |
-| 29 | `test_sil_power` | Full thruster load current modeling, eFuse protection, and telemetry continuity |
-| 30 | `test_sil_fuzz` | 1,000 randomized malformed CAN FD frames and Bus-Off fault recovery |
-| 31 | `test_sil_burnin` | 100,000-cycle (16.7 min virtual time) continuous stability and ramp alternating |
-| 32 | `test_sil_bridge_logical` | Logical-clock engine step determinism |
-| 33 | `test_registry_consistency` | CMake test registry matches rov.toml (drift guard) |
-| 34 | `test_suite_manifest` | Guide suite list matches CTest registrations (drift guard) |
+| 9 | `test_rov_i2c` | Injected I2C bus contract and `mem_*` helper semantics |
+| 10 | `test_timesync` | Distributed vehicle clock synchronization and time slew |
+| 11 | `test_bsp` | Board support package time, PWM bounds, and emergency brake |
+| 12 | `test_mock_i2c_bus` | Mock BSP I2C bus, register pointer, fault injection, and presence probe |
+| 13 | `test_driver_bme280` | BME280 driver against the inverse datasheet model |
+| 14 | `test_driver_ms5837` | MS5837 pressure sensor driver |
+| 15 | `test_driver_ina226` | INA226 power monitor driver |
+| 16 | `test_driver_tcan1044` | TCAN1044 CAN transceiver driver |
+| 17 | `test_driver_tps25990` | TPS25990 eFuse monitor driver |
+| 18 | `test_driver_lsm6dsoxtr` | LSM6DSOXTR IMU driver |
+| 19 | `test_driver_bmi270` | BMI270 IMU driver |
+| 20 | `test_driver_ina237` | INA237 power monitor driver |
+| 21 | `test_driver_tmp1075` | TMP1075 temperature sensor driver |
+| 22 | `test_driver_dshot` | DShot / BDShot ESC protocol and telemetry decoder driver |
+| 23 | `test_driver_pmbus_brick` | PMBus brick driver |
+| 24 | `test_mock_physics` | Closed-loop 6-DOF hydrodynamic physics and closed-loop depth PID hold |
+| 25 | `test_node1_pi_shield` | Pi Shield enclosure pressure, humidity, and leak detection |
+| 26 | `test_node2_control_board` | Control board thruster slew rate, solenoid actuation, and 100 Hz nav stream |
+| 27 | `test_node3_power_slab` | Power slab PMBus telemetry, current monitoring, and 20 Hz power stream |
+| 28 | `test_multi_node_bus` | Full virtual CAN FD bus integration across all 3 nodes and Pi Core |
+| 29 | `test_services` | Domain service interfaces unit tests |
+| 30 | `test_sil_safety` | Tether watchdog SLA, emergency break virtual-time latency, and pneumatics |
+| 31 | `test_sil_power` | Full thruster load current modeling, eFuse protection, and telemetry continuity |
+| 32 | `test_sil_fuzz` | 1,000 randomized malformed CAN FD frames and Bus-Off fault recovery |
+| 33 | `test_sil_burnin` | 100,000-cycle (16.7 min virtual time) continuous stability and ramp alternating |
+| 34 | `test_sil_bridge_logical` | Logical-clock engine step determinism |
+| 35 | `test_registry_consistency` | CMake test registry matches rov.toml (drift guard) |
+| 36 | `test_suite_manifest` | Guide suite list matches CTest registrations (drift guard) |
 
 `tests/test_suite_manifest.py` and `tests/test_registry_consistency.py` are the two drift guards wired to CTest; the live CTest registry is the source of truth the guide enumerates above via `ctest --test-dir build-native -N`.
 

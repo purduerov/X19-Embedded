@@ -125,6 +125,21 @@ void mock_bsp_i2c_set_regs(uint8_t addr, uint8_t start_reg, const uint8_t *data,
 uint8_t mock_bsp_i2c_get_reg(uint8_t addr, uint8_t reg);
 
 /**
+ * @brief Force every mock I2C transfer to fail with this status until reset.
+ *
+ * @param status Error to return; ROV_OK clears the fault.
+ */
+void mock_bsp_i2c_set_fault(rov_status_t status);
+
+/**
+ * @brief Mark whether a device answers at this address for probe().
+ *
+ * @param addr 7-bit I2C address.
+ * @param present true if the bus should report the device present.
+ */
+void mock_bsp_i2c_set_present(uint8_t addr, bool present);
+
+/**
  * @brief Report whether a converter brick's enable line is asserted.
  *
  * The power sequencing state machine drives these lines, so a test that asserts

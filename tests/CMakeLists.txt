@@ -112,6 +112,11 @@ x19_add_node_test(NAME test_bsp SUITE bsp
     LIBS rov_mocks
 )
 
+x19_add_node_test(NAME test_mock_i2c_bus SUITE bsp
+    SOURCES test_mock_i2c_bus.c
+    LIBS rov_mocks
+)
+
 # Peripheral Hardware Driver Unit Tests (Mocked Hardware Registers)
 x19_add_node_test(NAME test_driver_bme280 SUITE driver
     SOURCES test_driver_bme280.c
