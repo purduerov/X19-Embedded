@@ -9,13 +9,14 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define MS5837_I2C_ADDR           0x76U
-#define MS5837_CMD_RESET          0x1EU
-#define MS5837_CMD_ADC_READ       0x00U
-#define MS5837_CMD_CONVERT_D1     0x48U
-#define MS5837_CMD_CONVERT_D2     0x58U
-#define MS5837_CMD_PROM_BASE      0xA0U
-#define MS5837_CONVERSION_TIME_MS 10U
+#define MS5837_I2C_ADDR             0x76U
+#define MS5837_CMD_RESET            0x1EU
+#define MS5837_CMD_ADC_READ         0x00U
+#define MS5837_CMD_CONVERT_D1       0x48U
+#define MS5837_CMD_CONVERT_D2       0x58U
+#define MS5837_CMD_PROM_BASE        0xA0U
+#define MS5837_CONVERSION_TIME_MS   20U
+#define MS5837_02BA_30BA_SEPARATION 37000U
 
 #define MS5837_ATMOSPHERIC_MBAR 1013.25f
 #define MS5837_GRAVITY_M_S2     9.80665f
@@ -53,7 +54,7 @@ static bool ms5837_read_prom_word(uint8_t index, uint16_t *value) {
 
 static bool ms5837_read_adc(uint32_t *value) {
     uint8_t command = MS5837_CMD_ADC_READ;
-    uint8_t data[3];
+    uint8_t data[3] = {0};
 
     if (!value) {
         return false;
@@ -67,7 +68,12 @@ static bool ms5837_read_adc(uint32_t *value) {
         return false;
     }
 
-    *value = ((uint32_t)data[0] << 16U) | ((uint32_t)data[1] << 8U) | (uint32_t)data[2];
+    uint32_t adc = ((uint32_t)data[0] << 16U) | ((uint32_t)data[1] << 8U) | (uint32_t)data[2];
+    if (adc == 0U) {
+        return false;
+    }
+
+    *value = adc;
 
     return true;
 }
@@ -117,57 +123,70 @@ static void ms5837_calculate_depth(ms5837_dev_t *dev, float fluid_density_kg_m3)
 }
 
 static void ms5837_compensate(ms5837_dev_t *dev) {
-    int32_t d_t;
-    int32_t temperature;
+    int32_t d_t = (int32_t)dev->raw_temperature - ((int32_t)dev->cal_coeffs[5] << 8U);
+    int32_t temperature = 2000 + (int32_t)(((int64_t)d_t * (int64_t)dev->cal_coeffs[6]) >> 23U);
+
     int64_t offset;
     int64_t sensitivity;
 
-    int64_t temp_correction;
-    int64_t offset_correction;
-    int64_t sensitivity_correction;
+    if (dev->is_model_02ba) {
+        offset = ((int64_t)dev->cal_coeffs[2] << 17U) + (((int64_t)dev->cal_coeffs[4] * (int64_t)d_t) >> 6U);
+        sensitivity = ((int64_t)dev->cal_coeffs[1] << 16U) + (((int64_t)dev->cal_coeffs[3] * (int64_t)d_t) >> 7U);
+    } else {
+        offset = ((int64_t)dev->cal_coeffs[2] << 16U) + (((int64_t)dev->cal_coeffs[4] * (int64_t)d_t) >> 7U);
+        sensitivity = ((int64_t)dev->cal_coeffs[1] << 15U) + (((int64_t)dev->cal_coeffs[3] * (int64_t)d_t) >> 8U);
+    }
 
-    d_t = (int32_t)dev->raw_temperature - ((int32_t)dev->cal_coeffs[5] << 8U);
+    int64_t temp_correction = 0;
+    int64_t offset_correction = 0;
+    int64_t sensitivity_correction = 0;
+    int64_t d_t_sq = (int64_t)d_t * (int64_t)d_t;
 
-    temperature = 2000 + (int32_t)(((int64_t)d_t * (int64_t)dev->cal_coeffs[6]) >> 23U);
-
-    offset = ((int64_t)dev->cal_coeffs[2] << 16U) + (((int64_t)dev->cal_coeffs[4] * (int64_t)d_t) >> 7U);
-
-    sensitivity = ((int64_t)dev->cal_coeffs[1] << 15U) + (((int64_t)dev->cal_coeffs[3] * (int64_t)d_t) >> 8U);
-
-    if (temperature < 2000) {
-        int64_t temp_delta = (int64_t)temperature - 2000LL;
-        int64_t temp_delta_sq = temp_delta * temp_delta;
-        int64_t d_t_sq = (int64_t)d_t * (int64_t)d_t;
-
-        temp_correction = (3LL * d_t_sq) >> 33U;
-        offset_correction = (3LL * temp_delta_sq) >> 1U;
-        sensitivity_correction = (5LL * temp_delta_sq) >> 3U;
-
-        if (temperature < -1500) {
-            int64_t very_low_delta = (int64_t)temperature + 1500LL;
-            int64_t very_low_delta_sq = very_low_delta * very_low_delta;
-
-            offset_correction += 7LL * very_low_delta_sq;
-            sensitivity_correction += 4LL * very_low_delta_sq;
+    if (dev->is_model_02ba) {
+        if (temperature < 2000) {
+            int64_t temp_delta = (int64_t)temperature - 2000LL;
+            int64_t temp_delta_sq = temp_delta * temp_delta;
+            temp_correction = (11LL * d_t_sq) >> 35U;
+            offset_correction = (31LL * temp_delta_sq) >> 3U;
+            sensitivity_correction = (63LL * temp_delta_sq) >> 5U;
         }
     } else {
-        int64_t temp_delta = (int64_t)temperature - 2000LL;
-        int64_t temp_delta_sq = temp_delta * temp_delta;
-        int64_t d_t_sq = (int64_t)d_t * (int64_t)d_t;
+        if (temperature < 2000) {
+            int64_t temp_delta = (int64_t)temperature - 2000LL;
+            int64_t temp_delta_sq = temp_delta * temp_delta;
 
-        temp_correction = (2LL * d_t_sq) >> 37U;
-        offset_correction = temp_delta_sq >> 4U;
-        sensitivity_correction = 0LL;
+            temp_correction = (3LL * d_t_sq) >> 33U;
+            offset_correction = (3LL * temp_delta_sq) >> 1U;
+            sensitivity_correction = (5LL * temp_delta_sq) >> 3U;
+
+            if (temperature < -1500) {
+                int64_t very_low_delta = (int64_t)temperature + 1500LL;
+                int64_t very_low_delta_sq = very_low_delta * very_low_delta;
+
+                offset_correction += 7LL * very_low_delta_sq;
+                sensitivity_correction += 4LL * very_low_delta_sq;
+            }
+        } else {
+            int64_t temp_delta = (int64_t)temperature - 2000LL;
+            temp_correction = (2LL * d_t_sq) >> 37U;
+            offset_correction = (temp_delta * temp_delta) >> 4U;
+            sensitivity_correction = 0LL;
+        }
     }
 
     temperature -= (int32_t)temp_correction;
     offset -= offset_correction;
     sensitivity -= sensitivity_correction;
 
-    int32_t pressure_x10 = (int32_t)(((((int64_t)dev->raw_pressure * sensitivity) >> 21U) - offset) >> 13U);
-
     dev->temperature_c = (float)temperature / 100.0f;
-    dev->pressure_mbar = (float)pressure_x10 / 10.0f;
+
+    if (dev->is_model_02ba) {
+        int32_t p = (int32_t)(((((int64_t)dev->raw_pressure * sensitivity) >> 21U) - offset) >> 15U);
+        dev->pressure_mbar = (float)p / 100.0f;
+    } else {
+        int32_t pressure_x10 = (int32_t)(((((int64_t)dev->raw_pressure * sensitivity) >> 21U) - offset) >> 13U);
+        dev->pressure_mbar = (float)pressure_x10 / 10.0f;
+    }
 }
 
 rov_status_t ms5837_init(ms5837_dev_t *dev) {
@@ -196,7 +215,7 @@ rov_status_t ms5837_init(ms5837_dev_t *dev) {
      * Reset is only performed during initialization.
      * D1/D2 conversions below remain nonblocking.
      */
-    delay_ms(3U);
+    delay_ms(10U);
 
     for (uint8_t i = 0U; i < 7U; i++) {
         if (!ms5837_read_prom_word(i, &dev->cal_coeffs[i])) {
@@ -211,6 +230,8 @@ rov_status_t ms5837_init(ms5837_dev_t *dev) {
         return ROV_ERR_CRC_MISMATCH;
     }
 
+    /* Auto-detect MS5837-02BA vs MS5837-30BA based on PROM Word 1 sensitivity */
+    dev->is_model_02ba = (dev->cal_coeffs[1] > MS5837_02BA_30BA_SEPARATION);
     dev->initialized = true;
 
     return ROV_OK;
@@ -281,4 +302,48 @@ rov_status_t ms5837_read_pressure_depth(ms5837_dev_t *dev, float fluid_density_k
         dev->state = MS5837_STATE_IDLE;
         return ROV_ERROR;
     }
+}
+
+rov_status_t ms5837_read_sync(ms5837_dev_t *dev, float fluid_density_kg_m3) {
+    if (!dev || fluid_density_kg_m3 <= 0.0f) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
+    if (mock_sensors_get_ms5837(&dev->pressure_mbar, &dev->temperature_c)) {
+        ms5837_calculate_depth(dev, fluid_density_kg_m3);
+        return ROV_OK;
+    }
+
+    if (!dev->initialized) {
+        return ROV_ERROR;
+    }
+
+    /* 1. Request D1 (Pressure) conversion */
+    if (!ms5837_write_command(MS5837_CMD_CONVERT_D1)) {
+        return ROV_ERROR;
+    }
+    delay_ms(MS5837_CONVERSION_TIME_MS);
+
+    /* 2. Read D1 ADC result (24 bits) */
+    if (!ms5837_read_adc(&dev->raw_pressure)) {
+        return ROV_ERROR;
+    }
+
+    /* 3. Request D2 (Temperature) conversion */
+    if (!ms5837_write_command(MS5837_CMD_CONVERT_D2)) {
+        return ROV_ERROR;
+    }
+    delay_ms(MS5837_CONVERSION_TIME_MS);
+
+    /* 4. Read D2 ADC result (24 bits) */
+    if (!ms5837_read_adc(&dev->raw_temperature)) {
+        return ROV_ERROR;
+    }
+
+    /* 5. Compensate and calculate depth */
+    ms5837_compensate(dev);
+    ms5837_calculate_depth(dev, fluid_density_kg_m3);
+
+    dev->state = MS5837_STATE_IDLE;
+    return ROV_OK;
 }

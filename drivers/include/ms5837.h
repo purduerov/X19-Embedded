@@ -30,6 +30,7 @@ typedef struct {
 
     ms5837_state_t state;
     bool initialized;
+    bool is_model_02ba;
 
     float cached_fluid_density;
     float inv_rho_g;
@@ -37,6 +38,7 @@ typedef struct {
 
 rov_status_t ms5837_init(ms5837_dev_t *dev);
 rov_status_t ms5837_read_pressure_depth(ms5837_dev_t *dev, float fluid_density_kg_m3);
+rov_status_t ms5837_read_sync(ms5837_dev_t *dev, float fluid_density_kg_m3);
 
 #ifdef __cplusplus
 }
