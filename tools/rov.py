@@ -461,10 +461,11 @@ Examples:
 
     # 1. Scan (Zero-code automated I2C bus scanner)
     scan_p = subparsers.add_parser("scan", help="Build, flash, and monitor zero-code I2C bus scanner on connected dev board")
-    scan_p.add_argument("-b", "--board", default=None, help=f"Target dev board (f411, f446, f401, g474, g431) (auto-detected if omitted, default: {default_board})")
+    scan_p.add_argument("-b", "--board", default=None, help=f"Target dev board (f411, f446, f401, g474, g431, host) (auto-detected if omitted, default: {default_board})")
     scan_p.add_argument("-s", "--serial-number", help="Target ST-Link serial number")
     scan_p.add_argument("--baud", type=int, default=default_baud, help=f"Serial baud rate (default: {default_baud})")
     scan_p.add_argument("--port", help="Explicit serial COM port (auto-detected if omitted)")
+    scan_p.add_argument("--timeout", type=float, default=None, help="Stop serial monitor after specified seconds (useful for CI/automated tests)")
 
     # 2. Sandbox (Zero-boilerplate developer scratchpad / single-file test)
     sandbox_p = subparsers.add_parser("sandbox", help="Build, flash, and monitor developer sandbox or custom scratch C file")
@@ -559,7 +560,13 @@ Examples:
 
     if args.command == "scan":
         print(f"\033[1;36m=== Preparing Hardware I2C Diagnostic Bus Scanner for {args.board} ===\033[0m")
-        elf = build_target("rnd", args.board, "debug")
+        scanner_source = (REPO_ROOT / "sandbox/i2c_scanner.c").resolve().as_posix()
+        elf = build_target("sandbox", args.board, "debug", custom_file=scanner_source)
+        if args.board == "host":
+            print(f"\033[1;32m=== Executing Host SIL I2C Scanner ({elf}) ===\033[0m\n")
+            run_cmd([elf], cwd=REPO_ROOT)
+            return
+
         sn = flash_binary(elf, args.serial_number)
         port = args.port or match_serial_port(sn)
         if not port:
@@ -568,7 +575,7 @@ Examples:
                 for p in serial.tools.list_ports.comports():
                     print(f"  {p.device}: {p.description}")
             sys.exit(1)
-        open_monitor(port, args.baud)
+        open_monitor(port, args.baud, getattr(args, "timeout", None))
 
     elif args.command == "sandbox":
         elf = build_target("sandbox", args.board, "debug", getattr(args, "file", None))

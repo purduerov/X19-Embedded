@@ -136,17 +136,19 @@ binary_host = "build/sil-debug/tests/test_node3_power_slab.exe"
 
 [nodes.rnd]
 display_name = "Testing & R&D (I2C Scanner / CAN Ping-Pong)"
-supported_boards = ["f411", "f446", "f401", "g474", "g431"]
+supported_boards = ["f411", "f446", "f401", "g474", "g431", "host"]
 target_f411 = "f411_sandbox.elf"
 binary_f411 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
 target_f446 = "f411_sandbox.elf"
 binary_f446 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
 target_f401 = "f411_sandbox.elf"
 binary_f401 = "build/arm-c542-debug/boards/f411_nucleo/f411_sandbox.elf"
-target_g474 = "g474_i2c_scanner.elf"
-binary_g474 = "build/arm-c542-debug/boards/g474_nucleo/g474_i2c_scanner.elf"
-target_g431 = "g474_i2c_scanner.elf"
-binary_g431 = "build/arm-c542-debug/boards/g474_nucleo/g474_i2c_scanner.elf"
+target_g474 = "g474_sandbox.elf"
+binary_g474 = "build/arm-c542-debug/boards/g474_nucleo/g474_sandbox.elf"
+target_g431 = "g474_sandbox.elf"
+binary_g431 = "build/arm-c542-debug/boards/g474_nucleo/g474_sandbox.elf"
+target_host = "sil_sandbox"
+binary_host = "build/sil-debug/tests/sil_sandbox.exe"
 
 [nodes.sandbox]
 display_name = "Developer Sandbox (Rapid Prototyping / Single-File Test)"
