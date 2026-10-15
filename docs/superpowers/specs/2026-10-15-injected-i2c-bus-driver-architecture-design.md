@@ -60,22 +60,36 @@ Rules:
 
 ## The bus contract (`shared/include/rov_i2c.h`)
 
+The primitive is a raw byte transfer, because two of the parts are
+command-addressed rather than register-addressed (the MS5837 takes a command byte
+and answers with a word; a register-pointer read is meaningless to it). `mem_*` is
+a convenience built on the raw pair.
+
 ```c
 typedef struct rov_i2c_bus rov_i2c_bus_t;
 
 struct rov_i2c_bus {
     void *ctx;
-    rov_status_t (*mem_read)(void *ctx, uint8_t addr, uint8_t reg, uint8_t *dst, uint16_t len);
-    rov_status_t (*mem_write)(void *ctx, uint8_t addr, uint8_t reg, const uint8_t *src, uint16_t len);
+    rov_status_t (*write)(void *ctx, uint8_t addr, const uint8_t *data, uint16_t len);
+    rov_status_t (*read)(void *ctx, uint8_t addr, uint8_t *data, uint16_t len);
     bool         (*probe)(void *ctx, uint8_t addr);
 };
 
-rov_status_t rov_i2c_read_u8(const rov_i2c_bus_t *bus, uint8_t addr, uint8_t reg, uint8_t *v);
-rov_status_t rov_i2c_read_u16le(const rov_i2c_bus_t *bus, uint8_t addr, uint8_t reg, uint16_t *v);
-rov_status_t rov_i2c_write_u8(const rov_i2c_bus_t *bus, uint8_t addr, uint8_t reg, uint8_t v);
+/* write one register address, then read len bytes */
+static inline rov_status_t rov_i2c_mem_read(const rov_i2c_bus_t *bus, uint8_t addr,
+                                            uint8_t reg, uint8_t *dst, uint16_t len);
+/* write register address followed by len data bytes */
+static inline rov_status_t rov_i2c_mem_write(const rov_i2c_bus_t *bus, uint8_t addr,
+                                             uint8_t reg, const uint8_t *src, uint16_t len);
 ```
 
-Helpers are `static inline` in the header.
+Both helpers are `static inline` with a NULL/`len` guard returning
+`ROV_ERR_INVALID_ARG`. This mirrors the BSP it replaces: `bsp_i2c_write`/
+`bsp_i2c_read` (raw, returning `bool`) and `bsp_i2c_mem_read`/`mem_write`
+(register-addressed, returning `rov_status_t`).
+
+Timing is not part of this contract. Drivers keep using `time_get_ms()` and
+`delay_ms()`; host tests supply them, so a driver still needs no board to build.
 
 ## Driver shape and boundary rules
 
@@ -91,7 +105,8 @@ rov_status_t bme280_read_all(bme280_dev_t *dev);
 ```
 
 Internal diff is mechanical: `bsp_i2c_mem_read(addr, R, d, n)` becomes
-`dev->bus->mem_read(dev->bus->ctx, addr, R, d, n)`.
+`rov_i2c_mem_read(dev->bus, addr, R, d, n)`. A command-addressed part (MS5837)
+instead drives the raw pair: `dev->bus->write(...)` then `dev->bus->read(...)`.
 
 Rules:
 
@@ -110,10 +125,18 @@ Scope test: needs history -> filter layer; needs a vehicle parameter or a decisi
 | :--- | :--- | :--- |
 | STM32 target firmware | `bsp_i2c_bus()` wrapping `bsp_i2c_mem_*` | `rov_drivers` |
 | Nucleo bench | same HAL transport | `rov_drivers` |
-| Host SIL / unit tests | `tests/mocks/i2c_bus_mock.c` (register image + fault flags) | `rov_drivers` |
+| Host SIL / unit tests | `bsp_i2c_bus()` in `tests/mocks/mock_bsp.c`, wrapping the register file the mocks already keep, plus fault flags | `rov_drivers` |
 
 Services acquire the bus themselves (`bsp_i2c_bus()`), so `app.c` never mentions
 a bus or a transport.
+
+The host transport is cheap because most of it already exists: `mock_bsp.c`
+keeps a 128x256 register file and already implements `bsp_i2c_mem_read/write`
+against it, and register-addressed parts already run through it. A driver moving
+to the injected bus behaves identically on the host. Command-addressed parts are
+the exception: `mock_bsp.c`'s raw `bsp_i2c_read` currently returns zeros, so the
+MS5837 has been leaning on a value-level mock hook inside the driver. Closing
+that gap is its own task.
 
 ## Overlaps and oversteps to fix
 
@@ -136,7 +159,7 @@ sensor cannot break another target or the node firmwares.
 
 ```
 tests/test_env_service.c
-   links: env_service + bme280 + i2c_bus_mock + Unity
+   links: env_service + bme280 + mock_bsp (bsp_i2c_bus) + Unity
    loads a register image, calls the real service + driver, asserts exact units.
 ```
 
@@ -189,19 +212,29 @@ for the other.
 
 ## Migration order
 
-1. Add `shared/include/rov_i2c.h`.
-2. Add `tests/mocks/i2c_bus_mock.c`; convert one driver (MS5837) and its test,
-   including a fault-injection case, as the proof.
-3. Convert remaining I2C drivers: BME280, INA226, INA237, TMP1075.
-4. Add `bsp_i2c_bus()` to the node BSP and the dev-board platform; add services
-   to the tower as facades (own the driver, delete duplicate caches).
-5. Move device functions out of `bsp.h` into drivers; make services wrap them.
-6. Fail-loud board macros (`#error` on missing required macro).
-7. Single safety-state source.
-8. Delete `x19_*` forwarders.
-9. Add `bench/bench_<sensor>.c` per sensor plus the CMake target; add the
-   `rov bench -n <sensor>` CLI command.
-10. Delete the `tests/mocks/mock_<sensor>.c` driver-level mocks.
+1. Add `shared/include/rov_i2c.h` (bus + inline `mem_*` helpers).
+2. Add `bsp_i2c_bus()` to `tests/mocks/mock_bsp.c` over the existing register
+   file, with fault flags; add the missing raw `bsp_i2c_read` register-pointer
+   behaviour.
+3. Convert BME280 to the injected bus (`bme280_init(dev, bus)`), update its
+   callers and `tests/test_driver_bme280.c`. BME280 is the pilot because it is
+   already register-addressed and already mocked at the bus level, so nothing
+   in SIL moves.
+4. Add `bsp_i2c_bus()` to the node BSPs and `boards/*/platform` so target builds
+   link.
+5. Convert the remaining register-addressed I2C drivers: INA226, INA237,
+   TMP1075.
+6. Convert MS5837 (command-addressed): remove its `mock_sensors_get_ms5837` weak
+   hook and teach the mock bus the raw transaction, including the SIL ripple.
+7. Add services as facades to the tower (own the driver, delete duplicate
+   caches).
+8. Move device functions out of `bsp.h` into drivers; make services wrap them.
+9. Fail-loud board macros (`#error` on a missing required macro).
+10. Single safety-state source.
+11. Delete `x19_*` forwarders.
+12. Add `bench/bench_<sensor>.c` per sensor plus the CMake target; add the
+    `rov bench -n <sensor>` CLI command.
+13. Delete the `tests/mocks/mock_<sensor>.c` driver-level mocks.
 
 ## Testing
 
@@ -220,6 +253,6 @@ for the other.
   mock_*` hook is separate driver hygiene.
 - Fail-loud will break the F411/G474/Nucleo bench builds until their board macros
   are supplied. That is the intent, but it makes board bring-up a prerequisite.
-- Steps 5-8 are boundary cleanups independent of the bus; they can land before or
+- Steps 8-11 are boundary cleanups independent of the bus; they can land before or
   after the bus work, but `app.c` must not be touched by the bus change and the
   boundary change at the same time.
