@@ -39,23 +39,31 @@ void app_main(void) {
     }
 
     printf("------------------------------------------------------\r\n");
-    printf("Scan complete: found %u device(s).\r\n", count);
+    if (count == 0) {
+        printf("Scan complete: 0 devices found.\r\n");
+        printf("Note: If I2C devices are connected, verify:\r\n");
+        printf("  1. Pull-up resistors (2.2k - 4.7k to 3.3V) on SCL and SDA.\r\n");
+        printf("  2. Pinout: PB8 (SCL), PB9 (SDA) on Nucleo Arduino header (D15/D14).\r\n");
+        printf("  3. Sensor VCC (3.3V) and GND connections.\r\n");
+    } else {
+        printf("Scan complete: found %u device(s).\r\n", count);
 
-    for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
-        if (bsp_i2c_probe(addr)) {
-            const char *desc = "Unknown device";
-            if (addr == 0x76) {
-                desc = "MS5837 Depth Sensor / Bosch BME280 (SDO=GND)";
-            } else if (addr == 0x77) {
-                desc = "Bosch BME280 (SDO=VDD) / MS5837 Depth (ALT)";
-            } else if (addr >= 0x40 && addr <= 0x47) {
-                desc = "TI INA237 / INA226 Power Monitor";
-            } else if (addr >= 0x48 && addr <= 0x4F) {
-                desc = "TI TMP1075 / BNO086 IMU";
-            } else if (addr == 0x68 || addr == 0x69) {
-                desc = "BMI270 / LSM6DSOX IMU";
+        for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+            if (bsp_i2c_probe(addr)) {
+                const char *desc = "Unknown device";
+                if (addr == 0x76) {
+                    desc = "MS5837 Depth Sensor / Bosch BME280 (SDO=GND)";
+                } else if (addr == 0x77) {
+                    desc = "Bosch BME280 (SDO=VDD) / MS5837 Depth (ALT)";
+                } else if (addr >= 0x40 && addr <= 0x47) {
+                    desc = "TI INA237 / INA226 Power Monitor";
+                } else if (addr >= 0x48 && addr <= 0x4F) {
+                    desc = "TI TMP1075 / BNO086 IMU";
+                } else if (addr == 0x68 || addr == 0x69) {
+                    desc = "BMI270 / LSM6DSOX IMU";
+                }
+                printf("  -> [0x%02X] %s\r\n", addr, desc);
             }
-            printf("  -> [0x%02X] %s\r\n", addr, desc);
         }
     }
     printf("======================================================\r\n\r\n");

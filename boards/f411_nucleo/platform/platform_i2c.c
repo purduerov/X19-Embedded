@@ -21,10 +21,41 @@ void bsp_i2c_init(void) {
     /* Idle bus: SCL and SDA high */
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_SET);
+
+    /* If SDA is held low by a hung slave, clock SCL 9 times to free it */
+    for (volatile int i = 0; i < 300; i++) {
+        __NOP();
+    }
+    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_RESET) {
+        for (int i = 0; i < 9; i++) {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_RESET);
+            for (volatile int d = 0; d < 300; d++) {
+                __NOP();
+            }
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
+            for (volatile int d = 0; d < 300; d++) {
+                __NOP();
+            }
+            if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_SET) {
+                break;
+            }
+        }
+        /* STOP condition */
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_RESET);
+        for (volatile int d = 0; d < 300; d++) {
+            __NOP();
+        }
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8, GPIO_PIN_SET);
+        for (volatile int d = 0; d < 300; d++) {
+            __NOP();
+        }
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, GPIO_PIN_SET);
+    }
 }
 
 static inline void i2c_delay(void) {
-    for (volatile int i = 0; i < 40; i++) {
+    /* ~5 us delay per half-clock @ 180 MHz / 100 MHz for standard ~100 kHz I2C */
+    for (volatile int i = 0; i < 300; i++) {
         __NOP();
     }
 }
@@ -39,14 +70,28 @@ static inline void i2c_sda(bool high) {
     i2c_delay();
 }
 
+static inline bool i2c_read_scl(void) {
+    return (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_SET);
+}
+
 static inline bool i2c_read_sda(void) {
     return (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9) == GPIO_PIN_SET);
 }
 
 bool bsp_i2c_probe(uint8_t addr) {
-    /* START condition */
+    /* Bus idle verification: both lines MUST be HIGH before generating START.
+     * If SDA or SCL is already LOW, either:
+     * 1) No pull-up resistor is present (lines floating low).
+     * 2) Wire is shorted to GND.
+     * 3) A slave device is hung holding the bus low.
+     * In all cases, an active-low ACK cannot be reliably detected. */
     i2c_sda(true);
     i2c_scl(true);
+    if (!i2c_read_sda() || !i2c_read_scl()) {
+        return false;
+    }
+
+    /* START condition */
     i2c_sda(false);
     i2c_scl(false);
 
