@@ -191,7 +191,7 @@ For automated continuous integration, long-term stability runs, and rapid batch 
 
 ---
 
-## 6. Comprehensive CTest Suite (33 Test Targets)
+## 6. Comprehensive CTest Suite (36 Test Targets)
 
 The host SIL suite comprises 36 `test_*` targets testing the test framework itself, shared firmware libraries, hardware drivers, the mock BSP, domain services, plant physics, and cross-node integration:
 

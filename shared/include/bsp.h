@@ -15,8 +15,8 @@
 extern "C" {
 #endif
 
-#include "rov_types.h"
 #include "rov_i2c.h"
+#include "rov_types.h"
 #include <stdbool.h>
 #include <stdint.h>
 

@@ -98,6 +98,19 @@ static void test_mem_write_rejects_over_long_payload(void) {
     assert(b.write_calls == 0);
 }
 
+static void test_zero_length_transfers_are_rejected(void) {
+    fake_bus_t b;
+    uint8_t out[1] = {0};
+    rov_i2c_bus_t bus = {&b, fake_write, fake_read, fake_probe};
+
+    memset(&b, 0, sizeof(b));
+
+    assert(rov_i2c_mem_read(&bus, 0x76u, 0x10u, out, 0U) == ROV_ERR_INVALID_ARG);
+    assert(rov_i2c_mem_write(&bus, 0x76u, 0x10u, out, 0U) == ROV_ERR_INVALID_ARG);
+    assert(b.write_calls == 0);
+    assert(b.read_calls == 0);
+}
+
 static void test_null_bus_is_rejected(void) {
     uint8_t out[1] = {0};
     assert(rov_i2c_mem_read(NULL, 0x76u, 0x00u, out, 1U) == ROV_ERR_INVALID_ARG);
@@ -122,6 +135,7 @@ int main(void) {
     test_mem_read_issues_pointer_write_then_read();
     test_mem_write_sends_pointer_then_data();
     test_mem_write_rejects_over_long_payload();
+    test_zero_length_transfers_are_rejected();
     test_null_bus_is_rejected();
     test_write_error_propagates_before_read();
 

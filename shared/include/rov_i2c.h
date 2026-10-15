@@ -36,13 +36,13 @@ struct rov_i2c_bus {
 /**
  * @brief Write a register address, then read len bytes from the device.
  * @return ROV_OK on success, the transport error otherwise, or
- *         ROV_ERR_INVALID_ARG for a null bus/destination.
+ *         ROV_ERR_INVALID_ARG for a null bus/destination or a zero-length read.
  */
 static inline rov_status_t rov_i2c_mem_read(const rov_i2c_bus_t *bus, uint8_t addr, uint8_t reg, uint8_t *dst,
                                             uint16_t len) {
     rov_status_t status;
 
-    if (bus == NULL || bus->write == NULL || bus->read == NULL || dst == NULL) {
+    if (bus == NULL || bus->write == NULL || bus->read == NULL || dst == NULL || len == 0U) {
         return ROV_ERR_INVALID_ARG;
     }
 
@@ -59,8 +59,8 @@ static inline rov_status_t rov_i2c_mem_read(const rov_i2c_bus_t *bus, uint8_t ad
  * @return ROV_OK on success, the transport error otherwise, or
  *         ROV_ERR_INVALID_ARG for a null bus/source or a payload over 8 bytes.
  */
-static inline rov_status_t rov_i2c_mem_write(const rov_i2c_bus_t *bus, uint8_t addr, uint8_t reg,
-                                             const uint8_t *src, uint16_t len) {
+static inline rov_status_t rov_i2c_mem_write(const rov_i2c_bus_t *bus, uint8_t addr, uint8_t reg, const uint8_t *src,
+                                             uint16_t len) {
     uint8_t buffer[1U + 8U];
 
     if (bus == NULL || bus->write == NULL || src == NULL || len == 0U || len > 8U) {

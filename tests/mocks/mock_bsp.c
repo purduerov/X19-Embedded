@@ -357,6 +357,10 @@ static rov_status_t mock_bus_read(void *ctx, uint8_t addr, uint8_t *data, uint16
         return g_mock_i2c_fault;
     }
 
+    /*
+     * The register index is a uint8_t and the register file is 256 wide, so the
+     * running pointer wraps within the same address space the driver sees.
+     */
     for (uint16_t i = 0U; i < len; i++) {
         data[i] = g_mock_i2c_regs[addr][(uint8_t)(g_mock_i2c_ptr[addr] + (uint8_t)i)];
     }
