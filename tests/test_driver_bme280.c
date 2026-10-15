@@ -170,7 +170,10 @@ static void setup_measurement(void) {
  * Verify NULL pointer protection.
  */
 static void test_null_pointer_guards(void) {
-    assert(bme280_init(NULL) == ROV_ERR_INVALID_ARG);
+    bme280_dev_t dev;
+
+    assert(bme280_init(NULL, bsp_i2c_bus()) == ROV_ERR_INVALID_ARG);
+    assert(bme280_init(&dev, NULL) == ROV_ERR_INVALID_ARG);
     assert(bme280_read_all(NULL) == ROV_ERR_INVALID_ARG);
 }
 
@@ -191,7 +194,7 @@ static void test_init(void) {
 
     setup_bme280();
 
-    assert(bme280_init(&dev) == ROV_OK);
+    assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
 
     assert(dev.initialized == true);
     assert(dev.i2c_addr == BME280_TEST_ADDR);
@@ -215,7 +218,7 @@ static void test_configuration(void) {
 
     setup_bme280();
 
-    assert(bme280_init(&dev) == ROV_OK);
+    assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
 
     /*
      * ctrl_hum:
@@ -254,7 +257,7 @@ static void test_wrong_chip_id(void) {
 
     mock_bsp_i2c_set_reg(BME280_I2C_ADDR_SECONDARY, BME280_REG_CHIP_ID, 0x42u);
 
-    assert(bme280_init(&dev) != ROV_OK);
+    assert(bme280_init(&dev, bsp_i2c_bus()) != ROV_OK);
 }
 
 /*
@@ -273,7 +276,7 @@ static void test_invalid_calibration(void) {
      */
     mock_bsp_i2c_set_regs(BME280_TEST_ADDR, BME280_REG_CALIB00, zero_calibration, sizeof(zero_calibration));
 
-    assert(bme280_init(&dev) != ROV_OK);
+    assert(bme280_init(&dev, bsp_i2c_bus()) != ROV_OK);
 }
 
 /*
@@ -285,7 +288,7 @@ static void test_compensation(void) {
     setup_bme280();
     setup_measurement();
 
-    assert(bme280_init(&dev) == ROV_OK);
+    assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
     assert(bme280_read_all(&dev) == ROV_OK);
 
     /*
@@ -328,7 +331,7 @@ static void test_humidity_reference_vector(void) {
     data[7] = (uint8_t)(30000 & 0xFF);
     mock_bsp_i2c_set_regs(BME280_TEST_ADDR, BME280_REG_DATA, data, sizeof(data));
 
-    assert(bme280_init(&dev) == ROV_OK);
+    assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
     assert(bme280_read_all(&dev) == ROV_OK);
 
     assert(dev.temperature_c > 25.07f && dev.temperature_c < 25.09f);
@@ -356,7 +359,7 @@ static void test_humidity_is_monotonic_across_the_threshold(void) {
     data[4] = (uint8_t)((519888 >> 4) & 0xFF);
     data[5] = (uint8_t)((519888 & 0x0F) << 4);
 
-    assert(bme280_init(&dev) == ROV_OK);
+    assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
 
     for (int32_t adc_h = 16000; adc_h <= 48000; adc_h += 1000) {
         float got;
@@ -409,8 +412,31 @@ static void test_power_on_sentinel_is_rejected(void) {
     data[7] = (uint8_t)(sentinel & 0xFF);
     mock_bsp_i2c_set_regs(BME280_TEST_ADDR, BME280_REG_DATA, data, sizeof(data));
 
-    assert(bme280_init(&dev) == ROV_OK);
+    assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
     assert(bme280_read_all(&dev) != ROV_OK);
+}
+
+/*
+ * A bus error must surface from read_all() and must not overwrite the reading
+ * the caller already holds.
+ */
+static void test_bus_error_propagates_and_leaves_reading_intact(void) {
+    bme280_dev_t dev;
+    float before;
+
+    setup_bme280();
+    setup_measurement();
+
+    assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
+    assert(bme280_read_all(&dev) == ROV_OK);
+
+    before = dev.pressure_hpa;
+
+    mock_bsp_i2c_set_fault(ROV_TIMEOUT);
+    assert(bme280_read_all(&dev) == ROV_TIMEOUT);
+    assert(dev.pressure_hpa == before);
+
+    mock_bsp_i2c_set_fault(ROV_OK);
 }
 
 /*
@@ -450,7 +476,7 @@ static void test_device_model_round_trip(void) {
         assert(fabsf(model_t - want_t) < 0.05f);
 
         /* And the driver must agree with the model, since that is the real path. */
-        assert(bme280_init(&dev) == ROV_OK);
+        assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
         assert(bme280_read_all(&dev) == ROV_OK);
 
         assert(fabsf(dev.pressure_hpa - want_p) < 0.5f);
@@ -470,6 +496,7 @@ void test_bme280_driver(void) {
     test_humidity_reference_vector();
     test_humidity_is_monotonic_across_the_threshold();
     test_power_on_sentinel_is_rejected();
+    test_bus_error_propagates_and_leaves_reading_intact();
     test_device_model_round_trip();
 
     printf("[PASS] test_bme280_driver\n");

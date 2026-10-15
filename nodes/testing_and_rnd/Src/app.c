@@ -91,7 +91,7 @@ void app_main(void) {
      */
     bme280_dev_t bme280;
 
-    rov_status_t status = bme280_init(&bme280);
+    rov_status_t status = bme280_init(&bme280, bsp_i2c_bus());
 
     if (status != ROV_OK) {
         printf("\r\nBME280 initialization FAILED.\r\n");

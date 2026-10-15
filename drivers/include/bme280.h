@@ -9,6 +9,7 @@
 #define BME280_I2C_ADDR_PRIMARY   0x76u
 #define BME280_I2C_ADDR_SECONDARY 0x77u
 
+#include "rov_i2c.h"
 #include "rov_types.h"
 #include <stdint.h>
 
@@ -40,6 +41,7 @@ typedef struct {
 } bme280_calib_t;  // facotry coefficients
 
 typedef struct {
+    const rov_i2c_bus_t *bus; /* injected transport; set by bme280_init() */
     uint8_t i2c_addr;  // 0x76 or 0x77
     bme280_calib_t calib;
     uint32_t t_fine;  // temperature compensation produces an intermediate value
@@ -51,7 +53,7 @@ typedef struct {
     bool initialized;
 } bme280_dev_t;
 
-rov_status_t bme280_init(bme280_dev_t *dev);
+rov_status_t bme280_init(bme280_dev_t *dev, const rov_i2c_bus_t *bus);
 rov_status_t bme280_read_all(bme280_dev_t *dev);
 
 #ifdef __cplusplus

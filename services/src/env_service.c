@@ -16,7 +16,7 @@ static float g_cached_hum_pct = 0.0f;
 
 rov_status_t env_service_init(void) {
     memset(&g_bme_dev, 0, sizeof(g_bme_dev));
-    rov_status_t status = bme280_init(&g_bme_dev);
+    rov_status_t status = bme280_init(&g_bme_dev, bsp_i2c_bus());
     if (status == ROV_OK) {
         g_bme_initialized = true;
     }

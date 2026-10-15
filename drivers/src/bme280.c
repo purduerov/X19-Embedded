@@ -5,7 +5,6 @@
  */
 
 #include "bme280.h"
-#include "bsp.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -30,7 +29,7 @@
 static rov_status_t bme280_check_id(bme280_dev_t *dev) {
     uint8_t id = 0;
 
-    rov_status_t status = bsp_i2c_mem_read(dev->i2c_addr, BME280_REG_CHIP_ID, &id, 1);
+    rov_status_t status = rov_i2c_mem_read(dev->bus, dev->i2c_addr, BME280_REG_CHIP_ID, &id, 1);
 
     if (status != ROV_OK) {
         return status;
@@ -56,7 +55,7 @@ static rov_status_t bme280_read_calibration(bme280_dev_t *dev) {
     uint8_t calib2[7];
     rov_status_t status;
 
-    status = bsp_i2c_mem_read(dev->i2c_addr, BME280_REG_CALIB00, calib1, sizeof(calib1));
+    status = rov_i2c_mem_read(dev->bus, dev->i2c_addr, BME280_REG_CALIB00, calib1, sizeof(calib1));
 
     if (status != ROV_OK) {
         return status;
@@ -91,7 +90,7 @@ static rov_status_t bme280_read_calibration(bme280_dev_t *dev) {
     /*
      * Read the remaining humidity calibration coefficients.
      */
-    status = bsp_i2c_mem_read(dev->i2c_addr, BME280_REG_CALIB26, calib2, sizeof(calib2));
+    status = rov_i2c_mem_read(dev->bus, dev->i2c_addr, BME280_REG_CALIB26, calib2, sizeof(calib2));
 
     if (status != ROV_OK) {
         return status;
@@ -130,7 +129,7 @@ static rov_status_t bme280_configure(bme280_dev_t *dev) {
      */
     value = 0x01u;
 
-    status = bsp_i2c_mem_write(dev->i2c_addr, BME280_REG_CTRL_HUM, &value, 1);
+    status = rov_i2c_mem_write(dev->bus, dev->i2c_addr, BME280_REG_CTRL_HUM, &value, 1);
 
     if (status != ROV_OK) {
         return status;
@@ -143,7 +142,7 @@ static rov_status_t bme280_configure(bme280_dev_t *dev) {
      */
     value = 0x10u;
 
-    status = bsp_i2c_mem_write(dev->i2c_addr, BME280_REG_CONFIG, &value, 1);
+    status = rov_i2c_mem_write(dev->bus, dev->i2c_addr, BME280_REG_CONFIG, &value, 1);
 
     if (status != ROV_OK) {
         return status;
@@ -160,7 +159,7 @@ static rov_status_t bme280_configure(bme280_dev_t *dev) {
      */
     value = 0x57u;
 
-    status = bsp_i2c_mem_write(dev->i2c_addr, BME280_REG_CTRL_MEAS, &value, 1);
+    status = rov_i2c_mem_write(dev->bus, dev->i2c_addr, BME280_REG_CTRL_MEAS, &value, 1);
 
     if (status != ROV_OK) {
         return status;
@@ -169,14 +168,16 @@ static rov_status_t bme280_configure(bme280_dev_t *dev) {
     return ROV_OK;
 }
 
-rov_status_t bme280_init(bme280_dev_t *dev) {
+rov_status_t bme280_init(bme280_dev_t *dev, const rov_i2c_bus_t *bus) {
     rov_status_t status;
 
-    if (dev == NULL) {
+    if (dev == NULL || bus == NULL) {
         return ROV_ERR_INVALID_ARG;
     }
 
     memset(dev, 0, sizeof(*dev));
+
+    dev->bus = bus;
 
     /*
      * Try the primary BME280 I2C address first.
@@ -355,7 +356,7 @@ rov_status_t bme280_read_all(bme280_dev_t *dev) {
      * FA-FC: temperature
      * FD-FE: humidity
      */
-    status = bsp_i2c_mem_read(dev->i2c_addr, BME280_REG_DATA, data, sizeof(data));
+    status = rov_i2c_mem_read(dev->bus, dev->i2c_addr, BME280_REG_DATA, data, sizeof(data));
 
     if (status != ROV_OK) {
         return status;
