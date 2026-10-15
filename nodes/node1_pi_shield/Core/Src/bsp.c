@@ -136,4 +136,25 @@ bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
 #endif
 }
 
+static rov_status_t bsp_bus_write(void *ctx, uint8_t addr, const uint8_t *data, uint16_t len) {
+    (void)ctx;
+    return bsp_i2c_write(addr, data, len) ? ROV_OK : ROV_ERROR;
+}
+
+static rov_status_t bsp_bus_read(void *ctx, uint8_t addr, uint8_t *data, uint16_t len) {
+    (void)ctx;
+    return bsp_i2c_read(addr, data, len) ? ROV_OK : ROV_ERROR;
+}
+
+static bool bsp_bus_probe(void *ctx, uint8_t addr) {
+    (void)ctx;
+    return bsp_i2c_probe(addr);
+}
+
+const rov_i2c_bus_t *bsp_i2c_bus(void) {
+    static const rov_i2c_bus_t bus = {NULL, bsp_bus_write, bsp_bus_read, bsp_bus_probe};
+
+    return &bus;
+}
+
 #endif /* ROV_UNIT_TEST */
