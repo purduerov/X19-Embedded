@@ -1,0 +1,86 @@
+name: Firmware finding
+description: Report a concrete defect found in firmware, drivers, BSP, protocol, or build/tooling code.
+title: "[Priority] area: short summary"
+labels: ["bug", "scope:firmware", "priority:medium"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One finding per issue. Keep it code-grounded: cite `file:line`, quote the code, and state the impact on the vehicle.
+        Check `docs/target-integration-blockers.md` and `docs/board_findings.md` first - gaps already recorded there should
+        reference the doc in the Status field instead of duplicating it.
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Matches the repository priority labels. Update the label to match.
+      options:
+        - priority:critical
+        - priority:high
+        - priority:medium
+        - priority:low
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: Is this a newly found defect, or already recorded somewhere?
+      options:
+        - NEW
+        - KNOWN / already documented
+    validations:
+      required: true
+
+  - type: input
+    id: area
+    attributes:
+      label: Area
+      description: Subsystem and owning track, e.g. "drivers/bme280 (track:dev3-pi-shield)".
+      placeholder: "drivers/bme280 (track:dev3-pi-shield)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: location
+    attributes:
+      label: Location
+      description: One `path:line` per relevant site.
+      placeholder: |
+        - drivers/src/bme280.c:309-331
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Quote the offending code or command output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What breaks, and how it affects the vehicle, build, or tests.
+    validations:
+      required: true
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested fix
+      description: A concrete direction, not necessarily the only option.
+    validations:
+      required: true
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related issues
+      description: Optional. Cross-reference related findings (e.g. "Related to #173").
+    validations:
+      required: false

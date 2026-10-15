@@ -25,3 +25,16 @@ Welcome to the Purdue ROV **Embedded Firmware** team (configured for the X19 sub
 - **Fail-Safe Motor Neutral**: Thruster outputs must initialize to stopped neutral (`1500 us`) and revert to neutral immediately if the heartbeat watchdog expires or leak is detected.
 - **Memory Safety**: No dynamic memory allocation (`malloc`, `free`) in embedded flight firmware. Use static allocations and compile-time arrays.
 - **I2C Bus Recovery**: All I2C peripherals must implement bus timeout handling and automated 9-clock bus clear recovery via `rov_i2c_recover_bus()`.
+
+---
+
+## 3. Issue Format
+
+All defect and audit findings use one fixed structure so they can be triaged by label. Open issues with the **Firmware finding** form (`.github/ISSUE_TEMPLATE/firmware_finding.yml`) or copy the structure below.
+
+- **Title**: `[Priority] area: short summary` (for example `[High] drivers/bme280: t_fine is uint32_t`).
+- **Body sections**, in order: Severity, Status (`NEW` or `KNOWN / already documented`), Area, Location (`file:line`), Evidence (quote the code), Impact, Suggested fix.
+- **Labels**: `bug`, plus exactly one `priority:*`, one `scope:*` (`firmware` or `integration`), and the owning `track:*` where one applies.
+- **Milestone**: Milestone 2 (Subsystem Application Firmware), Milestone 3 (CAN Bootloader & Flashing Suite), or Milestone 4 (Full-Stack Dry Bench Integration).
+
+Before filing, check `docs/target-integration-blockers.md` and `docs/board_findings.md`. Gaps already recorded there should cite the document in the Status field rather than opening a duplicate.

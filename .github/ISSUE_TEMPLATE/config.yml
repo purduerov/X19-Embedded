@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Target integration blockers
+    url: https://github.com/purduerov/X19-Embedded/blob/master/docs/target-integration-blockers.md
+    about: Known target-only gaps (missing generated projects, pins, mock-only drivers). Check here before filing.
+  - name: Board hardware findings
+    url: https://github.com/purduerov/X19-Embedded/blob/master/docs/board_findings.md
+    about: Known KiCad/schematic blockers (missing nets, strapping, layout). Check here before filing.
