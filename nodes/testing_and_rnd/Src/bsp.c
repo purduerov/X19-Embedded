@@ -296,6 +296,32 @@ rov_status_t bsp_i2c_mem_write(uint8_t addr, uint8_t reg, const uint8_t *data, u
     return ROV_OK;
 }
 
+/*
+ * Expose the raw I2C trio as an injectable bus. Drivers take a
+ * `rov_i2c_bus_t`, so this adapter is what lets the same driver source build
+ * for this bench target and for the host mock.
+ */
+static rov_status_t bsp_bus_write(void *ctx, uint8_t addr, const uint8_t *data, uint16_t len) {
+    (void)ctx;
+    return bsp_i2c_write(addr, data, len) ? ROV_OK : ROV_ERROR;
+}
+
+static rov_status_t bsp_bus_read(void *ctx, uint8_t addr, uint8_t *data, uint16_t len) {
+    (void)ctx;
+    return bsp_i2c_read(addr, data, len) ? ROV_OK : ROV_ERROR;
+}
+
+static bool bsp_bus_probe(void *ctx, uint8_t addr) {
+    (void)ctx;
+    return bsp_i2c_probe(addr);
+}
+
+const rov_i2c_bus_t *bsp_i2c_bus(void) {
+    static const rov_i2c_bus_t bus = {NULL, bsp_bus_write, bsp_bus_read, bsp_bus_probe};
+
+    return &bus;
+}
+
 uint64_t time_get_us(void) {
     return (uint64_t)HAL_GetTick() * 1000U;
 }
