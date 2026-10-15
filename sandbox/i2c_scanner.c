@@ -26,7 +26,7 @@ void app_main(void) {
         printf("%02X: ", row);
         for (uint8_t col = 0; col < 16; col++) {
             uint8_t addr = row + col;
-            if (addr < 0x08 || addr > 0x77) {
+            if (addr < 0x08 || addr > 0x7F) {
                 printf("   ");
             } else if (bsp_i2c_probe(addr)) {
                 printf("%02X ", addr);
@@ -48,19 +48,23 @@ void app_main(void) {
     } else {
         printf("Scan complete: found %u device(s).\r\n", count);
 
-        for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+        for (uint8_t addr = 0x08; addr <= 0x7F; addr++) {
             if (bsp_i2c_probe(addr)) {
                 const char *desc = "Unknown device";
                 if (addr == 0x76) {
                     desc = "MS5837 Depth Sensor / Bosch BME280 (SDO=GND)";
                 } else if (addr == 0x77) {
                     desc = "Bosch BME280 (SDO=VDD) / MS5837 Depth (ALT)";
+                } else if (addr == 0x7F) {
+                    desc = "Delta E48SC12030 PMBus Brick (Default Fallback Address 127)";
                 } else if (addr >= 0x40 && addr <= 0x47) {
-                    desc = "TI INA237 / INA226 Power Monitor";
+                    desc = "TI INA237 / INA226 Power Monitor / PMBus Device";
                 } else if (addr >= 0x48 && addr <= 0x4F) {
                     desc = "TI TMP1075 / BNO086 IMU";
                 } else if (addr == 0x68 || addr == 0x69) {
                     desc = "BMI270 / LSM6DSOX IMU";
+                } else if (addr <= 0x3F) {
+                    desc = "PMBus / I2C Device (e.g. Delta E48SC12030 configured address)";
                 }
                 printf("  -> [0x%02X] %s\r\n", addr, desc);
             }
