@@ -17,6 +17,7 @@
 
 #include "rov_types.h"
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
