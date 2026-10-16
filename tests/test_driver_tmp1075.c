@@ -4,9 +4,9 @@
  * @organization Purdue ROV
  */
 
-#include "tmp1075.h"
 #include "mocks/mock_bsp.h"
 #include "mocks/mock_tmp1075.h"
+#include "tmp1075.h"
 #include <assert.h>
 #include <stdio.h>
 

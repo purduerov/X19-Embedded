@@ -10,7 +10,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#define INA237_TEST_ADDR 0x40u
+#define INA237_TEST_ADDR       0x40u
 #define INA237_TEST_SHUNT_OHMS 0.001f
 
 void test_ina237_driver(void) {

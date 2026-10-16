@@ -14,11 +14,6 @@ static uint8_t s_gpio_modes[3][16];
 static uint8_t s_gpio_pulls[3][16];
 static uint32_t s_tick_ms;
 static uint8_t s_can_init_count;
-static float s_ina_voltage_v;
-static float s_ina_current_a;
-static float s_tmp1075_temperature_c;
-static bool s_ina_available;
-static bool s_tmp1075_available;
 
 void fake_hal_reset(void) {
     memset(s_gpio_levels, 0, sizeof(s_gpio_levels));
@@ -29,11 +24,6 @@ void fake_hal_reset(void) {
     memset(&fake_htim8, 0, sizeof(fake_htim8));
     s_tick_ms = 0;
     s_can_init_count = 0;
-    s_ina_voltage_v = 0.0f;
-    s_ina_current_a = 0.0f;
-    s_tmp1075_temperature_c = 0.0f;
-    s_ina_available = false;
-    s_tmp1075_available = false;
 }
 
 void fake_hal_set_input(GPIO_TypeDef *port, uint16_t pin, uint32_t state) {
@@ -125,32 +115,4 @@ bool fake_hal_can_init(void) {
 
 uint8_t fake_hal_can_init_count(void) {
     return s_can_init_count;
-}
-
-void fake_hal_set_ina237(float voltage_v, float current_a, bool available) {
-    s_ina_voltage_v = voltage_v;
-    s_ina_current_a = current_a;
-    s_ina_available = available;
-}
-
-void fake_hal_set_tmp1075(float temperature_c, bool available) {
-    s_tmp1075_temperature_c = temperature_c;
-    s_tmp1075_available = available;
-}
-
-bool mock_sensors_get_ina226(float *voltage_v, float *current_a) {
-    if (!s_ina_available || voltage_v == NULL || current_a == NULL) {
-        return false;
-    }
-    *voltage_v = s_ina_voltage_v;
-    *current_a = s_ina_current_a;
-    return true;
-}
-
-bool mock_sensors_get_tmp1075(float *temperature_c) {
-    if (!s_tmp1075_available || temperature_c == NULL) {
-        return false;
-    }
-    *temperature_c = s_tmp1075_temperature_c;
-    return true;
 }

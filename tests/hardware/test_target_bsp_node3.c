@@ -15,11 +15,16 @@ static unsigned s_failures;
 
 int main(void) {
     fake_hal_reset();
-    fake_hal_set_ina237(5.07f, 1.25f, true);
-    fake_hal_set_tmp1075(37.5f, true);
     bsp_init();
 
     CHECK(fake_hal_can_init_count() == 1U, "bsp_init must initialize the node CAN controller");
+    /*
+     * Node 3 sources the logic voltage and PCB temperature from INA237 and
+     * TMP1075. Both drivers now read the injected I2C bus, but node 3's BSP has
+     * no bus (no MX_I2C*_Init and no C542 HAL in this checkout), so it still
+     * returns nominal constants and these two checks stay red. When node 3's
+     * bus lands, stage the two readings through the I2C register file.
+     */
     CHECK(bsp_get_logic_voltage_mv() == 5070U, "Logic voltage must come from INA237 data, not a nominal constant");
     CHECK(fabsf(bsp_get_pcb_temperature_c() - 37.5f) < 0.1f,
           "PCB temperature must come from TMP1075 data, not a nominal constant");

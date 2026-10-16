@@ -34,11 +34,15 @@ suite.
 
 ## Sensor integration
 
-The BME280, BMI270/LSM6DSOXTR, INA226/INA237, MS5837, PMBus, and TMP1075 paths
-now reject unavailable samples rather than returning success with stale or
-zero data. The checked-in implementations still rely on mock sensor hooks;
-real I2C/SPI/PMBus transactions and their fault recovery must be implemented in
-the target BSP/driver integration.
+The BME280, INA226, INA237, and TMP1075 drivers read the injected I2C bus
+(`rov_i2c_bus_t`) and convert raw registers to engineering units per datasheet;
+their host tests drive the real driver against a device model in the mock
+register file, and no driver carries a value hook. INA226 validates its
+manufacturer and die ID; TMP1075N and INA237 have no usable ID register and
+validate arguments only. On target, each driver still needs a board
+`bsp_i2c_bus()` implementation and, for INA237, a configured I2C peripheral.
+The BMI270/LSM6DSOXTR (SPI), MS5837 (command-addressed), and PMBus paths remain
+on their existing hooks and are out of scope here.
 
 ## HIL watchdog observation
 

@@ -154,8 +154,6 @@ uint32_t fake_hal_get_output(GPIO_TypeDef *port, uint16_t pin);
 bool fake_hal_gpio_was_configured(GPIO_TypeDef *port, uint16_t pin, uint32_t mode, uint32_t pull);
 uint8_t fake_hal_can_init_count(void);
 bool fake_hal_can_init(void);
-void fake_hal_set_ina237(float voltage_v, float current_a, bool available);
-void fake_hal_set_tmp1075(float temperature_c, bool available);
 
 /* Startup calls are instrumented by target-startup acceptance tests. */
 void SystemClock_Config(void);
