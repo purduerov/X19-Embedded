@@ -217,7 +217,7 @@ The host SIL suite comprises 36 `test_*` targets testing the test framework itse
 | 18 | `test_driver_lsm6dsoxtr` | LSM6DSOXTR IMU driver |
 | 19 | `test_driver_bmi270` | BMI270 IMU driver |
 | 20 | `test_driver_ina237` | INA237 power monitor driver |
-| 21 | `test_driver_tmp1075` | TMP1075 temperature sensor driver |
+| 21 | `test_driver_tmp1075` | TMP1075 temperature register read, sign extension, and fault propagation |
 | 22 | `test_driver_dshot` | DShot / BDShot ESC protocol and telemetry decoder driver |
 | 23 | `test_driver_pmbus_brick` | PMBus brick driver |
 | 24 | `test_mock_physics` | Closed-loop 6-DOF hydrodynamic physics and closed-loop depth PID hold |
