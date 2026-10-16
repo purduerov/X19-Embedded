@@ -7,6 +7,7 @@
 #include "env_service.h"
 #include "mock_bme280.h"
 #include "mock_bsp.h"
+#include "mock_ina237.h"
 #include "power_service.h"
 #include "safety_service.h"
 #include <assert.h>
@@ -113,11 +114,43 @@ static void test_env_service(void) {
     printf("  [PASS] Environmental service probing and engineering-unit reads\n");
 }
 
+/*
+ * The service owns the rail INA237: power_service_init() binds it to the mock
+ * bus and power_read_rail() returns engineering units. Going through the
+ * register image means a wrong LSB, a wrong register or a wrong shunt all
+ * surface here instead of being masked by a value-level hook.
+ */
+static void test_power_service_rail(void) {
+    float voltage_v = 0.0f;
+    float current_a = 0.0f;
+
+    mock_bsp_reset();
+    mock_ina237_set_reading(0x40u, 5.2f, 1.5f, 0.001f);
+
+    assert(power_service_init() == ROV_OK);
+    assert(power_read_rail(&voltage_v, &current_a) == ROV_OK);
+    assert(fabsf(voltage_v - 5.2f) < 0.01f);
+    assert(fabsf(current_a - 1.5f) < 0.01f);
+
+    /* A bus fault fails the read and leaves the caller's outputs untouched. */
+    mock_bsp_reset();
+    mock_bsp_i2c_set_fault(ROV_TIMEOUT);
+    voltage_v = 7.0f;
+    current_a = 7.0f;
+    assert(power_read_rail(&voltage_v, &current_a) == ROV_TIMEOUT);
+    assert(voltage_v == 7.0f);
+    assert(current_a == 7.0f);
+
+    mock_bsp_reset();
+    printf("  [PASS] Power service rail ownership and fault handling\n");
+}
+
 int main(void) {
     printf("=== Running Domain Services Tests ===\n");
     test_actuator_service_clamping();
     test_safety_service_tripping();
     test_power_service();
+    test_power_service_rail();
     test_env_service();
     printf("=== All Domain Services Tests Passed ===\n");
     return 0;
