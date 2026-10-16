@@ -59,6 +59,38 @@ static void test_probe_reports_presence(void) {
     assert(bus->probe(bus->ctx, 0x76u) == true);
 }
 
+static void test_word_register_round_trip(void) {
+    const rov_i2c_bus_t *bus = bsp_i2c_bus();
+    uint8_t readback[2] = {0u, 0u};
+    uint8_t writeback[2] = {0xABu, 0xCDu};
+
+    mock_bsp_reset();
+    mock_bsp_i2c_set_word(0x40u, 0x05u, 0x1234u);
+
+    /* A two-byte read at register 0x05 returns the word, MSB first. */
+    assert(rov_i2c_mem_read(bus, 0x40u, 0x05u, readback, 2U) == ROV_OK);
+    assert(readback[0] == 0x12u);
+    assert(readback[1] == 0x34u);
+
+    /*
+     * The word store must not touch the byte register at the same index, or
+     * register 0x05 (VBUS) and register 0x06 (DIETEMP) would alias.
+     */
+    assert(mock_bsp_i2c_get_reg(0x40u, 0x05u) == 0x00u);
+    assert(mock_bsp_i2c_get_reg(0x40u, 0x06u) == 0x00u);
+
+    /* A two-byte write through the bus updates the word file. */
+    assert(rov_i2c_mem_write(bus, 0x40u, 0x05u, writeback, 2U) == ROV_OK);
+    assert(mock_bsp_i2c_get_word(0x40u, 0x05u) == 0xABCDu);
+
+    /* A byte-addressed address is unaffected by the word path. */
+    mock_bsp_i2c_set_regs(0x76u, 0x10u, writeback, 2U);
+    assert(mock_bsp_i2c_get_reg(0x76u, 0x10u) == 0xABu);
+    assert(rov_i2c_mem_read(bus, 0x76u, 0x10u, readback, 2U) == ROV_OK);
+    assert(readback[0] == 0xABu);
+    assert(readback[1] == 0xCDu);
+}
+
 int main(void) {
     printf("Running mock I2C bus tests...\n");
 
@@ -66,6 +98,7 @@ int main(void) {
     test_multi_byte_read_spans_registers();
     test_fault_is_returned_and_cleared_on_reset();
     test_probe_reports_presence();
+    test_word_register_round_trip();
 
     printf("[PASS] test_mock_i2c_bus\n");
     return 0;

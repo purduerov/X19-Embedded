@@ -116,6 +116,30 @@ void mock_bsp_i2c_set_reg(uint8_t addr, uint8_t reg, uint8_t value);
 void mock_bsp_i2c_set_regs(uint8_t addr, uint8_t start_reg, const uint8_t *data, uint16_t len);
 
 /**
+ * @brief Set a 16-bit register and mark the device word-addressed.
+ *
+ * A byte-addressed device (BME280) stores register R at byte offset R. A
+ * word-addressed device (INA226, INA237, TMP1075) stores the 16-bit register R
+ * as one word, and a driver reads two big-endian bytes from register R. The mock
+ * keeps those words in a separate file so register R cannot alias register R+1,
+ * which the byte file would otherwise do because it advances one byte per step.
+ *
+ * @param addr 7-bit I2C device address.
+ * @param reg Register address.
+ * @param value 16-bit register value.
+ */
+void mock_bsp_i2c_set_word(uint8_t addr, uint8_t reg, uint16_t value);
+
+/**
+ * @brief Read a 16-bit register from the mock word file.
+ *
+ * @param addr 7-bit I2C device address.
+ * @param reg Register address.
+ * @return Stored word, or 0 for an unknown address.
+ */
+uint16_t mock_bsp_i2c_get_word(uint8_t addr, uint8_t reg);
+
+/**
  * @brief Read one register from the mock I2C register map.
  *
  * @param addr 7-bit I2C device address.

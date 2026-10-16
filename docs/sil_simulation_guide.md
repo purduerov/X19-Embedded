@@ -208,7 +208,7 @@ The host SIL suite comprises 36 `test_*` targets testing the test framework itse
 | 9 | `test_rov_i2c` | Injected I2C bus contract and `mem_*` helper semantics |
 | 10 | `test_timesync` | Distributed vehicle clock synchronization and time slew |
 | 11 | `test_bsp` | Board support package time, PWM bounds, and emergency brake |
-| 12 | `test_mock_i2c_bus` | Mock BSP I2C bus, register pointer, fault injection, and presence probe |
+| 12 | `test_mock_i2c_bus` | Mock BSP I2C bus, byte and 16-bit word registers, fault injection, and presence probe |
 | 13 | `test_driver_bme280` | BME280 driver against the inverse datasheet model |
 | 14 | `test_driver_ms5837` | MS5837 pressure sensor driver |
 | 15 | `test_driver_ina226` | INA226 power monitor driver |

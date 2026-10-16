@@ -16,6 +16,8 @@
 #define MOCK_I2C_NUM_REGS  256
 
 static uint8_t g_mock_i2c_regs[MOCK_I2C_NUM_ADDRS][MOCK_I2C_NUM_REGS];
+static uint16_t g_mock_i2c_words[MOCK_I2C_NUM_ADDRS][MOCK_I2C_NUM_REGS];
+static bool g_mock_i2c_word_addressed[MOCK_I2C_NUM_ADDRS];
 static uint8_t g_mock_i2c_ptr[MOCK_I2C_NUM_ADDRS];
 static rov_status_t g_mock_i2c_fault = ROV_OK;
 static bool g_mock_i2c_present[MOCK_I2C_NUM_ADDRS];
@@ -39,6 +41,8 @@ void mock_bsp_reset(void) {
     g_mock_led_toggle_count = 0;
 
     memset(g_mock_i2c_regs, 0, sizeof(g_mock_i2c_regs));
+    memset(g_mock_i2c_words, 0, sizeof(g_mock_i2c_words));
+    memset(g_mock_i2c_word_addressed, 0, sizeof(g_mock_i2c_word_addressed));
     memset(g_mock_i2c_ptr, 0, sizeof(g_mock_i2c_ptr));
     memset(g_mock_i2c_present, 0, sizeof(g_mock_i2c_present));
     g_mock_i2c_fault = ROV_OK;
@@ -141,6 +145,21 @@ uint8_t mock_bsp_i2c_get_reg(uint8_t addr, uint8_t reg) {
     }
 
     return g_mock_i2c_regs[addr][reg];
+}
+
+void mock_bsp_i2c_set_word(uint8_t addr, uint8_t reg, uint16_t value) {
+    if (addr < MOCK_I2C_NUM_ADDRS) {
+        g_mock_i2c_word_addressed[addr] = true;
+        g_mock_i2c_words[addr][reg] = value;
+    }
+}
+
+uint16_t mock_bsp_i2c_get_word(uint8_t addr, uint8_t reg) {
+    if (addr < MOCK_I2C_NUM_ADDRS) {
+        return g_mock_i2c_words[addr][reg];
+    }
+
+    return 0u;
 }
 
 void mock_bsp_i2c_set_fault(rov_status_t status) {
@@ -337,6 +356,20 @@ static rov_status_t mock_bus_write(void *ctx, uint8_t addr, const uint8_t *data,
     /* The first byte is the register pointer; the rest are payload bytes. */
     g_mock_i2c_ptr[addr] = data[0];
 
+    if (g_mock_i2c_word_addressed[addr]) {
+        /*
+         * The payload is a sequence of big-endian 16-bit words, one per
+         * register. A pointer-only write (len == 1) has no payload.
+         */
+        for (uint16_t i = 1U; (uint16_t)(i + 1U) < len; i += 2U) {
+            uint8_t reg = (uint8_t)(g_mock_i2c_ptr[addr] + (uint8_t)((i - 1U) / 2U));
+
+            g_mock_i2c_words[addr][reg] = (uint16_t)(((uint16_t)data[i] << 8) | (uint16_t)data[i + 1U]);
+        }
+
+        return ROV_OK;
+    }
+
     for (uint16_t i = 1U; i < len; i++) {
         uint8_t reg = (uint8_t)(g_mock_i2c_ptr[addr] + (uint8_t)(i - 1U));
 
@@ -355,6 +388,18 @@ static rov_status_t mock_bus_read(void *ctx, uint8_t addr, uint8_t *data, uint16
 
     if (g_mock_i2c_fault != ROV_OK) {
         return g_mock_i2c_fault;
+    }
+
+    if (g_mock_i2c_word_addressed[addr]) {
+        /* Two bytes per register, MSB first. */
+        for (uint16_t i = 0U; i < len; i++) {
+            uint8_t reg = (uint8_t)(g_mock_i2c_ptr[addr] + (uint8_t)(i / 2U));
+            uint16_t word = g_mock_i2c_words[addr][reg];
+
+            data[i] = ((i % 2U) == 0U) ? (uint8_t)(word >> 8) : (uint8_t)(word & 0xFFu);
+        }
+
+        return ROV_OK;
     }
 
     /*
