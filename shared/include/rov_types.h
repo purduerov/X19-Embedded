@@ -125,13 +125,15 @@ typedef struct __attribute__((packed)) {
 } rov_nav_telemetry_t;
 
 /**
- * @brief 10 Hz Environmental & Leak Telemetry from Pi Shield (Packed, 13 bytes).
+ * @brief 10 Hz Environmental & Leak Telemetry from Pi Shield (Packed, 17 bytes).
  */
 typedef struct __attribute__((packed)) {
-    float pressure_hpa;  /**< Enclosure internal pressure in hPa (BME280) */
-    float humidity_pct;  /**< Enclosure relative humidity in % (BME280) */
-    float temperature_c; /**< Enclosure internal temperature in deg C (BME280) */
-    uint8_t leak_flags;  /**< Bit 0: BME280 trigger, Bit 1: Floor leak trace 1, Bit 2: Floor leak trace 2 */
+    float pressure_hpa;       /**< Enclosure internal pressure in hPa (BME280) */
+    float humidity_pct;       /**< Enclosure relative humidity in % (BME280) */
+    float temperature_c;      /**< Enclosure internal temperature in deg C (BME280) */
+    uint8_t leak_flags;       /**< Bit 0: BME280 trigger, Bit 1: Floor leak trace 1, Bit 2: Floor leak trace 2 */
+    uint16_t rail_voltage_mv; /**< Node 1 Pi 5V rail voltage in mV (INA237); 0 when invalid */
+    uint16_t rail_current_ma; /**< Node 1 Pi 5V rail current in mA (INA237); 0 when invalid */
 } rov_env_telemetry_t;
 
 /**

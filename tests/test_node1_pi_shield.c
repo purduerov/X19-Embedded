@@ -95,6 +95,14 @@ void test_node1_nominal_telemetry(void) {
 
     assert(env.leak_flags == 0);
 
+    /*
+     * The INA237 at 0x40 was placed at 5.21 V / 1.35 A. 5.21 V quantizes to
+     * 1667 bus counts at 3.125 mV each -> 5209 mV; 1.35 A through 0.001 ohm is
+     * exactly 270 shunt counts at 5 uV each -> 1350 mA.
+     */
+    assert(env.rail_voltage_mv >= 5208u && env.rail_voltage_mv <= 5210u);
+    assert(env.rail_current_ma == 1350u);
+
     assert(mock_bsp_get_led_toggle_count() >= 1);
 
     assert(!mock_bsp_is_emergency_brake_tripped());
@@ -410,10 +418,67 @@ void test_node1_irq_emergency_is_latched(void) {
     printf("[PASS] test_node1_irq_emergency_is_latched\n");
 }
 
+void test_node1_rail_zero_when_absent(void) {
+    setup();
+
+    set_bme280_reading(1013.25f, 35.0f, 24.0f);
+    /* No mock_ina237_set_reading(): the mock register file reads as zero. */
+
+    node1_app_init();
+
+    mock_bsp_advance_time_ms(100);
+    node1_app_step();
+
+    uint32_t tx_id = 0;
+    uint8_t data[64];
+    uint8_t len = 0;
+
+    assert(mock_can_get_last_tx(&tx_id, data, &len));
+    assert(tx_id == ROV_CAN_ID_ENV_TELEMETRY);
+
+    rov_env_telemetry_t env;
+
+    assert(rov_can_unpack_env_telemetry(data, len, &env) == ROV_OK);
+    assert(env.rail_voltage_mv == 0u);
+    assert(env.rail_current_ma == 0u);
+
+    printf("[PASS] test_node1_rail_zero_when_absent\n");
+}
+
+void test_node1_rail_saturates(void) {
+    setup();
+
+    set_bme280_reading(1013.25f, 35.0f, 24.0f);
+    /* 100 A through 0.001 ohm is 100000 mA, which would wrap a uint16_t. */
+    mock_ina237_set_reading(0x40u, 5.0f, 100.0f, 0.001f);
+
+    node1_app_init();
+
+    mock_bsp_advance_time_ms(100);
+    node1_app_step();
+
+    uint32_t tx_id = 0;
+    uint8_t data[64];
+    uint8_t len = 0;
+
+    assert(mock_can_get_last_tx(&tx_id, data, &len));
+    assert(tx_id == ROV_CAN_ID_ENV_TELEMETRY);
+
+    rov_env_telemetry_t env;
+
+    assert(rov_can_unpack_env_telemetry(data, len, &env) == ROV_OK);
+    assert(env.rail_voltage_mv == 5000u);
+    assert(env.rail_current_ma == 65535u);
+
+    printf("[PASS] test_node1_rail_saturates\n");
+}
+
 int main(void) {
     printf("Running Node 1 (Pi Shield) SIL Unit Tests...\n");
 
     test_node1_nominal_telemetry();
+    test_node1_rail_zero_when_absent();
+    test_node1_rail_saturates();
 
     test_node1_vacuum_loss_leak_trigger();
 

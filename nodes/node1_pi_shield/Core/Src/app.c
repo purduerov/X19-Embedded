@@ -13,7 +13,7 @@
 #include "bsp.h"
 #include "can_interface.h"
 #include "env_service.h"
-#include "ina237.h"
+#include "power_service.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
@@ -23,12 +23,10 @@
 
 static rov_safety_state_t g_safety_state;
 static rov_env_telemetry_t g_env_telemetry;
-static ina237_dev_t g_ina237_dev;
 
 static uint32_t g_last_telemetry_time = 0;
 static float g_baseline_pressure_hpa = 0.0f;
 static bool g_bme280_valid = false;
-static bool g_ina237_valid = false;
 static bool g_can_ready = false;
 
 /*
@@ -36,6 +34,23 @@ static bool g_can_ready = false;
  * 10 Hz backup polling path does not continuously flood CAN ID 0x001.
  */
 static volatile bool g_emergency_latched = false;
+
+/*
+ * Convert a non-negative engineering value to an unsigned 16-bit field,
+ * rounding to nearest and saturating instead of wrapping. NaN and negatives
+ * map to 0.
+ */
+static uint16_t node1_saturate_u16(float value) {
+    if (!(value > 0.0f)) {
+        return 0u;
+    }
+
+    if (value >= 65535.0f) {
+        return 65535u;
+    }
+
+    return (uint16_t)(value + 0.5f);
+}
 
 /**
  * @brief Read both physical floor leak probes and construct the protocol
@@ -179,9 +194,8 @@ void node1_app_init(void) {
     }
 
     env_service_init();
-    ina237_init(&g_ina237_dev, bsp_i2c_bus(), 0x40, 0.001f);
+    power_service_init();
     g_bme280_valid = false;
-    g_ina237_valid = false;
 
     g_last_telemetry_time = 0;
     g_baseline_pressure_hpa = 0.0f;
@@ -191,6 +205,8 @@ void node1_app_init(void) {
     g_env_telemetry.humidity_pct = 30.0f;
     g_env_telemetry.temperature_c = 25.0f;
     g_env_telemetry.leak_flags = 0;
+    g_env_telemetry.rail_voltage_mv = 0;
+    g_env_telemetry.rail_current_ma = 0;
 }
 
 void node1_app_step(void) {
@@ -207,13 +223,14 @@ void node1_app_step(void) {
         float temp_c = 0.0f;
         float press_hpa = 0.0f;
         float hum_pct = 0.0f;
+        float rail_v = 0.0f;
+        float rail_i = 0.0f;
 
         g_last_telemetry_time = current_time;
 
         g_bme280_valid = (env_read_all(&temp_c, &press_hpa, &hum_pct) == ROV_OK) && isfinite(press_hpa) &&
                          isfinite(hum_pct) && isfinite(temp_c);
-        g_ina237_valid = (ina237_read_power(&g_ina237_dev) == ROV_OK) && isfinite(g_ina237_dev.bus_voltage_v) &&
-                         isfinite(g_ina237_dev.shunt_current_a);
+        bool rail_valid = (power_read_rail(&rail_v, &rail_i) == ROV_OK) && isfinite(rail_v) && isfinite(rail_i);
 
         /* Track the lowest valid pressure so a vacuum applied after startup is detectable. */
         if (g_bme280_valid && press_hpa > 0.0f &&
@@ -260,6 +277,10 @@ void node1_app_step(void) {
         g_env_telemetry.temperature_c = g_bme280_valid ? temp_c : 0.0f;
 
         g_env_telemetry.leak_flags = leak_bits;
+
+        g_env_telemetry.rail_voltage_mv = rail_valid ? node1_saturate_u16(rail_v * 1000.0f) : 0u;
+
+        g_env_telemetry.rail_current_ma = rail_valid ? node1_saturate_u16(rail_i * 1000.0f) : 0u;
 
         /*
          * Trigger the emergency response for any detected leak.

@@ -128,8 +128,12 @@ void test_time_sync_pack_unpack(void) {
 }
 
 void test_env_telemetry_pack_unpack(void) {
-    rov_env_telemetry_t original = {
-        .pressure_hpa = 1013.25f, .humidity_pct = 45.5f, .temperature_c = 22.1f, .leak_flags = 5};
+    rov_env_telemetry_t original = {.pressure_hpa = 1013.25f,
+                                    .humidity_pct = 45.5f,
+                                    .temperature_c = 22.1f,
+                                    .leak_flags = 5,
+                                    .rail_voltage_mv = 5210u,
+                                    .rail_current_ma = 1350u};
 
     uint8_t buffer[64];
     size_t len = 0;
@@ -144,6 +148,8 @@ void test_env_telemetry_pack_unpack(void) {
     assert(decoded.humidity_pct == original.humidity_pct);
     assert(decoded.temperature_c == original.temperature_c);
     assert(decoded.leak_flags == original.leak_flags);
+    assert(decoded.rail_voltage_mv == original.rail_voltage_mv);
+    assert(decoded.rail_current_ma == original.rail_current_ma);
     (void)status;
     (void)len;
     (void)decoded;
@@ -205,6 +211,8 @@ void test_invalid_arguments(void) {
     rov_env_telemetry_t env = {0};
     assert(rov_can_pack_env_telemetry(&env, buffer, 5, &len) == ROV_ERR_INVALID_ARG);
     assert(rov_can_unpack_env_telemetry(buffer, 5, &env) == ROV_ERR_INVALID_ARG);
+    /* A 13-byte frame is the old layout and must be rejected, not truncated. */
+    assert(rov_can_unpack_env_telemetry(buffer, 13, &env) == ROV_ERR_INVALID_ARG);
     assert(rov_can_unpack_env_telemetry(NULL, sizeof(buffer), &env) == ROV_ERR_INVALID_ARG);
     assert(rov_can_unpack_env_telemetry(buffer, sizeof(buffer), NULL) == ROV_ERR_INVALID_ARG);
 
