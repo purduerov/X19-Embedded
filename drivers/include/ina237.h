@@ -26,12 +26,12 @@ typedef struct {
 } ina237_dev_t;
 
 /**
- * @brief Bind an INA237 at @p i2c_addr to @p bus and start conversions.
+ * @brief Bind an INA237 at @p i2c_addr to @p bus and configure its ADC.
  *
  * The INA237 has no device-ID register (the 0x3F ID register exists on the
  * INA238 only), so init cannot verify the chip and validates its arguments
- * only. It does write ADC_CONFIG, because the power-on default is shutdown
- * (MODE = 0000) and the part would otherwise never convert.
+ * only. It writes ADC_CONFIG to select 16-sample averaging; the power-on
+ * reset (0xFB68) is already continuous at 1052 us, averaging one sample.
  */
 rov_status_t ina237_init(ina237_dev_t *dev, const rov_i2c_bus_t *bus, uint8_t i2c_addr, float shunt_resistor_ohms);
 

@@ -16,8 +16,11 @@
 
 /*
  * ADC_CONFIG: continuous bus + shunt + temperature (MODE = 1111), 1052 us
- * conversion time on all three fields, 16-sample average. Reset is 0x0000
- * (shutdown), so this write is what starts the part converting.
+ * conversion time on all three fields, 16-sample average.
+ *
+ * The power-on reset is 0xFB68: the same continuous 1052 us settings but with
+ * 1-sample averaging. This write keeps those settings and raises the average
+ * to 16 samples for a lower-noise reading; it is not what leaves shutdown.
  */
 #define INA237_ADC_CONFIG_CONTINUOUS 0xFB6Au
 
@@ -26,7 +29,7 @@
 #define INA237_BUS_VOLTAGE_LSB_V   0.003125f /* 3.125 mV per count */
 #define INA237_DIE_TEMP_LSB_C      0.125f    /* 0.125 C per count */
 
-static rov_status_t ina237_start_conversions(ina237_dev_t *dev) {
+static rov_status_t ina237_configure_adc(ina237_dev_t *dev) {
     const uint8_t config[2] = {(uint8_t)(INA237_ADC_CONFIG_CONTINUOUS >> 8),
                                (uint8_t)(INA237_ADC_CONFIG_CONTINUOUS & 0xFFu)};
 
@@ -43,7 +46,7 @@ rov_status_t ina237_init(ina237_dev_t *dev, const rov_i2c_bus_t *bus, uint8_t i2
     dev->i2c_addr = i2c_addr;
     dev->shunt_resistor_ohms = shunt_resistor_ohms;
 
-    return ina237_start_conversions(dev);
+    return ina237_configure_adc(dev);
 }
 
 rov_status_t ina237_read_power(ina237_dev_t *dev) {
