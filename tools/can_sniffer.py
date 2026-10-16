@@ -40,7 +40,7 @@ _STRUCT_8H               = struct.Struct("<8H")
 _STRUCT_H                = struct.Struct("<H")
 _STRUCT_NAV_TS           = struct.Struct("<QffffffffB")
 _STRUCT_NAV_LEGACY       = struct.Struct("<ffffffffB")
-_STRUCT_ENV              = struct.Struct("<fffB")
+_STRUCT_ENV              = struct.Struct("<fffBHH")
 _STRUCT_POWER            = struct.Struct("<HHHHHHHHhH")
 
 _last_sec = None
@@ -123,12 +123,12 @@ def decode_msg(msg: can.Message):
             print(f"[{ts}] [CAN 0x200] WARNING: Malformed Nav Telemetry packet (len={len(data)}, expected 41 or 33)")
 
     elif msg_id == CAN_ID_ENV_TELEMETRY:
-        if len(data) == 13:
-            press, hum, temp, leak = _STRUCT_ENV.unpack(data[:13])
+        if len(data) == 17:
+            press, hum, temp, leak, rail_mv, rail_ma = _STRUCT_ENV.unpack(data[:17])
             leak_str = "LEAK ALERT!" if leak != 0 else "OK"
-            print(f"[{ts}] [CAN 0x210] Env: P={press:6.1f}hPa | Hum={hum:4.1f}% | Temp={temp:4.1f}C | Status={leak_str}")
+            print(f"[{ts}] [CAN 0x210] Env: P={press:6.1f}hPa | Hum={hum:4.1f}% | Temp={temp:4.1f}C | Rail={rail_mv/1000.0:4.2f}V @ {rail_ma}mA | Status={leak_str}")
         else:
-            print(f"[{ts}] [CAN 0x210] WARNING: Malformed Env Telemetry packet (len={len(data)}, expected 13)")
+            print(f"[{ts}] [CAN 0x210] WARNING: Malformed Env Telemetry packet (len={len(data)}, expected 17)")
 
     elif msg_id == CAN_ID_POWER_TELEMETRY:
         if len(data) == 20:

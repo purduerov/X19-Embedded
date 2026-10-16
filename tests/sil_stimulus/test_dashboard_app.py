@@ -2135,9 +2135,9 @@ class TestDashboardClientStreamResync(unittest.TestCase):
     letting the error reach the loop's exit handler.
 
     The workhorse frame is ``CAN_ID_ENV_TELEMETRY``, whose payload is
-    ``struct.Struct("<3fB")`` -- three floats and a leak-flags byte, so a known
-    value is trivial to build and ``client.env_data.leak_flags`` is an exact
-    observable rather than a float comparison.
+    ``struct.Struct("<3fBHH")`` -- three floats, a leak-flags byte and two rail
+    words, so a known value is trivial to build and ``client.env_data.leak_flags``
+    is an exact observable rather than a float comparison.
 
     Every assertion here is "the connection survived and the next real frame
     landed".  That is deliberate: the failure mode is a dead reader, so an
@@ -2145,9 +2145,9 @@ class TestDashboardClientStreamResync(unittest.TestCase):
     pass against the broken code for the wrong reason.
     """
 
-    #: The env payload the real server sends, as ``<3fB``.
+    #: The env payload the real server sends, as ``<3fBHH``.
     ENV_LEAK_FLAGS = 0x03
-    ENV_PAYLOAD = struct.pack("<3fB", 1013.25, 42.0, 26.5, ENV_LEAK_FLAGS)
+    ENV_PAYLOAD = struct.pack("<3fBHH", 1013.25, 42.0, 26.5, ENV_LEAK_FLAGS, 5200, 1350)
 
     def setUp(self) -> None:
         self.client = SilDashboardClient(port=1)
@@ -2257,7 +2257,7 @@ class TestDashboardClientStreamResync(unittest.TestCase):
         for flags in (0x01, 0x02, 0x03):
             self.board_side.sendall(
                 pack_sil_can_frame(
-                    CAN_ID_ENV_TELEMETRY, struct.pack("<3fB", 1013.25, 42.0, 26.5, flags)
+                    CAN_ID_ENV_TELEMETRY, struct.pack("<3fBHH", 1013.25, 42.0, 26.5, flags, 5200, 1350)
                 )
             )
 
@@ -2274,7 +2274,7 @@ class TestDashboardClientStreamResync(unittest.TestCase):
         A frame with a valid header but a payload too short to decode must be
         skipped, not allowed to reach the loop's exit handler.
 
-        ``EnvTelemetry.unpack`` requires 13 bytes, so 12 is undecodable while
+        ``EnvTelemetry.unpack`` requires 17 bytes, so 16 is undecodable while
         the enclosing SIL frame is perfectly well formed -- which is the whole
         point.  Header validation alone does not cover this, and it is the case
         that would otherwise take the reader down.

@@ -1213,7 +1213,7 @@ class VehicleStimulusTester:
         Watch 0x210 enclosure telemetry from the Pi shield.
 
         Asserts that at least two frames arrive in the window, that every frame
-        decodes as a full 13-byte ``EnvTelemetry`` record, that the values are
+        decodes as a full 17-byte ``EnvTelemetry`` record, that the values are
         finite and physically plausible, and that no leak is flagged.  The count
         of two is grounded in the server: the first 0x210 is sent immediately on
         connect and the rest at 1 Hz (sil_bridge_server.c:376-382), so a 3.0 s
@@ -1280,7 +1280,8 @@ class VehicleStimulusTester:
             True,
             f"{len(records)} frame(s) decoded in {duration_s:.1f} s: "
             f"pressure={last.pressure_hpa:.2f} hPa humidity={last.humidity_pct:.1f} % "
-            f"temperature={last.temperature_c:.1f} C leak_flags=0x{last.leak_flags:02X}",
+            f"temperature={last.temperature_c:.1f} C leak_flags=0x{last.leak_flags:02X} "
+            f"rail={last.rail_voltage_mv} mV @ {last.rail_current_ma} mA",
         )
 
     # -- node 2: control board --------------------------------------------

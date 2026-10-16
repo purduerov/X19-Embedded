@@ -437,7 +437,8 @@ int main(int argc, char **argv) {
                     should_send = true;
                 } else if (rx_id == ROV_CAN_ID_ENV_TELEMETRY) {
                     /* Enclosure telemetry: instant if leak, otherwise 1 Hz (initial frame instant) */
-                    if ((rx_len >= 13 && rx_data[12] != 0) || !s_env_initial_sent || (now_ms - s_last_tx_env >= 1000)) {
+                    if ((rx_len >= sizeof(rov_env_telemetry_t) && rx_data[12] != 0) || !s_env_initial_sent ||
+                        (now_ms - s_last_tx_env >= 1000)) {
                         s_last_tx_env = now_ms;
                         s_env_initial_sent = true;
                         should_send = true;

@@ -113,12 +113,21 @@ def status(pwms=None, brake_active=False, solenoids=0, sim_time_ms=0):
 # fixture and the check stop agreeing and the failure-path tests fail loudly.
 # Each format is the one sil_protocol uses (its module-level struct objects) and
 # mirrors the matching field order in shared/include/rov_can_protocol.h:
-#   env   "<3fB"  pressure_hpa, humidity_pct, temperature_c, leak_flags  (13 B)
+#   env   "<3fBHH" pressure_hpa, humidity_pct, temperature_c, leak_flags, rail mV, rail mA (17 B)
 #   nav   "<Q8fB" timestamp_us, 4 quat, 3 gyro, depth_meters, imu_status  (41 B)
 #   power "<HHHH4HhH" tether V/mA, 5 V V/mA, 4x 12 V mA, pcb temp tenths, flags (20 B)
 # The checks' own minimum lengths come from sil_protocol's unpack guards.
-def env_payload(pressure_hpa=1013.25, humidity_pct=35.0, temperature_c=24.0, leak_flags=0):
-    return struct.pack("<3fB", pressure_hpa, humidity_pct, temperature_c, leak_flags)
+def env_payload(
+    pressure_hpa=1013.25,
+    humidity_pct=35.0,
+    temperature_c=24.0,
+    leak_flags=0,
+    rail_voltage_mv=5200,
+    rail_current_ma=1350,
+):
+    return struct.pack(
+        "<3fBHH", pressure_hpa, humidity_pct, temperature_c, leak_flags, rail_voltage_mv, rail_current_ma
+    )
 
 
 def nav_payload(depth_meters=0.0, imu_status=3, timestamp_us=1000):
@@ -1579,10 +1588,10 @@ class TestCanSnifferAgreesWithSilProtocol(unittest.TestCase):
     """
 
     SNIFFER = REPO_ROOT / "tools" / "can_sniffer.py"
-    # can_sniffer names this one _STRUCT_ENV; sil_protocol names it _STRUCT_3FB.
-    # The formats differ as text ("<fffB" vs "<3fB") and are the same 13-byte
-    # layout, which is exactly the kind of difference a text comparison would
-    # either reject or paper over.
+    # can_sniffer and sil_protocol now use the same struct name for the 0x210
+    # layout; the formats still differ as text ("<fffBHH" vs "<3fBHH") and the
+    # comparison is by layout, which is exactly the kind of difference a text
+    # comparison would either reject or paper over.
     STRUCT_NAMES = {
         "_STRUCT_TIME_SYNC_MASTER": "_STRUCT_TIME_SYNC_MASTER",
         "_STRUCT_TIME_SYNC_REQ": "_STRUCT_TIME_SYNC_REQ",
@@ -1591,7 +1600,7 @@ class TestCanSnifferAgreesWithSilProtocol(unittest.TestCase):
         "_STRUCT_H": "_STRUCT_H",
         "_STRUCT_NAV_TS": "_STRUCT_NAV_TS",
         "_STRUCT_NAV_LEGACY": "_STRUCT_NAV_LEGACY",
-        "_STRUCT_ENV": "_STRUCT_3FB",
+        "_STRUCT_ENV": "_STRUCT_ENV",
         "_STRUCT_POWER": "_STRUCT_POWER",
     }
 
@@ -3286,7 +3295,7 @@ SIL_ENV_TEMPERATURE_TOL_C = 0.02
 # (shared/include/rov_safety.h:18) at node1 app.c:192-194, and both floor probes
 # read dry (tests/mocks/mock_bsp.c:33-34 via node1 app.c:204).
 SIL_ENV_LEAK_FLAGS = 0
-SIL_ENV_PAYLOAD_LEN = 13  # struct "<3fB" (sil_protocol._STRUCT_3FB)
+SIL_ENV_PAYLOAD_LEN = 17  # struct "<3fBHH" (sil_protocol._STRUCT_ENV)
 
 # Node 3 (0x300) IS plant driven: the engine enables the plant
 # (tests/sil_bridge_server.c:218) and every 10 ms tick the plant overwrites the
@@ -3543,7 +3552,7 @@ class SilNodeIntegrationTests(ServerBackedTestCase):
         Asserts the 0x210 frames really arrived (at least two, which is what
         distinguishes a live stream from one stale frame, because the server
         emits the first immediately and then 1 Hz -
-        tests/sil_bridge_server.c:376-382), that each is a full 13-byte record,
+        tests/sil_bridge_server.c:376-382), that each is a full 17-byte record,
         and that every field is the value the firmware computes from the sensor
         mock. The 6-DOF plant never drives the BME280
         (tests/mocks/mock_physics.c:332-361), so 1013.25 hPa / 35 % / 24.0 C /
@@ -3565,7 +3574,7 @@ class SilNodeIntegrationTests(ServerBackedTestCase):
                     len(payload),
                     SIL_ENV_PAYLOAD_LEN,
                     f"0x210 frame {index} is {len(payload)} B; the packed rov_env_telemetry_t "
-                    "is 13 B and a short record cannot be a valid reading",
+                    "is 17 B and a short record cannot be a valid reading",
                 )
                 record = EnvTelemetry.unpack(payload)
                 # Exact equality, not a tolerance. All three values are exactly

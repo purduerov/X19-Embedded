@@ -38,7 +38,7 @@ _STRUCT_8H = struct.Struct("<8H")
 _STRUCT_H = struct.Struct("<H")
 _STRUCT_NAV_TS = struct.Struct("<Q8fB")
 _STRUCT_NAV_LEGACY = struct.Struct("<8fB")
-_STRUCT_3FB = struct.Struct("<3fB")
+_STRUCT_ENV = struct.Struct("<3fBHH")
 _STRUCT_POWER = struct.Struct("<HHHH4HhH")
 _STRUCT_SIL_PACKET = struct.Struct(SIL_PACKET_FMT)
 SIL_OUTPUT_STATUS_STRUCT = struct.Struct("<8HBHI")
@@ -172,13 +172,22 @@ class EnvTelemetry:
     humidity_pct: float
     temperature_c: float
     leak_flags: int
+    rail_voltage_mv: int
+    rail_current_ma: int
 
     @classmethod
     def unpack(cls, data: bytes) -> "EnvTelemetry":
-        if len(data) < 13:
-            raise ValueError(f"EnvTelemetry requires at least 13 bytes, got {len(data)}")
-        p, h, t, flags = _STRUCT_3FB.unpack(data[:13])
-        return cls(pressure_hpa=p, humidity_pct=h, temperature_c=t, leak_flags=flags)
+        if len(data) < 17:
+            raise ValueError(f"EnvTelemetry requires at least 17 bytes, got {len(data)}")
+        p, h, t, flags, rail_mv, rail_ma = _STRUCT_ENV.unpack(data[:17])
+        return cls(
+            pressure_hpa=p,
+            humidity_pct=h,
+            temperature_c=t,
+            leak_flags=flags,
+            rail_voltage_mv=rail_mv,
+            rail_current_ma=rail_ma,
+        )
 
 @dataclass
 class PowerTelemetry:
