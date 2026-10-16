@@ -6,6 +6,7 @@
 
 #include "mock_physics.h"
 #include "mock_bsp.h"
+#include "mock_ina237.h"
 #include "mock_sensors.h"
 #include <math.h>
 #include <string.h>
@@ -354,9 +355,9 @@ void mock_physics_step(float dt_s) {
                                       g_phys.brick_currents_a[i], g_phys.brick_temps_c[i], status);
         }
 
-        /* INA226 12V bus monitor & INA237 48V tether monitor */
+        /* INA237 48V tether monitor (node 1 reads it at 0x40 with a 1 mOhm shunt) */
         float total_12v_cur = g_phys.brick_currents_a[0] + g_phys.brick_currents_a[1] + g_phys.brick_currents_a[2] +
                               g_phys.brick_currents_a[3];
-        mock_sensors_set_ina226(g_phys.brick_voltages_v[0], total_12v_cur);
+        mock_ina237_set_reading(0x40u, g_phys.brick_voltages_v[0], total_12v_cur, 0.001f);
     }
 }

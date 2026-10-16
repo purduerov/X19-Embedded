@@ -7,6 +7,7 @@
 #ifndef INA237_H
 #define INA237_H
 
+#include "rov_i2c.h"
 #include "rov_types.h"
 #include <stdint.h>
 
@@ -15,6 +16,7 @@ extern "C" {
 #endif
 
 typedef struct {
+    const rov_i2c_bus_t *bus; /* injected transport; set by ina237_init() */
     uint8_t i2c_addr;
     float shunt_resistor_ohms;
     float bus_voltage_v;
@@ -23,7 +25,16 @@ typedef struct {
     float die_temp_c;
 } ina237_dev_t;
 
-rov_status_t ina237_init(ina237_dev_t *dev, uint8_t i2c_addr, float shunt_resistor_ohms);
+/**
+ * @brief Bind an INA237 at @p i2c_addr to @p bus and start conversions.
+ *
+ * The INA237 has no device-ID register (the 0x3F ID register exists on the
+ * INA238 only), so init cannot verify the chip and validates its arguments
+ * only. It does write ADC_CONFIG, because the power-on default is shutdown
+ * (MODE = 0000) and the part would otherwise never convert.
+ */
+rov_status_t ina237_init(ina237_dev_t *dev, const rov_i2c_bus_t *bus, uint8_t i2c_addr, float shunt_resistor_ohms);
+
 rov_status_t ina237_read_power(ina237_dev_t *dev);
 
 #ifdef __cplusplus

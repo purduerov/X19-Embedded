@@ -181,7 +181,7 @@ void node1_app_init(void) {
     }
 
     bme280_init(&g_bme280_dev, bsp_i2c_bus());
-    ina237_init(&g_ina237_dev, 0x40, 0.001f);
+    ina237_init(&g_ina237_dev, bsp_i2c_bus(), 0x40, 0.001f);
     g_bme280_valid = false;
     g_ina237_valid = false;
 

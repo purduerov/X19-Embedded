@@ -8,6 +8,7 @@
 #include "mocks/mock_bme280.h"
 #include "mocks/mock_bsp.h"
 #include "mocks/mock_can.h"
+#include "mocks/mock_ina237.h"
 #include "mocks/mock_sensors.h"
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
@@ -56,7 +57,7 @@ void test_node1_nominal_telemetry(void) {
 
     set_bme280_reading(1013.25f, 42.0f, 26.5f);
 
-    mock_sensors_set_ina226(5.21f, 1.35f);
+    mock_ina237_set_reading(0x40u, 5.21f, 1.35f, 0.001f);
 
     node1_app_init();
 
