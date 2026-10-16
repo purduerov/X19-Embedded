@@ -117,6 +117,7 @@ else()
         Core/Inc
         ../../shared/include
         ../../drivers/include
+        ../../services/include
         "../Shared Library/include"
         "../Hardware Drivers/include"
     )
@@ -124,6 +125,7 @@ else()
     target_link_libraries(node2_control_board.elf PRIVATE
         rov_shared
         rov_drivers
+        rov_services
         m
     )
 
