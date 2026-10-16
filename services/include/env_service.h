@@ -34,24 +34,6 @@ rov_status_t env_service_init(void);
 rov_status_t env_read_all(float *temp_c, float *press_hpa, float *hum_pct);
 
 /**
- * @brief Get latest cached ambient temperature.
- * @return Temperature in degrees Celsius.
- */
-float env_get_temperature(void);
-
-/**
- * @brief Get latest cached enclosure barometric pressure.
- * @return Pressure in hPa.
- */
-float env_get_pressure(void);
-
-/**
- * @brief Get latest cached enclosure relative humidity.
- * @return Relative humidity in %RH.
- */
-float env_get_humidity(void);
-
-/**
  * @brief Probe if an I2C device acknowledges at the given address.
  * @param addr 7-bit I2C device address.
  * @return true if device responded, false otherwise.

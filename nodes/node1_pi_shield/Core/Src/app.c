@@ -10,7 +10,6 @@
  */
 
 #include "app.h"
-#include "bme280.h"
 #include "bsp.h"
 #include "can_interface.h"
 #include "env_service.h"
@@ -24,7 +23,6 @@
 
 static rov_safety_state_t g_safety_state;
 static rov_env_telemetry_t g_env_telemetry;
-static bme280_dev_t g_bme280_dev;
 static ina237_dev_t g_ina237_dev;
 
 static uint32_t g_last_telemetry_time = 0;
@@ -180,7 +178,7 @@ void node1_app_init(void) {
         g_emergency_latched = true;
     }
 
-    bme280_init(&g_bme280_dev, bsp_i2c_bus());
+    env_service_init();
     ina237_init(&g_ina237_dev, bsp_i2c_bus(), 0x40, 0.001f);
     g_bme280_valid = false;
     g_ina237_valid = false;
@@ -206,18 +204,21 @@ void node1_app_step(void) {
 
     /* Sample sensors and evaluate leak state at 10 Hz */
     if (current_time - g_last_telemetry_time >= (1000 / ROV_ENV_TELEMETRY_FREQ_HZ)) {
+        float temp_c = 0.0f;
+        float press_hpa = 0.0f;
+        float hum_pct = 0.0f;
 
         g_last_telemetry_time = current_time;
 
-        g_bme280_valid = (bme280_read_all(&g_bme280_dev) == ROV_OK) && isfinite(g_bme280_dev.pressure_hpa) &&
-                         isfinite(g_bme280_dev.humidity_pct) && isfinite(g_bme280_dev.temperature_c);
+        g_bme280_valid = (env_read_all(&temp_c, &press_hpa, &hum_pct) == ROV_OK) && isfinite(press_hpa) &&
+                         isfinite(hum_pct) && isfinite(temp_c);
         g_ina237_valid = (ina237_read_power(&g_ina237_dev) == ROV_OK) && isfinite(g_ina237_dev.bus_voltage_v) &&
                          isfinite(g_ina237_dev.shunt_current_a);
 
         /* Track the lowest valid pressure so a vacuum applied after startup is detectable. */
-        if (g_bme280_valid && g_bme280_dev.pressure_hpa > 0.0f &&
-            (g_baseline_pressure_hpa <= 0.0f || g_bme280_dev.pressure_hpa < g_baseline_pressure_hpa)) {
-            g_baseline_pressure_hpa = g_bme280_dev.pressure_hpa;
+        if (g_bme280_valid && press_hpa > 0.0f &&
+            (g_baseline_pressure_hpa <= 0.0f || press_hpa < g_baseline_pressure_hpa)) {
+            g_baseline_pressure_hpa = press_hpa;
         }
 
         uint8_t leak_bits = 0;
@@ -227,7 +228,7 @@ void node1_app_step(void) {
          *
          * Environmental leak detection uses bit 0.
          */
-        if (g_bme280_valid && g_bme280_dev.humidity_pct >= ROV_LEAK_HUMIDITY_MAX_PCT) {
+        if (g_bme280_valid && hum_pct >= ROV_LEAK_HUMIDITY_MAX_PCT) {
             leak_bits |= 0x01;
         }
 
@@ -239,7 +240,7 @@ void node1_app_step(void) {
          * leak using bit 0.
          */
         if (g_bme280_valid && g_baseline_pressure_hpa > 0.0f &&
-            (g_bme280_dev.pressure_hpa - g_baseline_pressure_hpa) >= ROV_LEAK_PRESSURE_DROP_THRESHOLD_HPA) {
+            (press_hpa - g_baseline_pressure_hpa) >= ROV_LEAK_PRESSURE_DROP_THRESHOLD_HPA) {
             leak_bits |= 0x01;
         }
 
@@ -252,11 +253,11 @@ void node1_app_step(void) {
          */
         leak_bits |= node1_get_floor_leak_bits();
 
-        g_env_telemetry.pressure_hpa = g_bme280_valid ? g_bme280_dev.pressure_hpa : 0.0f;
+        g_env_telemetry.pressure_hpa = g_bme280_valid ? press_hpa : 0.0f;
 
-        g_env_telemetry.humidity_pct = g_bme280_valid ? g_bme280_dev.humidity_pct : 0.0f;
+        g_env_telemetry.humidity_pct = g_bme280_valid ? hum_pct : 0.0f;
 
-        g_env_telemetry.temperature_c = g_bme280_valid ? g_bme280_dev.temperature_c : 0.0f;
+        g_env_telemetry.temperature_c = g_bme280_valid ? temp_c : 0.0f;
 
         g_env_telemetry.leak_flags = leak_bits;
 

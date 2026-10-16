@@ -5,6 +5,7 @@
 
 #include "actuator_service.h"
 #include "env_service.h"
+#include "mock_bme280.h"
 #include "mock_bsp.h"
 #include "power_service.h"
 #include "safety_service.h"
@@ -80,10 +81,36 @@ static void test_power_service(void) {
     printf("  [PASS] Power service monitoring and brick shutdown\n");
 }
 
+/*
+ * The service owns the BME280: it initializes the driver and returns the
+ * compensated engineering units. Exercise the real register-image path (device
+ * model -> driver -> service), not a value-level hook, so a wrong branch in
+ * init, a wrong register, or wrong compensation all surface here.
+ */
 static void test_env_service(void) {
-    /* Test env probe returns false when mock I2C has no device */
+    float temp_c = 0.0f;
+    float press_hpa = 0.0f;
+    float hum_pct = 0.0f;
+
+    /* No device on the bus: the probe is false and a read fails. */
+    mock_bsp_reset();
     assert(!env_probe_i2c(0x76));
-    printf("  [PASS] Environmental service initialization and probing\n");
+    assert(env_read_all(NULL, NULL, NULL) != ROV_OK);
+
+    /* Put the sensor on the bus at a known reading. */
+    mock_bme280_present(0x76u);
+    mock_bme280_set_reading(0x76u, 1013.25f, 42.0f, 26.5f);
+
+    assert(env_service_init() == ROV_OK);
+    assert(env_read_all(&temp_c, &press_hpa, &hum_pct) == ROV_OK);
+
+    /* Expectations are hand-written literals, independent of the driver. */
+    assert(fabsf(temp_c - 26.5f) < 0.5f);
+    assert(fabsf(press_hpa - 1013.25f) < 1.0f);
+    assert(fabsf(hum_pct - 42.0f) < 1.0f);
+
+    mock_bsp_reset();
+    printf("  [PASS] Environmental service probing and engineering-unit reads\n");
 }
 
 int main(void) {
