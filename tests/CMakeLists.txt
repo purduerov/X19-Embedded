@@ -13,6 +13,7 @@ add_library(rov_mocks OBJECT
     mocks/mock_sensors.c
     mocks/mock_tmp1075.c
     mocks/mock_ina237.c
+    mocks/mock_ina226.c
     mocks/mock_physics.c
     harness/sil_clock.c
 )

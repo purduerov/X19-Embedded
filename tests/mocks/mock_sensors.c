@@ -19,12 +19,6 @@ static struct {
 } g_mock_imu;
 
 static struct {
-    float voltage_v;
-    float current_a;
-    bool valid;
-} g_mock_ina226;
-
-static struct {
     float v_in;
     float v_out;
     float i_out;
@@ -48,10 +42,6 @@ void mock_sensors_reset(void) {
     g_mock_imu.data.gyro_z_dps = 0.0f;
     g_mock_imu.data.status = 3;
     g_mock_imu.valid = true;
-
-    g_mock_ina226.voltage_v = 5.2f;
-    g_mock_ina226.current_a = 1.5f;
-    g_mock_ina226.valid = true;
 
     for (int i = 0; i < 5; i++) {
         g_mock_tps[i].v_in = 48.0f;
@@ -90,22 +80,6 @@ bool mock_sensors_get_imu(imu_data_t *data) {
     if (!g_mock_imu.valid || !data)
         return false;
     *data = g_mock_imu.data;
-    return true;
-}
-
-void mock_sensors_set_ina226(float voltage_v, float current_a) {
-    g_mock_ina226.voltage_v = voltage_v;
-    g_mock_ina226.current_a = current_a;
-    g_mock_ina226.valid = true;
-}
-
-bool mock_sensors_get_ina226(float *voltage_v, float *current_a) {
-    if (!g_mock_ina226.valid)
-        return false;
-    if (voltage_v)
-        *voltage_v = g_mock_ina226.voltage_v;
-    if (current_a)
-        *current_a = g_mock_ina226.current_a;
     return true;
 }
 

@@ -211,7 +211,7 @@ The host SIL suite comprises 36 `test_*` targets testing the test framework itse
 | 12 | `test_mock_i2c_bus` | Mock BSP I2C bus, byte and 16-bit word registers, fault injection, and presence probe |
 | 13 | `test_driver_bme280` | BME280 driver against the inverse datasheet model |
 | 14 | `test_driver_ms5837` | MS5837 pressure sensor driver |
-| 15 | `test_driver_ina226` | INA226 power monitor driver |
+| 15 | `test_driver_ina226` | INA226 die-ID probe, bus/shunt register reads, conversion, and fault propagation |
 | 16 | `test_driver_tcan1044` | TCAN1044 CAN transceiver driver |
 | 17 | `test_driver_tps25990` | TPS25990 eFuse monitor driver |
 | 18 | `test_driver_lsm6dsoxtr` | LSM6DSOXTR IMU driver |

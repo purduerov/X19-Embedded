@@ -9,8 +9,6 @@
 
 #include "bme280.h"
 #include "bmi270.h"
-#include "ina226.h"
-#include "ina237.h"
 #include "lsm6dsoxtr.h"
 #include "ms5837.h"
 #include "pmbus_brick.h"
@@ -38,12 +36,6 @@ bool mock_sensors_get_ms5837(float *pressure_mbar, float *temp_c);
  */
 void mock_sensors_set_imu(const imu_data_t *data);
 bool mock_sensors_get_imu(imu_data_t *data);
-
-/**
- * @brief Inject INA226 / INA237 bus voltage and current.
- */
-void mock_sensors_set_ina226(float voltage_v, float current_a);
-bool mock_sensors_get_ina226(float *voltage_v, float *current_a);
 
 /**
  * @brief Inject TPS25990 PMBus converter brick telemetry.
