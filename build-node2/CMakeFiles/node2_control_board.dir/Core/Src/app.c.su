@@ -1,0 +1,5 @@
+/app/nodes/node2_control_board/Core/Src/app.c:43:13:node2_force_pwm_neutral	16	static
+/app/nodes/node2_control_board/Core/Src/app.c:51:13:node2_force_neutral	8	static
+/app/nodes/node2_control_board/Core/Src/app.c:56:6:node2_app_init	16	static
+/app/nodes/node2_control_board/Core/Src/app.c:91:6:node2_app_step	320	static
+/app/nodes/node2_control_board/Core/Src/app.c:273:28:app_main	8	static

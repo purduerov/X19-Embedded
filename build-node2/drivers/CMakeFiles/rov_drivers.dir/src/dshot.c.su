@@ -1,0 +1,8 @@
+/app/drivers/src/dshot.c:15:17:dshot_checksum	16	static
+/app/drivers/src/dshot.c:19:10:dshot_prepare_packet	24	static
+/app/drivers/src/dshot.c:28:6:dshot_decode_telemetry_frame	32	static
+/app/drivers/src/dshot.c:60:24:dshot_parse_telemetry	32	static
+/app/drivers/src/dshot.c:127:6:dshot_cmd_queue_init	16	static
+/app/drivers/src/dshot.c:137:6:dshot_cmd_request	16	static
+/app/drivers/src/dshot.c:152:10:dshot_cmd_get_frame	24	static
+/app/drivers/src/dshot.c:169:10:dshot_erpm_period_to_rpm	32	static

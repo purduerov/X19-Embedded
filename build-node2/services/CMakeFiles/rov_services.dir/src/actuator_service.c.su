@@ -1,0 +1,6 @@
+/app/services/src/actuator_service.c:19:6:actuator_service_init	8	static
+/app/services/src/actuator_service.c:23:6:pwm_set_pulse_us	16	static
+/app/services/src/actuator_service.c:46:10:pwm_get_pulse_us	16	static
+/app/services/src/actuator_service.c:53:6:solenoid_set_mask	16	static
+/app/services/src/actuator_service.c:63:10:solenoid_get_mask	4	static
+/app/services/src/actuator_service.c:67:6:actuators_stop_all	16	static

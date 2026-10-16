@@ -1,0 +1,2 @@
+/app/drivers/src/tcan1044.c:9:14:tcan1044_init	16	static
+/app/drivers/src/tcan1044.c:16:14:tcan1044_set_standby	16	static

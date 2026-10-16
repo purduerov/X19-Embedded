@@ -1,0 +1,5 @@
+/app/drivers/src/bmi270.c:12:28:mock_sensors_get_imu	16	static
+/app/drivers/src/bmi270.c:17:13:bmi270_data_valid	24	static
+/app/drivers/src/bmi270.c:27:14:bmi270_init	16	static
+/app/drivers/src/bmi270.c:35:14:bmi270_read_raw	48	static
+/app/drivers/src/bmi270.c:54:14:bmi270_update_attitude	80	static

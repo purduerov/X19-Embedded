@@ -1,0 +1,3 @@
+/app/drivers/../shared/include/rov_i2c.h:41:28:rov_i2c_mem_read	40	static
+/app/drivers/src/tmp1075.c:17:14:tmp1075_init	24	static
+/app/drivers/src/tmp1075.c:29:14:tmp1075_read_temperature	32	static

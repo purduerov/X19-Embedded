@@ -1,0 +1,4 @@
+/app/shared/src/rov_pwm_ramp.c:13:7:rov_pwm_apply_expo	24	static
+/app/shared/src/rov_pwm_ramp.c:27:10:rov_pwm_step_ramp	16	static
+/app/shared/src/rov_pwm_ramp.c:53:7:x19_pwm_apply_expo	16	static
+/app/shared/src/rov_pwm_ramp.c:57:10:x19_pwm_step_ramp	16	static

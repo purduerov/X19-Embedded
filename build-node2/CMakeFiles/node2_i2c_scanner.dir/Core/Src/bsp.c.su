@@ -1,0 +1,14 @@
+/app/nodes/node2_control_board/Core/Src/bsp.c:41:6:bsp_init	16	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:63:10:time_get_ms	8	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:71:10:time_get_us	32	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:75:6:delay_ms	16	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:83:6:bsp_i2c_write	24	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:99:6:bsp_i2c_read	24	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:115:6:led_toggle	4	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:121:6:led_set	16	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:129:6:bsp_pwm_set_us	16	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:179:10:bsp_pwm_get_us	16	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:186:6:bsp_solenoid_set	16	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:198:10:bsp_solenoid_get	4	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:202:6:bsp_emergency_brake_trip	16	static
+/app/nodes/node2_control_board/Core/Src/bsp.c:211:6:bsp_is_emergency_brake_tripped	4	static

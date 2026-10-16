@@ -1,0 +1,6 @@
+/app/shared/src/rov_timesync.c:10:6:rov_timesync_init	16	static
+/app/shared/src/rov_timesync.c:20:14:rov_timesync_process_master	80	static
+/app/shared/src/rov_timesync.c:56:14:rov_timesync_calc_latency	120	static
+/app/shared/src/rov_timesync.c:83:14:rov_timesync_update_latency	32	static
+/app/shared/src/rov_timesync.c:98:10:rov_timesync_get_time_us	40	static
+/app/shared/src/rov_timesync.c:106:6:rov_timesync_is_synchronized	40	static

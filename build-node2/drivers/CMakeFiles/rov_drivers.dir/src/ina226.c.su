@@ -1,0 +1,5 @@
+/app/drivers/../shared/include/rov_i2c.h:41:28:rov_i2c_mem_read	40	static
+/app/drivers/src/ina226.c:25:17:read_u16_be	16	static
+/app/drivers/src/ina226.c:29:21:ina226_check_id	40	static
+/app/drivers/src/ina226.c:60:14:ina226_init	24	static
+/app/drivers/src/ina226.c:73:14:ina226_read_power	40	static

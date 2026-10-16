@@ -1,0 +1,2 @@
+/app/shared/src/rov_i2c_recovery.c:12:14:rov_i2c_recover_bus	32	static
+/app/shared/src/rov_i2c_recovery.c:54:14:x19_i2c_recover_bus	24	static

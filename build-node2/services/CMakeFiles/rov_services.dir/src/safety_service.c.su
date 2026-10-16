@@ -1,0 +1,5 @@
+/app/services/src/safety_service.c:12:6:safety_service_init	4	static
+/app/services/src/safety_service.c:16:6:leak_probe_is_wet	16	static
+/app/services/src/safety_service.c:20:6:safety_emergency_trip	8	static
+/app/services/src/safety_service.c:26:6:safety_is_tripped	8	static
+/app/services/src/safety_service.c:30:6:safety_emergency_reset	8	static
