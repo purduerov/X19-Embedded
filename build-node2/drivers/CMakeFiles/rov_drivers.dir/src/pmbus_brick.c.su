@@ -1,0 +1,11 @@
+/app/drivers/src/pmbus_brick.c:12:28:mock_sensors_get_tps25990	24	static
+/app/drivers/src/pmbus_brick.c:23:7:pmbus_linear11_to_float	24	static
+/app/drivers/src/pmbus_brick.c:41:14:pmbus_brick_init	16	static
+/app/drivers/src/pmbus_brick.c:64:14:pmbus_brick_read_telemetry	48	static
+/app/drivers/src/pmbus_brick.c:125:6:pmbus_brick_address_valid	16	static
+/app/drivers/src/pmbus_brick.c:129:9:pmbus_brick_next_address	16	static
+/app/drivers/src/pmbus_brick.c:141:6:pmbus_status_has_overcurrent	16	static
+/app/drivers/src/pmbus_brick.c:145:6:pmbus_status_has_overvoltage	16	static
+/app/drivers/src/pmbus_brick.c:149:6:pmbus_status_has_uvlo	16	static
+/app/drivers/src/pmbus_brick.c:153:6:pmbus_status_has_thermal_fault	16	static
+/app/drivers/src/pmbus_brick.c:157:7:pmbus_linear16_to_float	24	static

@@ -1,0 +1,10 @@
+/app/drivers/src/ms5837.c:24:28:mock_sensors_get_ms5837	16	static
+/app/drivers/src/ms5837.c:30:13:ms5837_write_command	16	static
+/app/drivers/src/ms5837.c:34:13:ms5837_read_prom_word	24	static
+/app/drivers/src/ms5837.c:55:13:ms5837_read_adc	24	static
+/app/drivers/src/ms5837.c:81:16:ms5837_crc4	40	static
+/app/drivers/src/ms5837.c:109:13:ms5837_calculate_depth	24	static
+/app/drivers/src/ms5837.c:125:13:ms5837_compensate	640	static
+/app/drivers/src/ms5837.c:192:14:ms5837_init	32	static
+/app/drivers/src/ms5837.c:240:14:ms5837_read_pressure_depth	24	static
+/app/drivers/src/ms5837.c:307:14:ms5837_read_sync	16	static

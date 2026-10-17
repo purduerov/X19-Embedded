@@ -1,0 +1,12 @@
+/app/drivers/../shared/include/rov_i2c.h:41:28:rov_i2c_mem_read	40	static
+/app/drivers/../shared/include/rov_i2c.h:62:28:rov_i2c_mem_write	48	static
+/app/drivers/src/bme280.c:29:21:bme280_check_id	32	static
+/app/drivers/src/bme280.c:45:17:read_u16_le	16	static
+/app/drivers/src/bme280.c:49:16:read_s16_le	16	static
+/app/drivers/src/bme280.c:53:21:bme280_read_calibration	64	static
+/app/drivers/src/bme280.c:122:21:bme280_configure	32	static
+/app/drivers/src/bme280.c:171:14:bme280_init	24	static
+/app/drivers/src/bme280.c:234:16:bme280_compensate_temperature	24	static
+/app/drivers/src/bme280.c:254:17:bme280_compensate_pressure	328	static
+/app/drivers/src/bme280.c:310:14:bme280_compensate_humidity	40	static
+/app/drivers/src/bme280.c:334:14:bme280_read_all	64	static

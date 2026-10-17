@@ -1,0 +1,17 @@
+/app/build-node2/CMakeFiles/node2_control_board.dir
+/app/build-node2/CMakeFiles/node2_i2c_scanner.dir
+/app/build-node2/CMakeFiles/sandbox.dir
+/app/build-node2/CMakeFiles/edit_cache.dir
+/app/build-node2/CMakeFiles/rebuild_cache.dir
+/app/build-node2/cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir
+/app/build-node2/cmake/stm32cubemx/CMakeFiles/edit_cache.dir
+/app/build-node2/cmake/stm32cubemx/CMakeFiles/rebuild_cache.dir
+/app/build-node2/shared/CMakeFiles/rov_shared.dir
+/app/build-node2/shared/CMakeFiles/edit_cache.dir
+/app/build-node2/shared/CMakeFiles/rebuild_cache.dir
+/app/build-node2/drivers/CMakeFiles/rov_drivers.dir
+/app/build-node2/drivers/CMakeFiles/edit_cache.dir
+/app/build-node2/drivers/CMakeFiles/rebuild_cache.dir
+/app/build-node2/services/CMakeFiles/rov_services.dir
+/app/build-node2/services/CMakeFiles/edit_cache.dir
+/app/build-node2/services/CMakeFiles/rebuild_cache.dir

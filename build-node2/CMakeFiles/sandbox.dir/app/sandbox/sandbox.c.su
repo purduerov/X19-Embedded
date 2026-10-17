@@ -1,0 +1,6 @@
+/app/sandbox/sandbox.c:64:6:DMA1_Channel1_IRQHandler	8	static
+/app/sandbox/sandbox.c:72:6:HAL_TIM_PWM_PulseFinishedCallback	16	static
+/app/sandbox/sandbox.c:85:13:dshot_dma_init	128	static
+/app/sandbox/sandbox.c:166:13:dshot_dma_write	32	static
+/app/sandbox/sandbox.c:209:20:delay_us	24	static
+/app/sandbox/sandbox.c:216:6:app_main	32	static

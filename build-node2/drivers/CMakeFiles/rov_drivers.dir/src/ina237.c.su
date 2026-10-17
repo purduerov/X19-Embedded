@@ -1,0 +1,5 @@
+/app/drivers/../shared/include/rov_i2c.h:41:28:rov_i2c_mem_read	40	static
+/app/drivers/../shared/include/rov_i2c.h:62:28:rov_i2c_mem_write	48	static
+/app/drivers/src/ina237.c:32:21:ina237_configure_adc	32	static
+/app/drivers/src/ina237.c:39:14:ina237_init	24	static
+/app/drivers/src/ina237.c:52:14:ina237_read_power	48	static

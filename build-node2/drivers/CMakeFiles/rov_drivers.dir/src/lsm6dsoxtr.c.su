@@ -1,0 +1,5 @@
+/app/drivers/src/lsm6dsoxtr.c:12:28:mock_sensors_get_imu	16	static
+/app/drivers/src/lsm6dsoxtr.c:17:13:lsm6dsoxtr_data_valid	24	static
+/app/drivers/src/lsm6dsoxtr.c:27:14:lsm6dsoxtr_init	16	static
+/app/drivers/src/lsm6dsoxtr.c:35:14:lsm6dsoxtr_read_raw	48	static
+/app/drivers/src/lsm6dsoxtr.c:55:14:lsm6dsoxtr_update_madgwick	80	static

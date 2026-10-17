@@ -1,0 +1,4 @@
+/app/services/src/power_service.c:10:6:power_bricks_disable_all	8	static
+/app/services/src/power_service.c:14:7:power_get_pcb_temperature_c	8	static
+/app/services/src/power_service.c:18:6:power_lm74700_is_ok	8	static
+/app/services/src/power_service.c:22:10:power_get_logic_voltage_mv	8	static

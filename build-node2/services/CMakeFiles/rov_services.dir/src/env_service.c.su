@@ -1,0 +1,6 @@
+/app/services/src/env_service.c:17:14:env_service_init	16	static
+/app/services/src/env_service.c:26:14:env_read_all	32	static
+/app/services/src/env_service.c:54:7:env_get_temperature	4	static
+/app/services/src/env_service.c:58:7:env_get_pressure	4	static
+/app/services/src/env_service.c:62:7:env_get_humidity	4	static
+/app/services/src/env_service.c:66:6:env_probe_i2c	16	static

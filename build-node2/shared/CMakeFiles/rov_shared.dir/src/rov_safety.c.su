@@ -1,0 +1,8 @@
+/app/shared/src/rov_safety.c:10:6:rov_safety_init	16	static
+/app/shared/src/rov_safety.c:21:6:rov_safety_feed_heartbeat	16	static
+/app/shared/src/rov_safety.c:29:6:rov_safety_is_heartbeat_lost	16	static
+/app/shared/src/rov_safety.c:37:6:rov_safety_trigger_emergency_break	16	static
+/app/shared/src/rov_safety.c:51:6:x19_safety_init	16	static
+/app/shared/src/rov_safety.c:55:6:x19_safety_feed_heartbeat	16	static
+/app/shared/src/rov_safety.c:59:6:x19_safety_is_heartbeat_lost	16	static
+/app/shared/src/rov_safety.c:63:6:x19_safety_trigger_emergency_break	16	static

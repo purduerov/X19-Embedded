@@ -1,0 +1,2 @@
+/app/nodes/node2_control_board/Core/Src/diagnostic_i2c_scan.c:17:13:i2c_probe_device	16	static
+/app/nodes/node2_control_board/Core/Src/diagnostic_i2c_scan.c:27:6:app_main	24	static
