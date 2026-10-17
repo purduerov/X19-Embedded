@@ -473,12 +473,58 @@ void test_node1_rail_saturates(void) {
     printf("[PASS] test_node1_rail_saturates\n");
 }
 
+/*
+ * A failed rail read must publish 0, not the last good value. This is the
+ * branch a stale-value regression would break: the service returns an error
+ * and leaves the caller's outputs untouched, and the app gates on that status.
+ * The absent-device case cannot cover it, because an absent mock device still
+ * answers with zeros and the read succeeds.
+ */
+void test_node1_rail_zero_on_fault(void) {
+    setup();
+
+    set_bme280_reading(1013.25f, 35.0f, 24.0f);
+    mock_ina237_set_reading(0x40u, 5.2f, 1.5f, 0.001f);
+
+    node1_app_init();
+
+    uint32_t tx_id = 0;
+    uint8_t data[64];
+    uint8_t len = 0;
+    rov_env_telemetry_t env;
+
+    /* The first frame carries the live rail, so the fault below is a change. */
+    mock_bsp_advance_time_ms(100);
+    node1_app_step();
+
+    assert(mock_can_get_last_tx(&tx_id, data, &len));
+    assert(tx_id == ROV_CAN_ID_ENV_TELEMETRY);
+    assert(rov_can_unpack_env_telemetry(data, len, &env) == ROV_OK);
+    assert(env.rail_voltage_mv != 0u);
+    assert(env.rail_current_ma != 0u);
+
+    /* Bus fault: the next frame must zero the rail rather than repeat it. */
+    mock_bsp_i2c_set_fault(ROV_TIMEOUT);
+    mock_bsp_advance_time_ms(100);
+    node1_app_step();
+
+    assert(mock_can_get_last_tx(&tx_id, data, &len));
+    assert(tx_id == ROV_CAN_ID_ENV_TELEMETRY);
+    assert(rov_can_unpack_env_telemetry(data, len, &env) == ROV_OK);
+    assert(env.rail_voltage_mv == 0u);
+    assert(env.rail_current_ma == 0u);
+
+    mock_bsp_reset();
+    printf("[PASS] test_node1_rail_zero_on_fault\n");
+}
+
 int main(void) {
     printf("Running Node 1 (Pi Shield) SIL Unit Tests...\n");
 
     test_node1_nominal_telemetry();
     test_node1_rail_zero_when_absent();
     test_node1_rail_saturates();
+    test_node1_rail_zero_on_fault();
 
     test_node1_vacuum_loss_leak_trigger();
 
