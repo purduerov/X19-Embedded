@@ -5,6 +5,7 @@ Opens COM6 at 115200, sends MSP handshake like esc-configurator.com, then
 switches into 4-way and sends the same cmd_InterfaceTestAlive /
 cmd_DeviceInitFlash packets the site uses.
 """
+import binascii
 import sys
 import serial
 
@@ -36,15 +37,7 @@ def fourway_frame(cmd, payload, address=0):
         body.extend(payload)
     else:
         body.append(0x00)
-    crc = 0
-    for b in body:
-        crc ^= b << 8
-        crc &= 0xFFFF
-        for _ in range(8):
-            if crc & 0x8000:
-                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
-            else:
-                crc = (crc << 1) & 0xFFFF
+    crc = binascii.crc_hqx(body, 0)
     body.append((crc >> 8) & 0xFF)
     body.append(crc & 0xFF)
     return bytes(body)
