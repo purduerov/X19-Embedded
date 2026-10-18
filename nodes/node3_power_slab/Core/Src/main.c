@@ -20,11 +20,11 @@
  * HAL_Init is declared here. Once the generated header exists this declaration
  * is redundant but harmless, and matches the prototype the HAL provides.
  */
-void HAL_Init(void);
-void SystemClock_Config(void);
-void MX_GPIO_Init(void);
-void MX_FDCAN1_Init(void);
-void MX_I2C1_Init(void);
+__attribute__((weak)) void HAL_Init(void) {}
+__attribute__((weak)) void SystemClock_Config(void) {}
+__attribute__((weak)) void MX_GPIO_Init(void) {}
+__attribute__((weak)) void MX_FDCAN1_Init(void) {}
+__attribute__((weak)) void MX_I2C1_Init(void) {}
 
 int main(void) {
 
@@ -40,7 +40,7 @@ int main(void) {
 
     /* Peripheral init must complete before app_main() runs, because
      * node3_app_init() calls bsp_init() and can_init() and then immediately
-     * starts the power sequencer and the INA237 rail monitor. */
+     * starts transmitting CAN telemetry. */
     MX_GPIO_Init();
     MX_FDCAN1_Init();
     MX_I2C1_Init();

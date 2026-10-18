@@ -48,7 +48,7 @@ SERVER_STEM = "sil_bridge_server"
 SERVER_EXE = Path(
     os.environ.get(
         "X19_SIL_SERVER",
-        str(REPO_ROOT / "build-native" / "tests" / f"{SERVER_STEM}.exe"),
+        str(REPO_ROOT / "build-native" / "tests" / f"{SERVER_STEM}{'.exe' if os.name == 'nt' else ''}"),
     )
 )
 SERVER_START_TIMEOUT_S = 5.0
