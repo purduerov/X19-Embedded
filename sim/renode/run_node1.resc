@@ -1,0 +1,7 @@
+using sysbus
+mach create "Node1_Pi_Shield"
+machine LoadPlatformDescription @sim/renode/nucleo_f411re.repl
+
+sysbus LoadELF @build/arm-c542-debug/boards/f411_nucleo/f411_node1_pi_shield.elf
+
+showAnalyzer sysbus.usart2
