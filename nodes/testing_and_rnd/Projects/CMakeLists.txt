@@ -32,7 +32,7 @@ message("Build type: " ${CMAKE_BUILD_TYPE})
 enable_language(C ASM)
 
 # Create an executable object type
-add_executable(${CMAKE_PROJECT_NAME})
+add_executable(${CMAKE_PROJECT_NAME} EXCLUDE_FROM_ALL)
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES SUFFIX ".elf")
 
 # Add STM32CubeMX generated sources
@@ -92,7 +92,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 # ==============================================================================
 
 # 1. Node 1 Pi Shield Bench Target
-add_executable(bench_node1_pi_shield.elf)
+add_executable(bench_node1_pi_shield.elf EXCLUDE_FROM_ALL)
 target_sources(bench_node1_pi_shield.elf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/bsp.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/can_f4.c
@@ -146,7 +146,7 @@ target_link_libraries(bench_node2_control_board.elf
 )
 
 # 3. Node 3 Power Slab Bench Target
-add_executable(bench_node3_power_slab.elf)
+add_executable(bench_node3_power_slab.elf EXCLUDE_FROM_ALL)
 target_sources(bench_node3_power_slab.elf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/bsp.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../Src/can_f4.c
