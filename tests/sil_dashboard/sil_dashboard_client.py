@@ -312,6 +312,9 @@ class SilDashboardClient:
         self._last_logged_payload: Dict[int, bytes] = {}
         self._last_logged_time: Dict[int, float] = {}
 
+        self._last_sec: Optional[int] = None
+        self._last_ts_str: str = ""
+
         # Live vehicle state
         self.pwms = [1500] * 8
         self.actual_pwms = [1500] * 8
@@ -933,8 +936,17 @@ class SilDashboardClient:
             self._last_logged_time[can_id] = now
 
         name = CAN_ID_MAP.get(can_id, ("UNKNOWN", ""))[0]
+
+        now_time = time.time()
+        sec = int(now_time)
+        if sec != self._last_sec:
+            self._last_sec = sec
+            self._last_ts_str = time.strftime("%H:%M:%S", time.localtime(sec))
+
+        timestamp_str = self._last_ts_str + f".{int(now_time*1000)%1000:03d}"
+
         rec = CanPacketRecord(
-            timestamp=time.strftime("%H:%M:%S") + f".{int(time.time()*1000)%1000:03d}",
+            timestamp=timestamp_str,
             direction=direction,
             can_id=can_id,
             name=name,
