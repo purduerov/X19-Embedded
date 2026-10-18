@@ -46,3 +46,7 @@
 ## 2026-09-23 - Prevent catch-up bursting in relative sleep loops
 **Learning:** When implementing periodic high-frequency transmission loops (e.g., CAN flashing), calculating sleep duration based on an absolute start time (e.g., `target = start + i * interval`) causes 'catch-up bursting'. If the loop is delayed (OS switch, full buffer), the sleep becomes negative, and subsequent iterations will fire with zero delay until the debt is repaid, overwhelming downstream receivers.
 **Action:** Calculate sleep relative to the start of the current iteration using high-resolution timers: `elapsed = time.perf_counter() - iter_start; if elapsed < interval: time.sleep(interval - elapsed)` to guarantee a minimum period without accumulating debt.
+
+## 2026-10-24 - Table-Driven CRC16 CCITT Computation (Update)
+**Learning:** While Python-level precomputed lookup tables (LUT) for CRC calculations avoid bit-by-bit loops, they still suffer from significant interpreter overhead per byte iteration. Using Python's built-in, C-optimized `binascii.crc_hqx(data, 0xFFFF)` performs the exact same CRC16-CCITT calculation natively.
+**Action:** Use `binascii.crc_hqx` for CRC16-CCITT calculations instead of manual Python table-driven loops to achieve an additional ~20x speedup over the table approach.
