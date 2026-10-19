@@ -6,6 +6,7 @@ usage: python3 esc_probe.py /dev/cu.usbmodemXXXX     (pip install pyserial)
 """
 import struct
 import sys
+import binascii
 
 import serial
 
@@ -27,13 +28,7 @@ def msp(port, cmd, data=b""):
 
 
 def crc_xmodem(data):
-    crc = 0
-    for b in data:
-        crc ^= b << 8
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else (crc << 1)
-            crc &= 0xFFFF
-    return crc
+    return binascii.crc_hqx(bytes(data), 0)
 
 
 def fourway(port, cmd, addr=0, params=b"\x00"):
