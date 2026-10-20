@@ -5,7 +5,10 @@ Opens COM6 at 115200, sends MSP handshake like esc-configurator.com, then
 switches into 4-way and sends the same cmd_InterfaceTestAlive /
 cmd_DeviceInitFlash packets the site uses.
 """
+import binascii
 import sys
+import time
+
 import serial
 
 COM = sys.argv[1] if len(sys.argv) > 1 else "COM6"
@@ -36,22 +39,13 @@ def fourway_frame(cmd, payload, address=0):
         body.extend(payload)
     else:
         body.append(0x00)
-    crc = 0
-    for b in body:
-        crc ^= b << 8
-        crc &= 0xFFFF
-        for _ in range(8):
-            if crc & 0x8000:
-                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
-            else:
-                crc = (crc << 1) & 0xFFFF
+    crc = binascii.crc_hqx(body, 0)
     body.append((crc >> 8) & 0xFF)
     body.append(crc & 0xFF)
     return bytes(body)
 
 
 def read_all(s, timeout=0.5):
-    import time
     s.timeout = timeout
     data = s.read(4096)
     return data
@@ -77,22 +71,17 @@ def main():
         s.write(msp_frame(104, 0))
         print("RX:", read_all(s, 0.5).hex())
 
-        print(">>> POWER-CYCLE THE ESC NOW (unplug and replug the battery) <<<")
-        import time
+        print(">>> POWER-CYCLE THE ESC NOW "
+              "(unplug and replug the battery) <<<")
 
         print("TX set 4way passthrough (245) -- ARMED window starts now")
         s.write(msp_frame(245, 0))
         print("RX:", read_all(s, 0.5).hex())
 
-        # The firmware blocks for the whole ~20 s arm window, so anything sent
-        # during it is dropped (LPUART has no FIFO). Wait for the explicit
-        # "window closed" banner rather than guessing with sleep(), otherwise we
-        # parse banner text as 4-way frames and get nonsense diagnostics.
-
-        # The firmware blocks for the whole ~20 s arm window, so anything sent
-        # during it is dropped (LPUART has no FIFO). Wait for the explicit
-        # "window closed" banner rather than guessing with sleep(), otherwise we
-        # parse banner text as 4-way frames and get nonsense diagnostics.
+        # The firmware blocks for the whole ~20 s arm window. Wait for the
+        # explicit "window closed" banner rather than guessing with sleep(),
+        # otherwise we parse banner text as 4-way frames and get nonsense
+        # diagnostics.
         s.reset_input_buffer()
         s.timeout = 1.0
         t_end = time.time() + 40
@@ -108,7 +97,8 @@ def main():
                 print("   ", text.strip().splitlines()[0])
             if "window closed" in text:
                 closed = True
-                print("   ", [l for l in text.splitlines() if "closed" in l][0])
+                lines = [ln for ln in text.splitlines() if "closed" in ln]
+                print("   ", lines[0])
                 break
 
         if not armed:
