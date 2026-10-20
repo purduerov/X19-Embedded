@@ -24,6 +24,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         Core/Inc
         ../../shared/include
         ../../drivers/include
+        ../../services/include
     )
 
     # Existing project libraries
@@ -56,6 +57,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         Core/Inc
         ../../shared/include
         ../../drivers/include
+        ../../services/include
     )
     target_link_libraries(node2_i2c_scanner
         STM32_Drivers
@@ -88,6 +90,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         Core/Inc
         ../../shared/include
         ../../drivers/include
+        ../../services/include
     )
     target_link_libraries(sandbox
         STM32_Drivers
@@ -117,6 +120,7 @@ else()
         Core/Inc
         ../../shared/include
         ../../drivers/include
+        ../../services/include
         "../Shared Library/include"
         "../Hardware Drivers/include"
     )
