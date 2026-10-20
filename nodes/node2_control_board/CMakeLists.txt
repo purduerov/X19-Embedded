@@ -34,6 +34,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     target_link_libraries(node2_control_board
         rov_shared
         rov_drivers
+        rov_services
         m
     )
 
@@ -63,6 +64,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         STM32_Drivers
         rov_shared
         rov_drivers
+        rov_services
         m
     )
     target_compile_options(node2_i2c_scanner PRIVATE
@@ -96,6 +98,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         STM32_Drivers
         rov_shared
         rov_drivers
+        rov_services
         m
     )
     target_compile_options(sandbox PRIVATE
@@ -128,6 +131,7 @@ else()
     target_link_libraries(node2_control_board.elf PRIVATE
         rov_shared
         rov_drivers
+        rov_services
         m
     )
 
