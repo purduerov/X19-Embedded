@@ -4,6 +4,7 @@ bootloader and print the BLHeli_S settings header. Read-only.
 
 usage: python3 esc_probe.py /dev/cu.usbmodemXXXX     (pip install pyserial)
 """
+import binascii
 import struct
 import sys
 
@@ -27,17 +28,12 @@ def msp(port, cmd, data=b""):
 
 
 def crc_xmodem(data):
-    crc = 0
-    for b in data:
-        crc ^= b << 8
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else (crc << 1)
-            crc &= 0xFFFF
-    return crc
+    return binascii.crc_hqx(data, 0)
 
 
 def fourway(port, cmd, addr=0, params=b"\x00"):
-    frame = bytes([0x2F, cmd, addr >> 8, addr & 0xFF, len(params) & 0xFF]) + params
+    f_len = len(params) & 0xFF
+    frame = bytes([0x2F, cmd, addr >> 8, addr & 0xFF, f_len]) + params
     port.write(frame + struct.pack(">H", crc_xmodem(frame)))
     hdr = port.read(5)
     if len(hdr) < 5 or hdr[0] != 0x2E:
@@ -60,14 +56,18 @@ def main():
 
     ack, info = fourway(port, 0x37)  # DeviceInitFlash, ESC 0
     if ack:
-        sys.exit(f"ESC bootloader not responding (ack 0x{ack:02X}). "
-                 "Power-cycle the ESC and retry.")
+        msg = f"ESC bootloader not responding (ack 0x{ack:02X}). " \
+              "Power-cycle the ESC and retry."
+        sys.exit(msg)
     print(f"Signature : 0x{info[1]:02X}{info[0]:02X}  mode {info[3]}")
 
     ack, ee = fourway(port, 0x3A, BLHELI_S_EEPROM, bytes([0x70]))  # DeviceRead
     if ack:
         sys.exit(f"read failed (ack 0x{ack:02X})")
-    text = lambda b: b.split(b"\x00")[0].decode(errors="replace").strip()
+
+    def text(b):
+        return b.split(b"\x00")[0].decode(errors="replace").strip()
+
     print(f"Firmware  : {ee[0]}.{ee[1]} (layout rev {ee[2]})")
     print("Layout    :", text(ee[0x40:0x50]))
     print("MCU       :", text(ee[0x50:0x60]))
