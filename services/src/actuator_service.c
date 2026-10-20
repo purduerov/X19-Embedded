@@ -33,7 +33,9 @@ void pwm_set_pulse_us(uint8_t channel, uint16_t pulse_us) {
     }
 
     /* Enforce strict physical clamp */
-    if (pulse_us < ESC_PULSE_MIN_US) {
+    if (pulse_us == 0U) {
+        pulse_us = ESC_PULSE_NEUTRAL_US;
+    } else if (pulse_us < ESC_PULSE_MIN_US) {
         pulse_us = ESC_PULSE_MIN_US;
     } else if (pulse_us > ESC_PULSE_MAX_US) {
         pulse_us = ESC_PULSE_MAX_US;
@@ -44,7 +46,7 @@ void pwm_set_pulse_us(uint8_t channel, uint16_t pulse_us) {
 }
 
 uint16_t pwm_get_pulse_us(uint8_t channel) {
-    if (channel >= 8U) {
+    if (channel >= 8U || safety_is_tripped()) {
         return ESC_PULSE_NEUTRAL_US;
     }
     return g_pwm_pulses[channel];
@@ -61,6 +63,9 @@ void solenoid_set_mask(uint16_t mask) {
 }
 
 uint16_t solenoid_get_mask(void) {
+    if (safety_is_tripped()) {
+        return 0;
+    }
     return g_solenoid_mask;
 }
 

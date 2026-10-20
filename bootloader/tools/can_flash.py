@@ -80,9 +80,7 @@ def wait_for_ack(bus, expected_node_id: int, timeout: float = 2.0) -> bool:
 
 
 def _send_can_frame(bus, message) -> None:
-    result = bus.send(message)
-    if result is False:
-        raise RuntimeError("python-can rejected the transmit request")
+    bus.send(message)
 
 
 def _send_boot_command(bus, command: int, node_id: int, payload: bytes = b"") -> None:
@@ -100,10 +98,22 @@ def _send_boot_command(bus, command: int, node_id: int, payload: bytes = b"") ->
     )
 
 
-def flash_node(interface: str, target_node: str, bin_path: str) -> bool:
-    node_id = NODES.get(target_node)
-    if node_id is None:
-        print(f"Error: Unknown target node '{target_node}'. Valid nodes: {list(NODES.keys())}")
+def parse_node_id(node_val: str | int) -> int:
+    if isinstance(node_val, int):
+        return node_val
+    if node_val in NODES:
+        return NODES[node_val]
+    try:
+        return int(node_val, 0)
+    except ValueError:
+        raise ValueError(f"Unknown target node '{node_val}'. Valid nodes: {list(NODES.keys())} or numeric ID")
+
+
+def flash_node(interface: str, target_node: str | int, bin_path: str) -> bool:
+    try:
+        node_id = parse_node_id(target_node)
+    except ValueError as exc:
+        print(f"Error: {exc}")
         return False
     if can is None:
         print("Error: python-can is not installed. Install it before flashing hardware.")
@@ -202,10 +212,17 @@ def flash_node(interface: str, target_node: str, bin_path: str) -> bool:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Purdue ROV CAN FD Remote Bootloader Flasher")
-    parser.add_argument("--interface", default="can0", help="SocketCAN interface (default: can0)")
-    parser.add_argument("--target", required=True, choices=list(NODES.keys()), help="Target node name")
-    parser.add_argument("--bin", required=True, help="Path to compiled firmware .bin file")
+    parser.add_argument("--interface", "--channel", dest="interface", default="can0", help="SocketCAN interface / channel (default: can0)")
+    parser.add_argument("--target", "--node-id", dest="target", default=None, help="Target node name or numeric ID (e.g. pi_shield or 0x01)")
+    parser.add_argument("pos_bin", nargs="?", default=None, help="Path to compiled firmware .bin file (positional)")
+    parser.add_argument("--bin", dest="opt_bin", default=None, help="Path to compiled firmware .bin file")
     args = parser.parse_args()
 
-    if not flash_node(args.interface, args.target, args.bin):
+    bin_path = args.opt_bin or args.pos_bin
+    if not bin_path:
+        parser.error("Binary file path must be specified via positional argument or --bin")
+    if not args.target:
+        parser.error("Target node must be specified via --target or --node-id")
+
+    if not flash_node(args.interface, args.target, bin_path):
         raise SystemExit(1)

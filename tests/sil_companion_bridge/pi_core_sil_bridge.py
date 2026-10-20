@@ -69,7 +69,15 @@ class PiCoreSilBridge:
         self.imu_pub = None
         if hasattr(telemetry_pb2, "ImuData") and hasattr(telemetry_pb2, "Quaternion"):
             try:
-                self.imu_pub = Publisher(address=zmq_telemetry_pub_addr.replace(":5555", ":5557"), topic="imu")
+                if ":" in zmq_telemetry_pub_addr:
+                    base_addr, port_str = zmq_telemetry_pub_addr.rsplit(":", 1)
+                    if port_str.isdigit():
+                        imu_addr = f"{base_addr}:{int(port_str) + 2}"
+                    else:
+                        imu_addr = zmq_telemetry_pub_addr + "_imu"
+                else:
+                    imu_addr = zmq_telemetry_pub_addr + "_imu"
+                self.imu_pub = Publisher(address=imu_addr, topic="imu")
             except Exception:
                 self.imu_pub = None
 

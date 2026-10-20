@@ -132,7 +132,6 @@ INSTALL_HINTS = {
     ),
 }
 
-REQUIRED = ("cmake", "ninja", "arm-none-eabi-gcc", "STM32_Programmer_CLI", "pyserial")
 
 
 def tool_version(argv: list[str]) -> str:

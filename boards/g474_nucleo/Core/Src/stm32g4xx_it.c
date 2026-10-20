@@ -22,6 +22,7 @@
 #include "main.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "bsp.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -81,7 +82,13 @@ void NMI_Handler(void) {
  */
 void HardFault_Handler(void) {
     /* USER CODE BEGIN HardFault_IRQn 0 */
-
+#if defined(TIM1) && defined(TIM_BDTR_MOE)
+    TIM1->BDTR &= ~TIM_BDTR_MOE;
+#endif
+#if defined(TIM8) && defined(TIM_BDTR_MOE)
+    TIM8->BDTR &= ~TIM_BDTR_MOE;
+#endif
+    bsp_emergency_brake_trip();
     /* USER CODE END HardFault_IRQn 0 */
     while (1) {
         /* USER CODE BEGIN W1_HardFault_IRQn 0 */

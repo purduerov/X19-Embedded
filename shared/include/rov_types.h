@@ -137,7 +137,7 @@ typedef struct __attribute__((packed)) {
 } rov_env_telemetry_t;
 
 /**
- * @brief 20 Hz Power Slab Telemetry Payload (Packed, 24 bytes).
+ * @brief 20 Hz Power Slab Telemetry Payload (Packed, 20 bytes).
  */
 typedef struct __attribute__((packed)) {
     uint16_t tether_voltage_mv; /**< Tether Voltage in millivolts */
@@ -150,7 +150,7 @@ typedef struct __attribute__((packed)) {
 } rov_power_telemetry_t;
 
 /**
- * @brief 5 Hz USB Camera Hub Telemetry Payload (Packed, 20 bytes).
+ * @brief 5 Hz USB Camera Hub Telemetry Payload (Packed, 22 bytes).
  */
 typedef struct __attribute__((packed)) {
     uint16_t vbus_voltage_mv;    /**< 5.0V VBUS Line Voltage (mV) */
@@ -159,6 +159,17 @@ typedef struct __attribute__((packed)) {
     uint8_t port_power_mask;     /**< Active VBUS power bitmask (8 ports) */
     uint8_t fault_flags;         /**< Overcurrent, thermal warning flags */
 } rov_usb_hub_telemetry_t;
+
+_Static_assert(sizeof(rov_thruster_cmd_t) == 16, "rov_thruster_cmd_t size mismatch");
+_Static_assert(sizeof(rov_solenoid_cmd_t) == 2, "rov_solenoid_cmd_t size mismatch");
+_Static_assert(sizeof(imu_data_t) == 29, "imu_data_t size mismatch");
+_Static_assert(sizeof(rov_time_sync_master_t) == 16, "rov_time_sync_master_t size mismatch");
+_Static_assert(sizeof(rov_time_sync_req_t) == 16, "rov_time_sync_req_t size mismatch");
+_Static_assert(sizeof(rov_time_sync_resp_t) == 32, "rov_time_sync_resp_t size mismatch");
+_Static_assert(sizeof(rov_nav_telemetry_t) == 41, "rov_nav_telemetry_t size mismatch");
+_Static_assert(sizeof(rov_env_telemetry_t) == 17, "rov_env_telemetry_t size mismatch");
+_Static_assert(sizeof(rov_power_telemetry_t) == 20, "rov_power_telemetry_t size mismatch");
+_Static_assert(sizeof(rov_usb_hub_telemetry_t) == 22, "rov_usb_hub_telemetry_t size mismatch");
 
 /**
  * @brief Bootloader Control Command Identifiers.

@@ -39,18 +39,18 @@
 
 #define STM32G4 1
 
-#define GPIO_PIN_RESET 0U
-#define GPIO_PIN_SET 1U
-#define GPIO_MODE_INPUT 0x01U
+#define GPIO_PIN_RESET      0U
+#define GPIO_PIN_SET        1U
+#define GPIO_MODE_INPUT     0x01U
 #define GPIO_MODE_OUTPUT_PP 0x02U
-#define GPIO_PULLUP 0x01U
-#define GPIO_NOPULL 0x00U
+#define GPIO_PULLUP         0x01U
+#define GPIO_NOPULL         0x00U
 #define GPIO_SPEED_FREQ_LOW 0x00U
-#define HAL_OK 0U
-#define TIM_CHANNEL_1 0U
-#define TIM_CHANNEL_2 1U
-#define TIM_CHANNEL_3 2U
-#define TIM_CHANNEL_4 3U
+#define HAL_OK              0U
+#define TIM_CHANNEL_1       0U
+#define TIM_CHANNEL_2       1U
+#define TIM_CHANNEL_3       2U
+#define TIM_CHANNEL_4       3U
 
 typedef struct {
     uint8_t id;
@@ -81,63 +81,64 @@ extern TIM_HandleTypeDef fake_htim8;
 #define htim1 fake_htim1
 #define htim8 fake_htim8
 
-#define PIN_0 (1U << 0U)
-#define PIN_1 (1U << 1U)
-#define PIN_2 (1U << 2U)
-#define PIN_3 (1U << 3U)
-#define PIN_4 (1U << 4U)
-#define PIN_5 (1U << 5U)
-#define PIN_6 (1U << 6U)
-#define PIN_7 (1U << 7U)
-#define PIN_8 (1U << 8U)
-#define PIN_9 (1U << 9U)
+#define PIN_0  (1U << 0U)
+#define PIN_1  (1U << 1U)
+#define PIN_2  (1U << 2U)
+#define PIN_3  (1U << 3U)
+#define PIN_4  (1U << 4U)
+#define PIN_5  (1U << 5U)
+#define PIN_6  (1U << 6U)
+#define PIN_7  (1U << 7U)
+#define PIN_8  (1U << 8U)
+#define PIN_9  (1U << 9U)
 #define PIN_10 (1U << 10U)
 #define PIN_13 (1U << 13U)
 
-#define LEAK_PROBE0_GPIO_Port GPIOA
-#define LEAK_PROBE0_Pin PIN_4
-#define LEAK_PROBE1_GPIO_Port GPIOA
-#define LEAK_PROBE1_Pin PIN_5
+#define LEAK_PROBE0_GPIO_Port      GPIOA
+#define LEAK_PROBE0_Pin            PIN_4
+#define LEAK_PROBE1_GPIO_Port      GPIOA
+#define LEAK_PROBE1_Pin            PIN_5
 #define EMERGENCY_CUTOFF_GPIO_Port GPIOC
-#define EMERGENCY_CUTOFF_Pin PIN_10
-#define LED_STATUS_GPIO_Port GPIOC
-#define LED_STATUS_Pin PIN_13
-#define LED_HEARTBEAT_GPIO_Port GPIOC
-#define LED_HEARTBEAT_Pin PIN_13
+#define EMERGENCY_CUTOFF_Pin       PIN_10
+#define LED_STATUS_GPIO_Port       GPIOC
+#define LED_STATUS_Pin             PIN_13
+#define LED_HEARTBEAT_GPIO_Port    GPIOC
+#define LED_HEARTBEAT_Pin          PIN_13
 
 #define SOL_0_GPIO_Port GPIOB
-#define SOL_0_Pin PIN_0
+#define SOL_0_Pin       PIN_0
 #define SOL_1_GPIO_Port GPIOB
-#define SOL_1_Pin PIN_1
+#define SOL_1_Pin       PIN_1
 #define SOL_2_GPIO_Port GPIOB
-#define SOL_2_Pin PIN_2
+#define SOL_2_Pin       PIN_2
 #define SOL_3_GPIO_Port GPIOB
-#define SOL_3_Pin PIN_3
+#define SOL_3_Pin       PIN_3
 #define SOL_4_GPIO_Port GPIOB
-#define SOL_4_Pin PIN_4
+#define SOL_4_Pin       PIN_4
 #define SOL_5_GPIO_Port GPIOB
-#define SOL_5_Pin PIN_5
+#define SOL_5_Pin       PIN_5
 #define SOL_6_GPIO_Port GPIOB
-#define SOL_6_Pin PIN_6
+#define SOL_6_Pin       PIN_6
 #define SOL_7_GPIO_Port GPIOB
-#define SOL_7_Pin PIN_7
+#define SOL_7_Pin       PIN_7
 #define SOL_8_GPIO_Port GPIOB
-#define SOL_8_Pin PIN_8
+#define SOL_8_Pin       PIN_8
 #define SOL_9_GPIO_Port GPIOB
-#define SOL_9_Pin PIN_9
+#define SOL_9_Pin       PIN_9
 
-#define BRICK1_EN_GPIO_Port GPIOB
-#define BRICK1_EN_Pin PIN_0
-#define BRICK2_EN_GPIO_Port GPIOB
-#define BRICK2_EN_Pin PIN_1
-#define BRICK3_EN_GPIO_Port GPIOB
-#define BRICK3_EN_Pin PIN_2
-#define BRICK4_EN_GPIO_Port GPIOB
-#define BRICK4_EN_Pin PIN_4
+#define BRICK1_EN_GPIO_Port    GPIOB
+#define BRICK1_EN_Pin          PIN_0
+#define BRICK2_EN_GPIO_Port    GPIOB
+#define BRICK2_EN_Pin          PIN_1
+#define BRICK3_EN_GPIO_Port    GPIOB
+#define BRICK3_EN_Pin          PIN_2
+#define BRICK4_EN_GPIO_Port    GPIOB
+#define BRICK4_EN_Pin          PIN_4
 #define LM74700_STAT_GPIO_Port GPIOA
-#define LM74700_STAT_Pin PIN_9
+#define LM74700_STAT_Pin       PIN_9
 
 #define __HAL_TIM_SET_COMPARE(timer, channel, value) fake_hal_set_compare((timer), (channel), (value))
+#define __HAL_TIM_MOE_ENABLE(timer)                  ((void)(timer))
 
 void HAL_GPIO_Init(GPIO_TypeDef *port, GPIO_InitTypeDef *init);
 void HAL_GPIO_WritePin(GPIO_TypeDef *port, uint16_t pin, uint32_t state);

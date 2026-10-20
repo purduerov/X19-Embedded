@@ -24,10 +24,28 @@ bool can_send(uint32_t id, const uint8_t *data, uint8_t len) {
     tx_header.Identifier = id;
     tx_header.IdType = FDCAN_STANDARD_ID;
     tx_header.TxFrameType = FDCAN_DATA_FRAME;
-    tx_header.DataLength = ((uint32_t)len <= 8U) ? ((uint32_t)len << 16U) : FDCAN_DLC_BYTES_64;
+    uint32_t dlc;
+    if (len <= 8U) {
+        dlc = (uint32_t)len << 16U;
+    } else if (len <= 12U) {
+        dlc = FDCAN_DLC_BYTES_12;
+    } else if (len <= 16U) {
+        dlc = FDCAN_DLC_BYTES_16;
+    } else if (len <= 20U) {
+        dlc = FDCAN_DLC_BYTES_20;
+    } else if (len <= 24U) {
+        dlc = FDCAN_DLC_BYTES_24;
+    } else if (len <= 32U) {
+        dlc = FDCAN_DLC_BYTES_32;
+    } else if (len <= 48U) {
+        dlc = FDCAN_DLC_BYTES_48;
+    } else {
+        dlc = FDCAN_DLC_BYTES_64;
+    }
+    tx_header.DataLength = dlc;
     tx_header.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-    tx_header.BitRateSwitch = FDCAN_BRS_OFF;
-    tx_header.FDFormat = FDCAN_CLASSIC_CAN;
+    tx_header.BitRateSwitch = FDCAN_BRS_ON;
+    tx_header.FDFormat = FDCAN_FD_CAN;
     tx_header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_header.MessageMarker = 0;
 
@@ -53,6 +71,8 @@ bool can_receive(uint32_t *id, uint8_t *data, uint8_t *len) {
     }
 
     *id = rx_header.Identifier;
-    *len = (uint8_t)((rx_header.DataLength >> 16U) & 0x0F);
+    uint32_t dlc_code = (rx_header.DataLength >> 16U) & 0x0FU;
+    static const uint8_t dlc_to_bytes[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64};
+    *len = dlc_to_bytes[dlc_code];
     return true;
 }

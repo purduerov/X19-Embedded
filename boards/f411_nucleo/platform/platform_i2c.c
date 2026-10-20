@@ -128,7 +128,7 @@ uint8_t bsp_i2c_scan(void) {
         printf("%02X: ", row);
         for (uint8_t col = 0; col < 16; col++) {
             uint8_t addr = (uint8_t)(row + col);
-            if (addr < 0x08 || addr > 0x7F) {
+            if (addr < 0x08 || addr > 0x77) {
                 printf("   ");
             } else if (bsp_i2c_probe(addr)) {
                 printf("%02X ", addr);
@@ -143,7 +143,7 @@ uint8_t bsp_i2c_scan(void) {
     printf("----------------------------------------\r\n");
     printf("Scan complete: found %u device(s).\r\n", count);
 
-    for (uint8_t addr = 0x08; addr <= 0x7F; addr++) {
+    for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
         if (bsp_i2c_probe(addr)) {
             const char *desc = "Unknown device";
             if (addr == 0x76 || addr == 0x77) {

@@ -23,7 +23,8 @@ static void setup(void) {
     mock_can_set_current_node(ROV_NODE_CONTROL_BOARD);
 }
 
-static void complete_esc_arming(void)  // this will simulate the ESC arming process by advancing time and calling node2_app_step
+static void
+complete_esc_arming(void)  // this will simulate the ESC arming process by advancing time and calling node2_app_step
 {
     mock_bsp_set_time_ms(3000U);
     node2_app_step();
@@ -54,18 +55,11 @@ void test_node2_esc_arming(void) {
     uint8_t buffer[64];
     size_t packed_len = 0;
 
-    assert(rov_can_pack_thruster_cmd(
-        &cmd,
-        buffer,
-        sizeof(buffer),
-        &packed_len) == ROV_OK);
+    assert(rov_can_pack_thruster_cmd(&cmd, buffer, sizeof(buffer), &packed_len) == ROV_OK);
 
     /* Thruster commands must be ignored before arming completes. */
     mock_bsp_set_time_ms(2999U);
-    mock_can_inject_rx(
-        ROV_CAN_ID_THRUSTER_CMD,
-        buffer,
-        (uint8_t)packed_len);
+    mock_can_inject_rx(ROV_CAN_ID_THRUSTER_CMD, buffer, (uint8_t)packed_len);
 
     node2_app_step();
 
@@ -75,10 +69,7 @@ void test_node2_esc_arming(void) {
 
     /* At exactly 3000 ms, the ESCs become active and may accept commands. */
     mock_bsp_set_time_ms(3000U);
-    mock_can_inject_rx(
-        ROV_CAN_ID_THRUSTER_CMD,
-        buffer,
-        (uint8_t)packed_len);
+    mock_can_inject_rx(ROV_CAN_ID_THRUSTER_CMD, buffer, (uint8_t)packed_len);
     node2_app_step();
 
     /* The accepted target should begin ramping on the next elapsed step. */
@@ -93,7 +84,7 @@ void test_node2_esc_arming(void) {
 void test_node2_thruster_ramping(void) {
     setup();
     node2_app_init();
-    complete_esc_arming(); // simulate ESC arming completion
+    complete_esc_arming();  // simulate ESC arming completion
 
     /* Command Thruster 0 to 1800 us */
     rov_thruster_cmd_t cmd;
@@ -127,7 +118,7 @@ void test_node2_thruster_ramping(void) {
 void test_node2_heartbeat_timeout_failsafe(void) {
     setup();
     node2_app_init();
-    complete_esc_arming(); // simulate ESC arming completion
+    complete_esc_arming();  // simulate ESC arming completion
 
     /* Ramp thruster 0 up to 1600 us */
     rov_thruster_cmd_t cmd;
@@ -237,25 +228,29 @@ void test_node2_nav_telemetry_stream(void) {
     setup();
 
     /* Set synthetic IMU orientation and depth (12.5 meters in seawater) */
-    imu_data_t imu_mock = {
-        .q_w = 0.7071f,
-        .q_x = 0.0f,
-        .q_y = 0.7071f,
-        .q_z = 0.0f,
-        .gyro_x_dps = 2.86f,
-        .gyro_y_dps = -1.15f,
-        .gyro_z_dps = 5.73f,
-        .status = 3
-    };
+    imu_data_t imu_mock = {.q_w = 0.7071f,
+                           .q_x = 0.0f,
+                           .q_y = 0.7071f,
+                           .q_z = 0.0f,
+                           .gyro_x_dps = 2.86f,
+                           .gyro_y_dps = -1.15f,
+                           .gyro_z_dps = 5.73f,
+                           .status = 3};
     mock_sensors_set_imu(&imu_mock);
     /* 12.5 meters in seawater (~1000 kg/m^3) corresponds to approx 2239 mbar absolute */
     mock_sensors_set_ms5837(2239.0f, 15.0f);
 
     node2_app_init();
 
-    /* Advance 10 ms to trigger 100 Hz Nav telemetry */
+    /* Advance time to allow the non-blocking MS5837 conversion to complete:
+     * D1 conversion (~20 ms) + D2 conversion (~20 ms)
+     */
     mock_bsp_advance_time_ms(10);
-    node2_app_step();
+    node2_app_step(); /* Tick 1: starts D1 conversion (ROV_BUSY) */
+    mock_bsp_advance_time_ms(20);
+    node2_app_step(); /* Tick 2: finishes D1, starts D2 (ROV_BUSY) */
+    mock_bsp_advance_time_ms(20);
+    node2_app_step(); /* Tick 3: finishes D2, calculates depth (ROV_OK) */
 
     assert(mock_can_get_tx_count() >= 1);
     uint8_t tx_data[64];
@@ -269,6 +264,14 @@ void test_node2_nav_telemetry_stream(void) {
     assert(nav.depth_meters > 12.0f && nav.depth_meters < 13.0f);
     assert(nav.imu_status == 3);
 
+    /* Verify that during subsequent ROV_BUSY ticks, the depth reading does NOT drop to 0.0m! */
+    mock_bsp_advance_time_ms(10);
+    node2_app_step(); /* Starts new D1 conversion, returns ROV_BUSY */
+    assert(mock_can_find_latest_tx(ROV_CAN_ID_NAV_TELEMETRY, tx_data, &tx_len));
+    assert(rov_can_unpack_nav_telemetry(tx_data, tx_len, &nav) == ROV_OK);
+    /* Depth must be preserved from previous reading (~12.5m), NOT 0.0m! */
+    assert(nav.depth_meters > 12.0f && nav.depth_meters < 13.0f);
+
     printf("[PASS] test_node2_nav_telemetry_stream\n");
 }
 
@@ -278,11 +281,7 @@ void test_node2_time_sync_and_latency_response(void) {
 
     /* 1. Inject Master Time Sync Frame (0x010) */
     rov_time_sync_master_t master = {
-        .master_time_us = 1726340000000000ULL,
-        .sync_seq = 1,
-        .flags = 0x01,
-        .reserved = {0, 0, 0}
-    };
+        .master_time_us = 1726340000000000ULL, .sync_seq = 1, .flags = 0x01, .reserved = {0, 0, 0}};
     uint8_t sync_buf[64];
     size_t sync_len = 0;
     assert(rov_can_pack_time_sync_master(&master, sync_buf, sizeof(sync_buf), &sync_len) == ROV_OK);
@@ -302,12 +301,7 @@ void test_node2_time_sync_and_latency_response(void) {
 
     /* 2. Inject Delay Request Frame (0x011) to measure latency */
     rov_time_sync_req_t req = {
-        .target_node_id = ROV_NODE_CONTROL_BOARD,
-        .seq = 15,
-        .reserved = 0,
-        .flags = 0,
-        .t1_us = 1726340000000500ULL
-    };
+        .target_node_id = ROV_NODE_CONTROL_BOARD, .seq = 15, .reserved = 0, .flags = 0, .t1_us = 1726340000000500ULL};
     uint8_t req_buf[64];
     size_t req_len = 0;
     assert(rov_can_pack_time_sync_req(&req, req_buf, sizeof(req_buf), &req_len) == ROV_OK);
@@ -331,8 +325,8 @@ void test_node2_time_sync_and_latency_response(void) {
     int64_t offset_us = 0;
     uint32_t rtt_us = 0;
     uint32_t one_way_delay_us = 0;
-    assert(rov_timesync_calc_latency(resp.t1_us, resp.t2_us, resp.t3_us, t4_us,
-                                     &offset_us, &rtt_us, &one_way_delay_us) == ROV_OK);
+    assert(rov_timesync_calc_latency(resp.t1_us, resp.t2_us, resp.t3_us, t4_us, &offset_us, &rtt_us,
+                                     &one_way_delay_us) == ROV_OK);
     assert(one_way_delay_us > 0);
 
     printf("[PASS] test_node2_time_sync_and_latency_response\n");

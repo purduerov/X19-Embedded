@@ -24,7 +24,8 @@ add_compile_options(
     -Wshadow
     -Wdouble-promotion
     -Werror
-    -O2
+    $<$<CONFIG:Release>:-O2>
+    $<$<CONFIG:Debug>:-Og>
 )
 
 # Common include directories available across all targets

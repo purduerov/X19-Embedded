@@ -52,9 +52,9 @@ void bsp_init(void) {
     hlpuart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
     HAL_UART_Init(&hlpuart1);
 
-    /* 2. Configure 50 Hz standard RC PWM (20 ms period) on TIM1 and TIM8 */
-    __HAL_TIM_SET_AUTORELOAD(&htim1, 19999U);
-    __HAL_TIM_SET_AUTORELOAD(&htim8, 19999U);
+    /* 2. Configure 400 Hz standard vehicle PWM (2500 us period) on TIM1 and TIM8 */
+    __HAL_TIM_SET_AUTORELOAD(&htim1, 2499U);
+    __HAL_TIM_SET_AUTORELOAD(&htim8, 2499U);
 
     static const uint32_t tim_channels[4] = {
         TIM_CHANNEL_1,

@@ -113,9 +113,7 @@ static void node1_trigger_emergency(uint8_t leak_bits) {
      * hardware transmit resource.
      */
     g_emergency_latched = true;
-    if (!can_send_emergency(ROV_CAN_ID_EMERGENCY_BREAK, alert_payload, sizeof(alert_payload))) {
-        g_emergency_latched = false;
-    }
+    (void)can_send_emergency(ROV_CAN_ID_EMERGENCY_BREAK, alert_payload, sizeof(alert_payload));
 }
 
 /**
@@ -128,9 +126,13 @@ static void node1_trigger_emergency(uint8_t leak_bits) {
  * must immediately trigger the emergency path.
  */
 void node1_leak_irq_handler(void) {
+    safety_emergency_trip();
     uint8_t leak_bits = node1_get_floor_leak_bits();
+    if (leak_bits == 0u) {
+        leak_bits = 0x01u;
+    }
 
-    if (leak_bits != 0u && !g_emergency_latched) {
+    if (!g_emergency_latched) {
         node1_trigger_emergency(leak_bits);
     }
 }
@@ -182,8 +184,10 @@ void node1_app_init(void) {
     bsp_init();
     rov_safety_init(&g_safety_state);
 
+#if defined(X19_DIAGNOSTIC_I2C_SCAN) && (X19_DIAGNOSTIC_I2C_SCAN != 0)
     /* Run I2C bus scan at startup to verify all sensors are reachable */
     node1_i2c_scan();
+#endif
 
     g_can_ready = can_init();
     if (!g_can_ready) {
@@ -214,7 +218,6 @@ void node1_app_step(void) {
 
     if (!g_can_ready) {
         safety_emergency_trip();
-        delay_ms(5);
         return;
     }
 
@@ -305,8 +308,6 @@ void node1_app_step(void) {
 
         led_toggle();
     }
-
-    delay_ms(5);
 }
 
 #ifndef ROV_UNIT_TEST

@@ -94,7 +94,6 @@ void node2_app_step(void) {
     if (!g_can_ready) {
         node2_force_neutral();
         safety_emergency_trip();
-        delay_ms(1);
         return;
     }
 
@@ -254,7 +253,12 @@ void node2_app_step(void) {
             nav.gyro_y_rad_s = 0.0f;
             nav.gyro_z_rad_s = 0.0f;
         }
-        nav.depth_meters = depth_status == ROV_OK ? g_depth_dev.depth_meters : 0.0f;
+        /* On ROV_BUSY, maintain the last valid compensated depth; on hard error, report 0.0f */
+        if (depth_status == ROV_OK || depth_status == ROV_BUSY) {
+            nav.depth_meters = g_depth_dev.depth_meters;
+        } else {
+            nav.depth_meters = 0.0f;
+        }
         nav.imu_status = imu_status == ROV_OK ? g_imu_dev.status_flags : 0U;
 
         uint8_t tx_buf[64];
@@ -265,8 +269,6 @@ void node2_app_step(void) {
 
         led_toggle();
     }
-
-    delay_ms(1);
 }
 
 #ifndef ROV_UNIT_TEST

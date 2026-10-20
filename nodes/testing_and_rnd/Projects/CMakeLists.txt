@@ -38,6 +38,11 @@ set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES SUFFIX ".elf")
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# Existing project libraries
+add_subdirectory(../../../shared ${CMAKE_BINARY_DIR}/shared)
+add_subdirectory(../../../drivers ${CMAKE_BINARY_DIR}/drivers)
+add_subdirectory(../../../services ${CMAKE_BINARY_DIR}/services)
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -59,6 +64,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../services/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node1_pi_shield/Core/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node2_control_board/Core/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Inc
@@ -84,6 +90,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
     rov_shared
     rov_drivers
+    rov_services
     m
 )
 
@@ -103,6 +110,7 @@ target_include_directories(bench_node1_pi_shield.elf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../services/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node1_pi_shield/Core/Inc
 )
 target_link_options(bench_node1_pi_shield.elf PRIVATE
@@ -115,6 +123,7 @@ target_link_libraries(bench_node1_pi_shield.elf
     stm32cubemx
     rov_shared
     rov_drivers
+    rov_services
     m
 )
 
@@ -130,6 +139,7 @@ target_include_directories(bench_node2_control_board.elf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../services/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node2_control_board/Core/Inc
 )
 target_link_options(bench_node2_control_board.elf PRIVATE
@@ -142,6 +152,7 @@ target_link_libraries(bench_node2_control_board.elf
     stm32cubemx
     rov_shared
     rov_drivers
+    rov_services
     m
 )
 
@@ -158,6 +169,7 @@ target_include_directories(bench_node3_power_slab.elf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../services/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../node3_power_slab/Core/Inc
 )
 target_link_options(bench_node3_power_slab.elf PRIVATE
@@ -170,6 +182,7 @@ target_link_libraries(bench_node3_power_slab.elf
     stm32cubemx
     rov_shared
     rov_drivers
+    rov_services
     m
 )
 
@@ -190,6 +203,7 @@ target_include_directories(bench_sandbox.elf PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../services/include
 )
 target_link_options(bench_sandbox.elf PRIVATE
     -T "${CMAKE_CURRENT_SOURCE_DIR}/STM32F446xx_FLASH.ld"
@@ -201,6 +215,7 @@ target_link_libraries(bench_sandbox.elf
     stm32cubemx
     rov_shared
     rov_drivers
+    rov_services
     m
 )
 

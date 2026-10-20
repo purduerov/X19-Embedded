@@ -25,6 +25,11 @@ float pmbus_linear11_to_float(uint16_t raw_value) {
     if (exponent > 15) {
         exponent -= 32;
     }
+    if (exponent < -16) {
+        exponent = -16;
+    } else if (exponent > 15) {
+        exponent = 15;
+    }
     int16_t mantissa = (int16_t)(raw_value & 0x07FF);
     if (mantissa > 1023) {
         mantissa -= 2048;
@@ -155,12 +160,22 @@ bool pmbus_status_has_thermal_fault(uint16_t status_word) {
 }
 
 float pmbus_linear16_to_float(uint16_t raw_value, int8_t exponent) {
+    int8_t exp = exponent;
+    if (exp > 15) {
+        exp = (int8_t)(exp - 32);
+    }
+    if (exp < -16) {
+        exp = -16;
+    } else if (exp > 15) {
+        exp = 15;
+    }
+
     float result = (float)raw_value;
 
-    if (exponent >= 0) {
-        result *= (float)(1UL << exponent);
+    if (exp >= 0) {
+        result *= (float)(1UL << exp);
     } else {
-        result /= (float)(1UL << (-exponent));
+        result /= (float)(1UL << (-exp));
     }
 
     return result;

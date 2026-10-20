@@ -10,8 +10,6 @@ target_include_directories(node3_power_slab.elf PRIVATE
     ../../shared/include
     ../../drivers/include
     ../../services/include
-    "../Shared Library/include"
-    "../Hardware Drivers/include"
 )
 
 target_link_libraries(node3_power_slab.elf PRIVATE

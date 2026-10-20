@@ -375,7 +375,7 @@ add_test(NAME test_registry_consistency
     COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test_registry_consistency.py)
 set_tests_properties(test_registry_consistency PROPERTIES LABELS "suite:shared")
 add_test(NAME test_suite_manifest
-    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test_suite_manifest.py)
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test_suite_manifest.py --build-dir ${CMAKE_BINARY_DIR})
 set_tests_properties(test_suite_manifest PROPERTIES LABELS "suite:shared")
 
 # Software-in-the-Loop (SIL) Bridge Server (Host Native Only)

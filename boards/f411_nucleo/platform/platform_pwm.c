@@ -38,7 +38,7 @@ void bsp_power_brick_disable_all(void) {
 }
 
 uint32_t bsp_get_logic_voltage_mv(void) {
-    return 5000U;
+    return 5200U;
 }
 
 bool bsp_lm74700_status_ok(void) {

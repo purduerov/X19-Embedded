@@ -10,11 +10,11 @@ static unsigned s_event_count;
 static unsigned s_failures;
 static jmp_buf s_app_entered;
 
-#define RECORD(event)                                                                                                   \
-    do {                                                                                                                \
-        if (s_event_count < (sizeof(s_events) / sizeof(s_events[0]))) {                                                 \
+#define RECORD(event)                                                                                                  \
+    do {                                                                                                               \
+        if (s_event_count < (sizeof(s_events) / sizeof(s_events[0]))) {                                                \
             s_events[s_event_count++] = (event);                                                                       \
-        }                                                                                                               \
+        }                                                                                                              \
     } while (0)
 
 static unsigned event_position(int event) {
@@ -26,13 +26,29 @@ static unsigned event_position(int event) {
     return s_event_count;
 }
 
-void HAL_Init(void) { RECORD(EVENT_HAL_INIT); }
-void SystemClock_Config(void) { RECORD(EVENT_CLOCK); }
-void MX_GPIO_Init(void) { RECORD(EVENT_GPIO); }
-void MX_FDCAN1_Init(void) { RECORD(EVENT_FDCAN); }
-void MX_I2C1_Init(void) { RECORD(EVENT_I2C); }
-void MX_TIM1_Init(void) { RECORD(EVENT_TIM1); }
-void MX_TIM8_Init(void) { RECORD(EVENT_TIM8); }
+void HAL_Init(void) {
+    RECORD(EVENT_HAL_INIT);
+}
+void SystemClock_Config(void) {
+    RECORD(EVENT_CLOCK);
+}
+void MX_GPIO_Init(void) {
+    RECORD(EVENT_GPIO);
+}
+void MX_FDCAN1_Init(void) {
+    RECORD(EVENT_FDCAN);
+}
+void MX_I2C1_Init(void) {
+    RECORD(EVENT_I2C);
+}
+void MX_TIM1_Init(void) {
+    RECORD(EVENT_TIM1);
+}
+void MX_TIM8_Init(void) {
+    RECORD(EVENT_TIM8);
+}
+void bsp_emergency_brake_trip(void) {}
+void bsp_power_brick_disable_all(void) {}
 
 void app_main(void) {
     RECORD(EVENT_APP);

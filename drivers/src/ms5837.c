@@ -243,8 +243,30 @@ rov_status_t ms5837_read_pressure_depth(ms5837_dev_t *dev, float fluid_density_k
     }
 
     if (mock_sensors_get_ms5837(&dev->pressure_mbar, &dev->temperature_c)) {
-        ms5837_calculate_depth(dev, fluid_density_kg_m3);
-        return ROV_OK;
+        uint32_t now = time_get_ms();
+        switch (dev->state) {
+        case MS5837_STATE_IDLE:
+            dev->conversion_start_ms = now;
+            dev->state = MS5837_STATE_WAIT_D1;
+            return ROV_BUSY;
+        case MS5837_STATE_WAIT_D1:
+            if ((uint32_t)(now - dev->conversion_start_ms) < MS5837_CONVERSION_TIME_MS) {
+                return ROV_BUSY;
+            }
+            dev->conversion_start_ms = now;
+            dev->state = MS5837_STATE_WAIT_D2;
+            return ROV_BUSY;
+        case MS5837_STATE_WAIT_D2:
+            if ((uint32_t)(now - dev->conversion_start_ms) < MS5837_CONVERSION_TIME_MS) {
+                return ROV_BUSY;
+            }
+            ms5837_calculate_depth(dev, fluid_density_kg_m3);
+            dev->state = MS5837_STATE_IDLE;
+            return ROV_OK;
+        default:
+            dev->state = MS5837_STATE_IDLE;
+            return ROV_ERROR;
+        }
     }
 
     if (!dev->initialized) {

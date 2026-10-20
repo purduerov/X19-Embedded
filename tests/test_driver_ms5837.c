@@ -4,6 +4,7 @@
  * @organization Purdue ROV
  */
 
+#include "mocks/mock_bsp.h"
 #include "mocks/mock_sensors.h"
 #include "ms5837.h"
 #include <assert.h>
@@ -21,6 +22,11 @@ void test_ms5837_driver(void) {
     assert(ms5837_read_pressure_depth(&dev, 0.0f) == ROV_ERR_INVALID_ARG);
     assert(ms5837_read_pressure_depth(&dev, -10.0f) == ROV_ERR_INVALID_ARG);
 
+    /* Test non-blocking asynchronous state machine under mock */
+    assert(ms5837_read_pressure_depth(&dev, 1000.0f) == ROV_BUSY);
+    mock_bsp_advance_time_ms(20);
+    assert(ms5837_read_pressure_depth(&dev, 1000.0f) == ROV_BUSY);
+    mock_bsp_advance_time_ms(20);
     /* Test surface atmospheric pressure: depth must clamp to 0.0 meters */
     assert(ms5837_read_pressure_depth(&dev, 1000.0f) == ROV_OK);
     assert(dev.depth_meters == 0.0f);
@@ -30,6 +36,10 @@ void test_ms5837_driver(void) {
      * Total P = 1013.25 + 980.665 = 1993.915 mbar
      */
     mock_sensors_set_ms5837(1993.915f, 15.0f);
+    assert(ms5837_read_pressure_depth(&dev, 1000.0f) == ROV_BUSY);
+    mock_bsp_advance_time_ms(20);
+    assert(ms5837_read_pressure_depth(&dev, 1000.0f) == ROV_BUSY);
+    mock_bsp_advance_time_ms(20);
     assert(ms5837_read_pressure_depth(&dev, 1000.0f) == ROV_OK);
     assert(dev.depth_meters > 9.99f && dev.depth_meters < 10.01f);
 

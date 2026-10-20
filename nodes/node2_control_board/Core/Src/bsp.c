@@ -58,6 +58,11 @@ void bsp_init(void) {
     for (uint8_t i = 0; i < 8; i++) {
         g_pwm_duty_us[i] = 1500U;
     }
+
+#if defined(__HAL_TIM_MOE_ENABLE)
+    __HAL_TIM_MOE_ENABLE(&htim1);
+    __HAL_TIM_MOE_ENABLE(&htim8);
+#endif
 }
 
 uint32_t time_get_ms(void) {

@@ -214,7 +214,16 @@ def build_target(node: str, board: str, profile: str = "debug", custom_file: str
         sys.exit(f"Error: Node '{node}' is not configured for board '{board}'. Supported: {supported}")
 
     preset_name = board_cfg.get("preset", "arm-c542-debug")
+    if profile == "release" and preset_name.endswith("-debug"):
+        preset_name = preset_name[:-6] + "-release"
+    elif profile == "debug" and preset_name.endswith("-release"):
+        preset_name = preset_name[:-8] + "-debug"
+
     build_dir_rel = board_cfg.get("build_dir", f"build/{preset_name}")
+    if profile == "release" and "debug" in build_dir_rel:
+        build_dir_rel = build_dir_rel.replace("debug", "release")
+    elif profile == "debug" and "release" in build_dir_rel:
+        build_dir_rel = build_dir_rel.replace("release", "debug")
     build_dir = REPO_ROOT / build_dir_rel
 
     # A raw `cmake -B build` at the preset parent poisons every later configure; clear it.
@@ -225,6 +234,8 @@ def build_target(node: str, board: str, profile: str = "debug", custom_file: str
 
     target_name = node_cfg.get(target_key)
     binary_rel = node_cfg.get(binary_key)
+    if binary_rel and profile == "release" and "debug" in binary_rel:
+        binary_rel = binary_rel.replace("debug", "release")
 
     display_source = f" (source: {file_path})" if file_path else ""
     print(f"\033[1;32m=== Configuring & Building Node: {node} for Board: {board} ({profile}){display_source} ===\033[0m")
@@ -413,8 +424,16 @@ def flash_binary(elf_path: str, probe_sn: str | None = None) -> str:
             print("\nMultiple ST-Link probes detected:")
             for idx, p in enumerate(probes):
                 print(f"  [{idx}] SN: {p['sn']} ({p.get('board', 'Unknown Target')})")
-            choice = int(input("Select probe index: "))
-            selected_sn = probes[choice]["sn"]
+            while True:
+                try:
+                    choice_str = input("Select probe index: ").strip()
+                    choice = int(choice_str)
+                    if 0 <= choice < len(probes):
+                        selected_sn = probes[choice]["sn"]
+                        break
+                    print(f"Error: Invalid index. Must be between 0 and {len(probes) - 1}.")
+                except (ValueError, EOFError, KeyboardInterrupt):
+                    sys.exit("\nOperation cancelled by user.")
 
     cmd = [
         cli_path,

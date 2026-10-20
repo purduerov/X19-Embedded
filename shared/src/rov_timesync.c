@@ -48,7 +48,7 @@ rov_status_t rov_timesync_process_master(rov_timesync_state_t *ts, const rov_tim
     ts->last_master_time_us = sync->master_time_us;
     ts->last_seq = sync->sync_seq;
     ts->master_status = sync->flags;
-    ts->synchronized = true;
+    ts->synchronized = (sync->flags != 0);
 
     return ROV_OK;
 }

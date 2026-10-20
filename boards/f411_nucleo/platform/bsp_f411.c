@@ -13,4 +13,7 @@ void bsp_init(void) {
 
     /* Initialize and start CAN hardware and filters */
     can_init();
+
+    /* Initialize bit-bang I2C pins and run bus recovery if needed */
+    bsp_i2c_init();
 }

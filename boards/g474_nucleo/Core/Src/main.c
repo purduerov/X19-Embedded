@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app.h"
+#include "bsp.h"
 
 /* USER CODE END Includes */
 
@@ -184,19 +185,19 @@ static void MX_FDCAN1_Init(void) {
     /* USER CODE END FDCAN1_Init 1 */
     hfdcan1.Instance = FDCAN1;
     hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
-    hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
+    hfdcan1.Init.FrameFormat = FDCAN_FRAME_FD_BRS;
     hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
-    hfdcan1.Init.AutoRetransmission = DISABLE;
+    hfdcan1.Init.AutoRetransmission = ENABLE;
     hfdcan1.Init.TransmitPause = DISABLE;
     hfdcan1.Init.ProtocolException = DISABLE;
-    hfdcan1.Init.NominalPrescaler = 16;
-    hfdcan1.Init.NominalSyncJumpWidth = 1;
-    hfdcan1.Init.NominalTimeSeg1 = 1;
-    hfdcan1.Init.NominalTimeSeg2 = 1;
-    hfdcan1.Init.DataPrescaler = 1;
-    hfdcan1.Init.DataSyncJumpWidth = 1;
-    hfdcan1.Init.DataTimeSeg1 = 1;
-    hfdcan1.Init.DataTimeSeg2 = 1;
+    hfdcan1.Init.NominalPrescaler = 10;
+    hfdcan1.Init.NominalSyncJumpWidth = 3;
+    hfdcan1.Init.NominalTimeSeg1 = 13;
+    hfdcan1.Init.NominalTimeSeg2 = 3;
+    hfdcan1.Init.DataPrescaler = 2;
+    hfdcan1.Init.DataSyncJumpWidth = 4;
+    hfdcan1.Init.DataTimeSeg1 = 12;
+    hfdcan1.Init.DataTimeSeg2 = 4;
     hfdcan1.Init.StdFiltersNbr = 0;
     hfdcan1.Init.ExtFiltersNbr = 0;
     hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
@@ -530,7 +531,13 @@ static void MX_GPIO_Init(void) {
  */
 void Error_Handler(void) {
     /* USER CODE BEGIN Error_Handler_Debug */
-    /* User can add his own implementation to report the HAL error return state */
+#if defined(TIM1) && defined(TIM_BDTR_MOE)
+    TIM1->BDTR &= ~TIM_BDTR_MOE;
+#endif
+#if defined(TIM8) && defined(TIM_BDTR_MOE)
+    TIM8->BDTR &= ~TIM_BDTR_MOE;
+#endif
+    bsp_emergency_brake_trip();
     __disable_irq();
     while (1) {
     }

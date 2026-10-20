@@ -18,6 +18,7 @@
 #include "rov_can_protocol.h"
 #include "rov_parameters.h"
 #include "rov_safety.h"
+#include "safety_service.h"
 #include <math.h>
 #include <string.h>
 
@@ -96,7 +97,7 @@ void node3_app_step(void) {
          */
         power_sequence_emergency_stop();
         power_bricks_disable_all();
-        delay_ms(5);
+        safety_emergency_trip();
         return;
     }
 
@@ -118,11 +119,18 @@ void node3_app_step(void) {
                 !isfinite(g_pmbus_bricks[i].output_voltage_v) || !isfinite(g_pmbus_bricks[i].output_current_a) ||
                 !isfinite(g_pmbus_bricks[i].temperature_c)) {
                 fault_detected = true;
+                if (i > 0) {
+                    g_power_telemetry.v12_current_ma[i - 1] = 0;
+                }
                 continue;
             }
 
-            if (i == 0) {
+            if (g_pmbus_bricks[i].input_voltage_v > 0.0f &&
+                (measured_tether_voltage_v <= 0.0f || g_pmbus_bricks[i].input_voltage_v > measured_tether_voltage_v)) {
                 measured_tether_voltage_v = g_pmbus_bricks[i].input_voltage_v;
+            }
+
+            if (i == 0) {
                 float v5_voltage_mv = g_pmbus_bricks[i].output_voltage_v * 1000.0f;
                 float v5_current_ma = g_pmbus_bricks[i].output_current_a * 1000.0f;
                 if (!node3_u16_value_valid(v5_voltage_mv) || !node3_u16_value_valid(v5_current_ma)) {
@@ -219,6 +227,7 @@ void node3_app_step(void) {
              */
             power_sequence_emergency_stop();
             power_bricks_disable_all();
+            safety_emergency_trip();
 
             /* Broadcast Priority 0 eFuse Fault Alert (0x005) once per fault. */
             if (!g_fault_alert_latched) {
@@ -240,8 +249,6 @@ void node3_app_step(void) {
 
         led_toggle();
     }
-
-    delay_ms(5);
 }
 
 #ifndef ROV_UNIT_TEST

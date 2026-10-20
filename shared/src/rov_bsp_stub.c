@@ -124,7 +124,7 @@ __attribute__((weak)) uint32_t bsp_get_logic_voltage_mv(void) {
 }
 
 __attribute__((weak)) bool bsp_lm74700_status_ok(void) {
-    return true;
+    return false;
 }
 
 __attribute__((weak)) float bsp_get_pcb_temperature_c(void) {

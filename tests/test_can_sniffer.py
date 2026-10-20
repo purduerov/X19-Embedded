@@ -1,9 +1,17 @@
 import time
 import unittest
-import can
-import tools.can_sniffer as sniffer
+
+try:
+    import can
+    import tools.can_sniffer as sniffer
+    CAN_AVAILABLE = True
+except ImportError:
+    can = None
+    sniffer = None
+    CAN_AVAILABLE = False
 
 
+@unittest.skipUnless(CAN_AVAILABLE, "python-can or tools.can_sniffer not available")
 class TestCanSniffer(unittest.TestCase):
 
     def test_format_timestamp_correctness(self):

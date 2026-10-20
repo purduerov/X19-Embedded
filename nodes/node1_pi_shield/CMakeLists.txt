@@ -9,8 +9,6 @@ target_include_directories(node1_pi_shield.elf PRIVATE
     ../../shared/include
     ../../drivers/include
     ../../services/include
-    "../Shared Library/include"
-    "../Hardware Drivers/include"
 )
 
 target_link_libraries(node1_pi_shield.elf PRIVATE
