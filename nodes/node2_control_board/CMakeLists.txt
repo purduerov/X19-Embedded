@@ -24,15 +24,18 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         Core/Inc
         ../../shared/include
         ../../drivers/include
+        ../../services/include
     )
 
     # Existing project libraries
     add_subdirectory(../../shared ${CMAKE_BINARY_DIR}/shared)
     add_subdirectory(../../drivers ${CMAKE_BINARY_DIR}/drivers)
+    add_subdirectory(../../services ${CMAKE_BINARY_DIR}/services)
 
     target_link_libraries(node2_control_board
         rov_shared
         rov_drivers
+        rov_services
         m
     )
 
