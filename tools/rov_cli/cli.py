@@ -7,7 +7,7 @@ import os
 import sys
 
 from .build import build_target, generate_cubemx
-from .config import REPO_ROOT, load_config, run_cmd
+from .config import REPO_ROOT, load_config, run_cmd, sync_rov_toml
 from .discovery import (
     detect_connected_board,
     get_stlink_probes,
@@ -121,6 +121,9 @@ Examples:
         default="all",
         help="Target board, node, folder name, or .ioc path to regenerate (default: all)",
     )
+
+    # 11. Sync (Persist newly discovered boards into rov.toml)
+    subparsers.add_parser("sync", help="Scan boards/ and persist any newly discovered boards and .ioc configs into rov.toml")
 
     args = parser.parse_args()
 
@@ -298,3 +301,6 @@ Examples:
 
     elif args.command == "generate":
         generate_cubemx(args.target)
+
+    elif args.command == "sync":
+        sync_rov_toml()
