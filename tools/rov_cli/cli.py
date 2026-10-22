@@ -118,9 +118,8 @@ Examples:
     gen_p = subparsers.add_parser("generate", help="Regenerate peripheral drivers from .ioc files via STM32CubeMX CLI")
     gen_p.add_argument(
         "-t", "--target",
-        choices=["all", "g474", "f411", "pi_shield", "control_board", "power_slab", "testing_and_rnd"],
         default="all",
-        help="Target board or node to regenerate (default: all)",
+        help="Target board, node, folder name, or .ioc path to regenerate (default: all)",
     )
 
     args = parser.parse_args()
