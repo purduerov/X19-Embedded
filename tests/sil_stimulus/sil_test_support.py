@@ -516,8 +516,10 @@ class ServerBackedTestCase(unittest.TestCase):
     #: output is used instead (see ``_server_diagnostics``).
     server: Optional[SilServerProcess] = None
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, methodName='runTest', *args, **kwargs) -> None:
+        super().__init__(methodName, *args, **kwargs)
+        if not hasattr(self, self._testMethodName):
+            return
         method = getattr(self, self._testMethodName)
         if isinstance(method, _FailureAnnotatingMethod):
             return
