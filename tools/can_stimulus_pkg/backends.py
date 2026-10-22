@@ -473,7 +473,19 @@ class PythonCanBackend(_BaseBackend):
         self._can = _require_optional_module(
             "can", "python-can", "pip install python-can", "can"
         )
-        self._bus = self._can.Bus(channel=self.channel, interface=self.interface, fd=True)
+        # Normalize socketcan channel vs backend interface for python-can
+        can_interface = self.interface
+        can_channel = self.channel
+        if can_interface and can_interface.startswith(("can", "vcan")):
+            can_channel = can_interface
+            can_interface = "socketcan"
+        elif not can_channel:
+            can_channel = "can0"
+
+        try:
+            self._bus = self._can.Bus(channel=can_channel, interface=can_interface, fd=True)
+        except TypeError:
+            self._bus = self._can.Bus(channel=can_channel, interface=can_interface)
         self._pending.clear()
 
     def set_frame_listener(self, listener):
