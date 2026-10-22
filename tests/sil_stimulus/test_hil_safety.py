@@ -42,8 +42,6 @@ try:
 except ImportError:  # pragma: no cover - Python 3.10 fallback
     import tomli as tomllib
 
-from tools import hil_tester
-
 
 CANONICAL_ID = "python-can>=4.3"
 
