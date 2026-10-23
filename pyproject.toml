@@ -15,3 +15,6 @@ dependencies = [
 
 [project.scripts]
 rov = "tools.rov:main"
+
+[project.optional-dependencies]
+can = ["python-can>=4.3"]
