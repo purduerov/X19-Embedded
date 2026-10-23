@@ -6,6 +6,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 enable_testing()
 
+# Ensure cached SANDBOX_FILE points to an existing file; fallback to sandbox/sandbox.c if deleted
+if(DEFINED SANDBOX_FILE AND NOT EXISTS "${SANDBOX_FILE}")
+    set(SANDBOX_FILE "${CMAKE_CURRENT_SOURCE_DIR}/sandbox/sandbox.c" CACHE FILEPATH "Sandbox source file" FORCE)
+endif()
+
 option(X19_BUILD_NODE1_ROOT
        "Build the Node 1 STM32C542 image in the root cross build (needs generated HAL/startup; see docs/target-integration-blockers.md)"
        OFF)
@@ -53,5 +58,7 @@ if(CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
-# Add unit tests
-add_subdirectory(tests)
+# Add unit tests (host-only)
+if(NOT CMAKE_CROSSCOMPILING)
+    add_subdirectory(tests)
+endif()

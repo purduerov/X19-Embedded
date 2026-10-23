@@ -86,9 +86,6 @@ target_include_directories(g474_node2_control_board.elf PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Inc"
 )
 
-# Backwards compatible alias: node2_control_board.elf -> g474_node2_control_board.elf
-add_custom_target(node2_control_board.elf DEPENDS g474_node2_control_board.elf)
-
 # 3. Bench Node 3 Power Slab Target
 add_g474_node_executable(g474_node3_power_slab.elf
     "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/app.c"

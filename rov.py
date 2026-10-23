@@ -4,11 +4,13 @@ Purdue ROV Unified Embedded Developer Interface (rov CLI).
 Platform-agnostic entry point. Works natively on Windows, Linux, and macOS.
 
 Usage:
-    python rov.py build
-    python rov.py run
+    python rov.py run [target] [-b board]
+    python rov.py build [target] [-b board]
+    python rov.py flash [target] [-b board]
     python rov.py monitor
     python rov.py test
     python rov.py devices
+    python rov.py generate [target]
 """
 
 import sys

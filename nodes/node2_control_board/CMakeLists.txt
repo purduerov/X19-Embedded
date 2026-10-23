@@ -109,27 +109,31 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
 else()
 
-    # Existing monorepo target
-    add_executable(node2_control_board.elf
-        Core/Src/main.c
-        Core/Src/app.c
-        Core/Src/bsp.c
-    )
+    # In monorepo cross build, board targets in boards/ (such as boards/g474_nucleo)
+    # compile node2 application logic and provide node2_control_board.elf.
+    # Provide fallback target only if not already defined by boards/.
+    if(NOT TARGET node2_control_board.elf)
+        add_executable(node2_control_board.elf
+            Core/Src/main.c
+            Core/Src/app.c
+            Core/Src/bsp.c
+        )
 
-    target_include_directories(node2_control_board.elf PRIVATE
-        Core/Inc
-        ../../shared/include
-        ../../drivers/include
-        ../../services/include
-    )
+        target_include_directories(node2_control_board.elf PRIVATE
+            Core/Inc
+            ../../shared/include
+            ../../drivers/include
+            ../../services/include
+        )
 
-    target_link_libraries(node2_control_board.elf PRIVATE
-        rov_services
-        rov_shared
-        rov_drivers
-        m
-    )
+        target_link_libraries(node2_control_board.elf PRIVATE
+            rov_services
+            rov_shared
+            rov_drivers
+            m
+        )
 
-    target_compile_features(node2_control_board.elf PUBLIC c_std_11)
+        target_compile_features(node2_control_board.elf PUBLIC c_std_11)
+    endif()
 
 endif()

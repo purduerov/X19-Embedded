@@ -44,3 +44,4 @@ nodes/*/.vscode/
 *.ioc.bak
 .aider*
 .vibe-wise/
+.agents/

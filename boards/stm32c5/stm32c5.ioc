@@ -1,0 +1,15 @@
+# STM32C542CCT6 CubeMX Configuration
+Mcu.CPN=STM32C542CCT6
+Mcu.Family=STM32C5
+Mcu.Name=STM32C542CCTx
+Mcu.Package=LQFP48
+Mcu.Pin0=PA4
+Mcu.Pin1=PA5
+Mcu.Pin2=PA8
+Mcu.Pin3=PB6
+Mcu.Pin4=PB7
+Mcu.PinsNb=5
+Mcu.UserConstants=
+MxCube.Version=6.12.0
+MxDb.Version=DB.6.0.120
+ProjectManager.TargetToolchain=CMake

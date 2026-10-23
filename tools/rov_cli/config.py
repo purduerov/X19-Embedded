@@ -28,34 +28,123 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = REPO_ROOT / "rov.toml"
 
 
+def parse_ioc_info(ioc_file: Path | str) -> dict[str, str]:
+    """Extract MCU model, family, architecture, and compile flags from an .ioc file.
+
+    Defaults to STM32G474RET6 / Cortex-M4 if not specified.
+    """
+    mcu = "STM32G474RET6"
+    family = ""
+    arch = "arm-cortex-m4"
+
+    p = Path(ioc_file) if ioc_file else None
+    if p and p.is_file():
+        try:
+            with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("Mcu.CPN="):
+                        val = line.split("=", 1)[1].strip()
+                        if val:
+                            mcu = val
+                    elif line.startswith("Mcu.Family="):
+                        family = line.split("=", 1)[1].strip().upper()
+                    elif line.startswith("Mcu.Name="):
+                        if not mcu or mcu == "STM32G474RET6":
+                            val = line.split("=", 1)[1].strip()
+                            if val:
+                                mcu = val
+        except Exception:
+            pass
+
+    # Infer family from MCU model if missing
+    mcu_upper = mcu.upper()
+    if not family:
+        if "STM32C5" in mcu_upper:
+            family = "STM32C5"
+        elif "STM32F4" in mcu_upper:
+            family = "STM32F4"
+        elif "STM32G4" in mcu_upper:
+            family = "STM32G4"
+        elif "STM32H7" in mcu_upper:
+            family = "STM32H7"
+        elif "STM32F7" in mcu_upper:
+            family = "STM32F7"
+        elif "STM32L4" in mcu_upper:
+            family = "STM32L4"
+        elif "STM32F1" in mcu_upper:
+            family = "STM32F1"
+        elif "STM32G0" in mcu_upper:
+            family = "STM32G0"
+        elif "STM32F0" in mcu_upper:
+            family = "STM32F0"
+        else:
+            family = "STM32G4"
+
+    # Architecture, CPU flags, and fallback baseline board
+    if "STM32C5" in family:
+        arch = "arm-cortex-m33"
+        cpu_flags = "-mcpu=cortex-m33 -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb"
+        fallback_board = "stm32c5"
+        fallback_lib = "stm32c5_platform"
+    elif "STM32H7" in family:
+        arch = "arm-cortex-m7"
+        cpu_flags = "-mcpu=cortex-m7 -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb"
+        fallback_board = "g474_nucleo"
+        fallback_lib = "g474_platform"
+    elif "STM32F7" in family:
+        arch = "arm-cortex-m7"
+        cpu_flags = "-mcpu=cortex-m7 -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb"
+        fallback_board = "f411_nucleo"
+        fallback_lib = "f411_platform"
+    elif "STM32F4" in family:
+        arch = "arm-cortex-m4"
+        cpu_flags = "-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb"
+        fallback_board = "f411_nucleo"
+        fallback_lib = "f411_platform"
+    elif "STM32G4" in family:
+        arch = "arm-cortex-m4"
+        cpu_flags = "-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb"
+        fallback_board = "g474_nucleo"
+        fallback_lib = "g474_platform"
+    elif "STM32L4" in family:
+        arch = "arm-cortex-m4"
+        cpu_flags = "-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb"
+        fallback_board = "g474_nucleo"
+        fallback_lib = "g474_platform"
+    elif "STM32F0" in family or "STM32G0" in family:
+        arch = "arm-cortex-m0plus"
+        cpu_flags = "-mcpu=cortex-m0plus -mthumb"
+        fallback_board = "f411_nucleo"
+        fallback_lib = "f411_platform"
+    elif "STM32F1" in family:
+        arch = "arm-cortex-m3"
+        cpu_flags = "-mcpu=cortex-m3 -mthumb"
+        fallback_board = "f411_nucleo"
+        fallback_lib = "f411_platform"
+    else:
+        arch = "arm-cortex-m4"
+        cpu_flags = "-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb"
+        fallback_board = "f411_nucleo"
+        fallback_lib = "f411_platform"
+
+    return {
+        "mcu": mcu,
+        "family": family,
+        "arch": arch,
+        "cpu_flags": cpu_flags,
+        "fallback_board": fallback_board,
+        "fallback_lib": fallback_lib,
+    }
+
+
 def _parse_ioc_mcu(ioc_file: Path) -> tuple[str, str]:
     """Extract (mcu_name, architecture) from an .ioc file.
 
     Defaults to ('STM32G474RET6', 'arm-cortex-m4') if not found.
     """
-    mcu = "STM32G474RET6"
-    arch = "arm-cortex-m4"
-    if not ioc_file.is_file():
-        return mcu, arch
-
-    try:
-        with open(ioc_file, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("Mcu.CPN="):
-                    mcu = line.split("=", 1)[1].strip()
-                elif line.startswith("Mcu.Family="):
-                    family = line.split("=", 1)[1].strip().upper()
-                    if "STM32C5" in family:
-                        arch = "arm-cortex-m33"
-                    elif "STM32F4" in family or "STM32G4" in family:
-                        arch = "arm-cortex-m4"
-                    elif "STM32H7" in family:
-                        arch = "arm-cortex-m7"
-    except Exception:
-        pass
-
-    return mcu, arch
+    info = parse_ioc_info(ioc_file)
+    return info["mcu"], info["arch"]
 
 
 def _auto_discover_boards(config: dict) -> dict:
@@ -77,7 +166,10 @@ def _auto_discover_boards(config: dict) -> dict:
         ioc_files = [p for p in b_dir.glob("*.ioc") if not p.name.endswith(".bak")]
         ioc_file = ioc_files[0] if ioc_files else Path("")
 
-        mcu, arch = _parse_ioc_mcu(ioc_file)
+        info = parse_ioc_info(ioc_file)
+        mcu = info["mcu"]
+        arch = info["arch"]
+        family = info["family"]
 
         candidate_keys = [folder_name]
         if short_name != folder_name and short_name not in boards_map:
@@ -89,6 +181,7 @@ def _auto_discover_boards(config: dict) -> dict:
                     "display_name": f"{folder_name} (Auto-Discovered Board)",
                     "architecture": arch,
                     "mcu": mcu,
+                    "family": family,
                     "preset": "arm-c542-debug",
                     "flash_driver": "stm32cubeprog",
                     "default_baud": 115200,
@@ -118,6 +211,113 @@ def load_config() -> dict:
     with open(CONFIG_PATH, "rb") as f:
         cfg = tomllib.load(f)
     return _auto_discover_boards(cfg)
+
+
+def resolve_target(
+    target_arg: str | None,
+    board_arg: str | None,
+    config: dict,
+) -> tuple[str, str, str | None]:
+    """Resolve target CLI input to (node_name, board_name, custom_file_path).
+
+    Args:
+        target_arg: Optional positional target argument (e.g. "my_code.c", "control_board", or None).
+        board_arg: Explicit board passed via -b / --board or detected, or None.
+        config: Loaded rov configuration dictionary from load_config().
+
+    Returns:
+        (node_name, board_name, custom_file_path)
+        - If target_arg is a .c file or existing file path: ("sandbox", board_name, resolved_path)
+        - If target_arg is a node name or alias: (canonical_node, board_name, None)
+        - If target_arg is None: (default_node_for_board, board_name, None)
+    """
+    default_node = config.get("workspace", {}).get("default_node", "pi_shield")
+    default_board = config.get("workspace", {}).get("default_board", "f411")
+
+    # 1. Resolve board
+    if board_arg is not None:
+        board_name = board_arg
+        if not board_name.strip():
+            valid_boards = ", ".join(config.get("boards", {}).keys())
+            raise ValueError(f"Unknown board ''. Valid boards: {valid_boards}")
+        if board_name not in config.get("boards", {}):
+            valid_boards = ", ".join(config.get("boards", {}).keys())
+            raise ValueError(f"Unknown board '{board_name}'. Valid boards: {valid_boards}")
+    else:
+        board_name = default_board
+
+    # 2. If target is omitted
+    if not target_arg:
+        if board_arg is not None:
+            if board_name in ("g474", "g431"):
+                node_name = "control_board"
+            elif board_name in ("f411", "f446", "f401"):
+                node_name = "pi_shield"
+            else:
+                node_name = default_node
+        else:
+            node_name = default_node
+        return node_name, board_name, None
+
+    # 3. Check if target is a C source file or existing file path
+    target_str = str(target_arg)
+    is_c_file = target_str.lower().endswith(".c")
+    p = Path(target_str)
+
+    if is_c_file or p.is_file() or (REPO_ROOT / target_str).is_file() or (REPO_ROOT / "sandbox" / target_str).is_file():
+        # Locate existing file in priority order
+        if p.is_file():
+            resolved_path = p.resolve().as_posix()
+        elif (REPO_ROOT / target_str).is_file():
+            resolved_path = (REPO_ROOT / target_str).resolve().as_posix()
+        elif (REPO_ROOT / "sandbox" / target_str).is_file():
+            resolved_path = (REPO_ROOT / "sandbox" / target_str).resolve().as_posix()
+        else:
+            # File ending in .c that doesn't exist yet on disk
+            if p.is_absolute():
+                resolved_path = p.as_posix()
+            else:
+                resolved_path = (Path.cwd() / target_str).resolve().as_posix()
+
+        return "sandbox", board_name, resolved_path
+
+    # 4. Check if target is a known node or alias
+    node_aliases = {
+        "node1": "pi_shield",
+        "node1_pi_shield": "pi_shield",
+        "pi": "pi_shield",
+        "pi_shield": "pi_shield",
+        "node2": "control_board",
+        "node2_control_board": "control_board",
+        "control": "control_board",
+        "control_board": "control_board",
+        "node3": "power_slab",
+        "node3_power_slab": "power_slab",
+        "power": "power_slab",
+        "power_slab": "power_slab",
+        "sandbox": "sandbox",
+        "rnd": "rnd",
+    }
+    target_lower = target_str.lower()
+    if target_lower in node_aliases:
+        return node_aliases[target_lower], board_name, None
+
+    if target_lower in config.get("nodes", {}):
+        return target_lower, board_name, None
+
+    # 5. Check if user passed a board name as target
+    if target_lower in config.get("boards", {}):
+        raise ValueError(
+            f"Target '{target_arg}' is a board name. Did you mean: python rov.py run -b {target_arg} ?"
+        )
+
+    # 6. Target is unrecognized
+    valid_nodes = ", ".join(config.get("nodes", {}).keys())
+    valid_boards = ", ".join(config.get("boards", {}).keys())
+    raise ValueError(
+        f"Unknown node '{target_arg}'. Valid nodes: {valid_nodes}. Valid boards: {valid_boards}."
+    )
+
 
 
 def sync_rov_toml() -> None:
