@@ -213,6 +213,8 @@ class PowerTelemetry:
 
 def pack_sil_can_frame(can_id: int, payload: bytes) -> bytes:
     """Wraps a CAN FD frame into the SIL TCP stream format."""
+    if len(payload) > 64:
+        raise ValueError(f"Payload length {len(payload)} exceeds CAN FD maximum of 64 bytes")
     padded = payload.ljust(64, b"\x00")[:64]
     return _STRUCT_SIL_PACKET.pack(SIL_MAGIC_HEADER, can_id, len(payload), padded)
 

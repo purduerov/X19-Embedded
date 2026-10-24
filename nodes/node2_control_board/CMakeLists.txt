@@ -36,6 +36,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         rov_services
         rov_shared
         rov_drivers
+        rov_services
         m
     )
 
