@@ -31,13 +31,13 @@
 
 /* Default node role selection based on target MCU or compile flag */
 #ifndef NODE_ROLE
-    #if defined(STM32G474xx)
-        #define NODE_ROLE 2   /* G474 defaults to Node 2: Control Board */
-    #elif defined(STM32F411xE) || defined(STM32F446xx)
-        #define NODE_ROLE 1   /* F4 dev boards default to Node 1: Pi Shield */
-    #else
-        #define NODE_ROLE 3   /* Custom / secondary boards default to Node 3 */
-    #endif
+#if defined(STM32G474xx)
+#define NODE_ROLE 2 /* G474 defaults to Node 2: Control Board */
+#elif defined(STM32F411xE) || defined(STM32F446xx)
+#define NODE_ROLE 1 /* F4 dev boards default to Node 1: Pi Shield */
+#else
+#define NODE_ROLE 3 /* Custom / secondary boards default to Node 3 */
+#endif
 #endif
 
 /* ========================================================================== */
@@ -45,19 +45,19 @@
 /* ========================================================================== */
 
 #if (NODE_ROLE == 1)
-    #define ROLE_NAME            "Node 1: Pi Shield"
-    #define ROLE_TX_CAN_ID       ROV_CAN_ID_ENV_TELEMETRY  /* 0x210 */
-    #define ROLE_TX_PERIOD_MS    100                       /* 10 Hz */
+#define ROLE_NAME         "Node 1: Pi Shield"
+#define ROLE_TX_CAN_ID    ROV_CAN_ID_ENV_TELEMETRY /* 0x210 */
+#define ROLE_TX_PERIOD_MS 100                      /* 10 Hz */
 #elif (NODE_ROLE == 2)
-    #define ROLE_NAME            "Node 2: Control Board"
-    #define ROLE_TX_CAN_ID       ROV_CAN_ID_NAV_TELEMETRY  /* 0x200 */
-    #define ROLE_TX_PERIOD_MS    20                        /* 50 Hz */
+#define ROLE_NAME         "Node 2: Control Board"
+#define ROLE_TX_CAN_ID    ROV_CAN_ID_NAV_TELEMETRY /* 0x200 */
+#define ROLE_TX_PERIOD_MS 20                       /* 50 Hz */
 #elif (NODE_ROLE == 3)
-    #define ROLE_NAME            "Node 3: Power Slab"
-    #define ROLE_TX_CAN_ID       ROV_CAN_ID_POWER_TELEMETRY /* 0x300 */
-    #define ROLE_TX_PERIOD_MS    50                        /* 20 Hz */
+#define ROLE_NAME         "Node 3: Power Slab"
+#define ROLE_TX_CAN_ID    ROV_CAN_ID_POWER_TELEMETRY /* 0x300 */
+#define ROLE_TX_PERIOD_MS 50                         /* 20 Hz */
 #else
-    #error "Invalid NODE_ROLE defined! Must be 1, 2, or 3."
+#error "Invalid NODE_ROLE defined! Must be 1, 2, or 3."
 #endif
 
 /* ========================================================================== */
@@ -158,8 +158,8 @@ void app_main(void) {
             float humidity_pct = 35.0f;
             float pressure_hpa = 1013.25f;
             uint8_t leak_bitmask = 0x00;
-            uint16_t v_rail_mv = 5020;  /* 5.02V rail */
-            uint16_t i_rail_ma = 480;   /* 480mA current */
+            uint16_t v_rail_mv = 5020; /* 5.02V rail */
+            uint16_t i_rail_ma = 480;  /* 480mA current */
 
             memcpy(&tx_buf[0], &temp_c, sizeof(float));
             memcpy(&tx_buf[4], &humidity_pct, sizeof(float));
@@ -173,10 +173,10 @@ void app_main(void) {
             /* Construct Mock Navigation Telemetry: 33 bytes (packed) */
             /* 8x float (accel x/y/z, gyro x/y/z, depth, heading) + 1 byte status */
             float dummy_floats[8] = {
-                0.0f, 0.0f, 9.81f,       /* Accel X, Y, Z */
-                0.01f, -0.02f, 0.00f,    /* Gyro X, Y, Z */
-                1.25f,                   /* Depth in meters */
-                180.5f                   /* Heading in degrees */
+                0.0f,  0.0f,   9.81f, /* Accel X, Y, Z */
+                0.01f, -0.02f, 0.00f, /* Gyro X, Y, Z */
+                1.25f,                /* Depth in meters */
+                180.5f                /* Heading in degrees */
             };
             uint8_t status_flags = 0x01; /* Sensor health OK */
 
@@ -189,7 +189,7 @@ void app_main(void) {
             /* 48V, 12V, 5V voltages, total current, and eFuse status mask */
             uint16_t v_48v_mv = 48200;
             uint16_t v_12v_mv = 12050;
-            uint16_t v_5v_mv  = 5010;
+            uint16_t v_5v_mv = 5010;
             uint16_t i_tot_ma = 12500;
             uint16_t efuse_status = 0x00FF;
 
@@ -212,9 +212,8 @@ void app_main(void) {
         /* ------------------------------------------------------------------ */
         if ((now - last_stats_ms) >= 1000) {
             last_stats_ms = now;
-            printf("[%s] Up: %lu s | TX: %lu pkts | RX: %lu pkts | E-Stop: %lu\r\n",
-                   ROLE_NAME, (unsigned long)(now / 1000),
-                   (unsigned long)tx_count, (unsigned long)rx_count,
+            printf("[%s] Up: %lu s | TX: %lu pkts | RX: %lu pkts | E-Stop: %lu\r\n", ROLE_NAME,
+                   (unsigned long)(now / 1000), (unsigned long)tx_count, (unsigned long)rx_count,
                    (unsigned long)emergency_count);
         }
     }

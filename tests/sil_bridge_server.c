@@ -396,7 +396,6 @@ int main(int argc, char **argv) {
             }
         }
 
-
         /* SIL-only feedback lets integration tests inspect actual mocked outputs. */
         if (!IS_INVALID_SOCKET(client_fd)) {
             uint8_t status[23];
@@ -487,7 +486,9 @@ int main(int argc, char **argv) {
         }
 
         /* Sleep 10 ms to throttle host CPU to true 100 Hz wall clock (skipped in LOGICAL mode) */
-        if (s_mode == SIL_MODE_REALTIME) { platform_sleep_ms(10); }
+        if (s_mode == SIL_MODE_REALTIME) {
+            platform_sleep_ms(10);
+        }
     }
 
     printf("SIL Bridge: Server exiting after %u cycles.\n", cycle_count);

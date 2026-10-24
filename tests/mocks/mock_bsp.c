@@ -5,12 +5,12 @@
  */
 
 #include "mock_bsp.h"
+#include "../harness/sil_clock.h"
 #include "actuator_service.h"
 #include "mock_physics.h"
 #include "rov_parameters.h"
 #include "safety_service.h"
 #include <string.h>
-#include "../harness/sil_clock.h"
 
 #define MOCK_I2C_NUM_ADDRS 128
 #define MOCK_I2C_NUM_REGS  256

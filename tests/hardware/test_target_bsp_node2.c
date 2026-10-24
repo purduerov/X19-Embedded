@@ -4,12 +4,12 @@
 
 static unsigned s_failures;
 
-#define CHECK(condition, description)                                                                                   \
-    do {                                                                                                                \
-        if (!(condition)) {                                                                                             \
+#define CHECK(condition, description)                                                                                  \
+    do {                                                                                                               \
+        if (!(condition)) {                                                                                            \
             printf("[FAIL] %s\n", description);                                                                        \
             s_failures++;                                                                                              \
-        }                                                                                                               \
+        }                                                                                                              \
     } while (0)
 
 static uint16_t expected_compare(uint8_t channel) {

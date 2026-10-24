@@ -30,12 +30,7 @@ void test_timesync_master_broadcast_and_slew(void) {
     /* Local hardware time at reception: 10,000 us (10 ms) */
     uint64_t local_rx_us = 10000;
     /* Master time: 1,000,000 us (1.000 s) */
-    rov_time_sync_master_t master = {
-        .master_time_us = 1000000,
-        .sync_seq = 1,
-        .flags = 0x01,
-        .reserved = {0, 0, 0}
-    };
+    rov_time_sync_master_t master = {.master_time_us = 1000000, .sync_seq = 1, .flags = 0x01, .reserved = {0, 0, 0}};
 
     /* First sync snaps directly */
     assert(rov_timesync_process_master(&ts, &master, local_rx_us) == ROV_OK);
@@ -49,7 +44,7 @@ void test_timesync_master_broadcast_and_slew(void) {
     assert(synced_time == 1000045);
 
     /* Second sync frame 100 ms later (at 10 Hz) with a slight master clock step (e.g. +200 us jump) */
-    local_rx_us += 100000; /* local = 110,000 us */
+    local_rx_us += 100000;           /* local = 110,000 us */
     master.master_time_us += 100200; /* master jumped +200 us extra */
     assert(rov_timesync_process_master(&ts, &master, local_rx_us) == ROV_ERR_INVALID_ARG);
     master.sync_seq++;
@@ -107,12 +102,7 @@ void test_timesync_timeout_and_health(void) {
     rov_timesync_init(&ts);
 
     uint64_t now_us = 1000000;
-    rov_time_sync_master_t master = {
-        .master_time_us = 5000000,
-        .sync_seq = 10,
-        .flags = 0x01,
-        .reserved = {0, 0, 0}
-    };
+    rov_time_sync_master_t master = {.master_time_us = 5000000, .sync_seq = 10, .flags = 0x01, .reserved = {0, 0, 0}};
 
     assert(rov_timesync_process_master(&ts, &master, now_us) == ROV_OK);
     assert(rov_timesync_is_synchronized(&ts, now_us) == true);

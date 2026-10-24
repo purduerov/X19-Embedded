@@ -5,9 +5,9 @@
 
 typedef struct {
     const char *name;
-    uint8_t     can_node_id;
-    void      (*init)(void);
-    void      (*step)(void);
+    uint8_t can_node_id;
+    void (*init)(void);
+    void (*step)(void);
 } sil_node_t;
 
 int sil_vehicle_node_count(void);

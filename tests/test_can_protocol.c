@@ -67,11 +67,7 @@ void test_nav_telemetry_pack_unpack(void) {
 void test_time_sync_pack_unpack(void) {
     /* 1. Master Time Sync frame (0x010) */
     rov_time_sync_master_t master_orig = {
-        .master_time_us = 1726345000000000ULL,
-        .sync_seq = 42,
-        .flags = 0x03,
-        .reserved = {0, 0, 0}
-    };
+        .master_time_us = 1726345000000000ULL, .sync_seq = 42, .flags = 0x03, .reserved = {0, 0, 0}};
     uint8_t buffer[64];
     size_t len = 0;
     assert(rov_can_pack_time_sync_master(&master_orig, buffer, sizeof(buffer), &len) == ROV_OK);
@@ -86,12 +82,7 @@ void test_time_sync_pack_unpack(void) {
 
     /* 2. Time Sync Delay Request frame (0x011) */
     rov_time_sync_req_t req_orig = {
-        .target_node_id = ROV_NODE_CONTROL_BOARD,
-        .seq = 7,
-        .reserved = 0,
-        .flags = 1,
-        .t1_us = 1726345000000100ULL
-    };
+        .target_node_id = ROV_NODE_CONTROL_BOARD, .seq = 7, .reserved = 0, .flags = 1, .t1_us = 1726345000000100ULL};
     assert(rov_can_pack_time_sync_req(&req_orig, buffer, sizeof(buffer), &len) == ROV_OK);
     assert(len == sizeof(rov_time_sync_req_t));
     assert(len == 16);
@@ -103,15 +94,13 @@ void test_time_sync_pack_unpack(void) {
     assert(req_dec.t1_us == req_orig.t1_us);
 
     /* 3. Time Sync Delay Response frame (0x012) */
-    rov_time_sync_resp_t resp_orig = {
-        .responder_node_id = ROV_NODE_CONTROL_BOARD,
-        .seq = 7,
-        .reserved = 0,
-        .status = 1,
-        .t1_us = 1726345000000100ULL,
-        .t2_us = 1726345000000145ULL,
-        .t3_us = 1726345000000155ULL
-    };
+    rov_time_sync_resp_t resp_orig = {.responder_node_id = ROV_NODE_CONTROL_BOARD,
+                                      .seq = 7,
+                                      .reserved = 0,
+                                      .status = 1,
+                                      .t1_us = 1726345000000100ULL,
+                                      .t2_us = 1726345000000145ULL,
+                                      .t3_us = 1726345000000155ULL};
     assert(rov_can_pack_time_sync_resp(&resp_orig, buffer, sizeof(buffer), &len) == ROV_OK);
     assert(len == sizeof(rov_time_sync_resp_t));
     assert(len == 32);

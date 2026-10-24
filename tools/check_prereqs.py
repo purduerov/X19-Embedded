@@ -130,6 +130,18 @@ INSTALL_HINTS = {
         "optional, dashboard tests only:\n"
         "           python -m pip install \"streamlit>=1.40,<2\""
     ),
+    "clang-format": (
+        "optional, automated C/C++ code formatting ('rov format'):\n"
+        "           Windows: winget install LLVM.LLVM | choco install llvm\n"
+        "           Linux:   sudo apt install clang-format\n"
+        "           macOS:   brew install clang-format"
+    ),
+    "ccache": (
+        "optional, compiler cache for fast rebuilds across targets:\n"
+        "           Windows: choco install ccache | winget install ccache\n"
+        "           Linux:   sudo apt install ccache\n"
+        "           macOS:   brew install ccache"
+    ),
 }
 
 
@@ -233,6 +245,25 @@ def main() -> int:
     else:
         print(f"  [opt]   {'streamlit':<22} {INSTALL_HINTS['streamlit']}")
         missing_optional.append("streamlit")
+
+    clang_fmt = shutil.which("clang-format")
+    if not clang_fmt:
+        for cand in (Path(r"C:\msys64\ucrt64\bin\clang-format.exe"), Path(r"C:\Program Files\LLVM\bin\clang-format.exe")):
+            if cand.is_file():
+                clang_fmt = str(cand)
+                break
+    if clang_fmt:
+        print(f"  [ ok ]   {'clang-format':<22} {tool_version([clang_fmt, '--version'])}")
+    else:
+        print(f"  [opt]   {'clang-format':<22} {INSTALL_HINTS['clang-format']}")
+        missing_optional.append("clang-format")
+
+    ccache_bin = shutil.which("ccache")
+    if ccache_bin:
+        print(f"  [ ok ]   {'ccache':<22} {tool_version([ccache_bin, '--version'])}")
+    else:
+        print(f"  [opt]   {'ccache':<22} {INSTALL_HINTS['ccache']}")
+        missing_optional.append("ccache")
 
     print()
     if missing_required:

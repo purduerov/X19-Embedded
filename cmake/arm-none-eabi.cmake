@@ -3,6 +3,13 @@ set(CMAKE_SYSTEM_PROCESSOR arm)
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 
+# Auto-detect ccache for cross-compilation caching
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif()
+
 # Auto-detect arm-none-eabi-gcc from PATH or standard install paths
 find_program(ARM_GCC_EXECUTABLE arm-none-eabi-gcc
     PATHS
@@ -60,6 +67,7 @@ set(CMAKE_ASM_FLAGS_INIT "${COMMON_FLAGS} -x assembler-with-cpp")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${COMMON_FLAGS} -Wl,--gc-sections --specs=nano.specs --specs=nosys.specs")
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)

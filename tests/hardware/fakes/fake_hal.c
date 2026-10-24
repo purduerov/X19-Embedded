@@ -1,5 +1,5 @@
-#include "main.h"
 #include "can_interface.h"
+#include "main.h"
 #include <string.h>
 
 GPIO_TypeDef fake_gpio_a = {0};

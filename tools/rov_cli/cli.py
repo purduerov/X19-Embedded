@@ -39,6 +39,7 @@ Examples:
   rov test                                Run Host SIL CTest test suites
   rov devices                             List connected ST-Link probes and COM ports
   rov generate                            Regenerate peripheral drivers from .ioc files
+  rov format                              Format C/C++ source code with clang-format
 """,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -117,6 +118,11 @@ Examples:
     can_p = subparsers.add_parser("can", help="Sniff and stimulate the vehicle CAN bus (real can0 or --sil)")
     from tools.rov_can.cli import build_parser as _build_can_parser
     _build_can_parser(can_p)
+
+    # 10. Format (clang-format)
+    fmt_p = subparsers.add_parser("format", help="Format C/C++ source code with clang-format", description="Format C/C++ source code with clang-format.")
+    fmt_p.add_argument("paths", nargs="*", default=None, help="Specific files or directories to format (default: all project sources)")
+    fmt_p.add_argument("-c", "--check", action="store_true", help="Check formatting without modifying files (exits 1 if unformatted)")
 
     args = parser.parse_args()
 
@@ -271,4 +277,8 @@ Examples:
     elif args.command == "generate":
         target = getattr(args, "target", None) or getattr(args, "target_flag", None) or "all"
         generate_cubemx(target)
+
+    elif args.command == "format":
+        from .format import run_format
+        sys.exit(run_format(check_only=args.check, paths=args.paths))
 

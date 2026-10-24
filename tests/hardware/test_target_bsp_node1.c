@@ -4,12 +4,12 @@
 
 static unsigned s_failures;
 
-#define CHECK(condition, description)                                                                                   \
-    do {                                                                                                                \
-        if (!(condition)) {                                                                                             \
+#define CHECK(condition, description)                                                                                  \
+    do {                                                                                                               \
+        if (!(condition)) {                                                                                            \
             printf("[FAIL] %s\n", description);                                                                        \
             s_failures++;                                                                                              \
-        }                                                                                                               \
+        }                                                                                                              \
     } while (0)
 
 int main(void) {
@@ -23,8 +23,7 @@ int main(void) {
           "Leak probe 1 must be configured as a pulled-up input");
     CHECK(fake_hal_gpio_was_configured(GPIOC, EMERGENCY_CUTOFF_Pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL),
           "Emergency cutoff must be configured as an output");
-    CHECK(fake_hal_get_output(GPIOC, EMERGENCY_CUTOFF_Pin) == GPIO_PIN_RESET,
-          "Emergency cutoff must boot deasserted");
+    CHECK(fake_hal_get_output(GPIOC, EMERGENCY_CUTOFF_Pin) == GPIO_PIN_RESET, "Emergency cutoff must boot deasserted");
 
     fake_hal_set_input(GPIOA, LEAK_PROBE0_Pin, GPIO_PIN_SET);
     fake_hal_set_input(GPIOA, LEAK_PROBE1_Pin, GPIO_PIN_SET);

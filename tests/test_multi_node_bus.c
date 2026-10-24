@@ -49,7 +49,8 @@ void test_full_system_simulation(void) {
     uint8_t dummy_data[64];
     uint8_t dummy_len;
     mock_can_set_current_node(ROV_NODE_PI_CORE);
-    while (can_receive(&dummy_id, dummy_data, &dummy_len)) {}
+    while (can_receive(&dummy_id, dummy_data, &dummy_len)) {
+    }
 
     /* 2. Pilot / Pi Core sends Thruster Command (0x100) commanding 1700 us and Time Sync Master (0x010) */
     rov_thruster_cmd_t cmd;
@@ -61,11 +62,7 @@ void test_full_system_simulation(void) {
     assert(rov_can_pack_thruster_cmd(&cmd, tx_buf, sizeof(tx_buf), &tx_len) == ROV_OK);
 
     rov_time_sync_master_t master_sync = {
-        .master_time_us = 1726340000000000ULL,
-        .sync_seq = 1,
-        .flags = 0x01,
-        .reserved = {0, 0, 0}
-    };
+        .master_time_us = 1726340000000000ULL, .sync_seq = 1, .flags = 0x01, .reserved = {0, 0, 0}};
     uint8_t sync_buf[64];
     size_t sync_len = 0;
     assert(rov_can_pack_time_sync_master(&master_sync, sync_buf, sizeof(sync_buf), &sync_len) == ROV_OK);

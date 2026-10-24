@@ -87,6 +87,12 @@ class TestR1SubcommandRemoval(unittest.TestCase):
         res = run_rov_cli(["sandbox", "--help"])
         self.assertNotEqual(res.returncode, 0)
 
+    def test_r1_format_subcommand_present(self):
+        """Verify: python rov.py format --help displays format help and exits 0."""
+        res = run_rov_cli(["format", "--help"])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("clang-format", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
