@@ -921,6 +921,14 @@ class SilDashboardClient:
             return False
         return True
 
+    def _format_timestamp(self, now: float) -> str:
+        """Formats timestamp into HH:MM:SS.mmm string, caching the HH:MM:SS part by integer second."""
+        sec = int(now)
+        if sec != getattr(self, "_last_ts_sec", None):
+            self._last_ts_sec = sec
+            self._last_ts_str = time.strftime("%H:%M:%S", time.localtime(sec))
+        return f"{self._last_ts_str}.{int(now * 1000) % 1000:03d}"
+
     def _record_packet(self, direction: str, can_id: int, payload: bytes, summary: str):
         now = time.monotonic()
         telemetry_ids = {CAN_ID_NAV_TELEMETRY, CAN_ID_ENV_TELEMETRY, CAN_ID_POWER_TELEMETRY}
@@ -934,7 +942,7 @@ class SilDashboardClient:
 
         name = CAN_ID_MAP.get(can_id, ("UNKNOWN", ""))[0]
         rec = CanPacketRecord(
-            timestamp=time.strftime("%H:%M:%S") + f".{int(time.time()*1000)%1000:03d}",
+            timestamp=self._format_timestamp(time.time()),
             direction=direction,
             can_id=can_id,
             name=name,
