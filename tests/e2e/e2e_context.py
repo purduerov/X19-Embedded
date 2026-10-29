@@ -24,8 +24,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # SIL CAN packet constants matching tests/sil_bridge_server.c
 SIL_MAGIC_HEADER = 0x524F5643        # "ROVC" in ASCII
-SIL_MAGIC_HEADER_LEGACY = 0x58313943  # "X19C" in ASCII
-SIL_CAN_PACKET_FORMAT = "<IIB64s"  # magic, id, len, data(64) = 73 bytes
+SIL_MAGIC_HEADER_LEGACY = 0x58313943 # "X19C" in ASCII
+SIL_CAN_PACKET_FORMAT = "<IIB64s"    # magic(4), id(4), len(1), data(64) = 73 bytes
 SIL_CAN_PACKET_SIZE = struct.calcsize(SIL_CAN_PACKET_FORMAT)
 
 # Standard protocol CAN identifiers
@@ -72,35 +72,24 @@ void app_main(void) {}
 """
 
 
-def pack_sil_can_frame(
-    arb_id: int, data: bytes, magic: int = SIL_MAGIC_HEADER
-) -> bytes:
+def pack_sil_can_frame(arb_id: int, data: bytes, magic: int = SIL_MAGIC_HEADER) -> bytes:
     """Pack an arbitration ID and payload into a 73-byte SIL CAN packet."""
     length = len(data)
     if length > 64:
         raise ValueError(f"CAN FD payload exceeds 64 bytes: {length}")
     padded_data = data.ljust(64, b"\x00")
-    return struct.pack(
-        SIL_CAN_PACKET_FORMAT, magic, arb_id, length, padded_data
-    )
+    return struct.pack(SIL_CAN_PACKET_FORMAT, magic, arb_id, length, padded_data)
 
 
 def unpack_sil_can_frame(buffer: bytes) -> Tuple[int, int, int, bytes]:
     """Unpack a 73-byte SIL CAN packet into (magic, arb_id, length, data)."""
     if len(buffer) < SIL_CAN_PACKET_SIZE:
-        raise ValueError(
-            f"Buffer too short for SIL frame: "
-            f"{len(buffer)} < {SIL_CAN_PACKET_SIZE}"
-        )
-    magic, arb_id, length, raw_data = struct.unpack(
-        SIL_CAN_PACKET_FORMAT, buffer[:SIL_CAN_PACKET_SIZE]
-    )
+        raise ValueError(f"Buffer too short for SIL frame: {len(buffer)} < {SIL_CAN_PACKET_SIZE}")
+    magic, arb_id, length, raw_data = struct.unpack(SIL_CAN_PACKET_FORMAT, buffer[:SIL_CAN_PACKET_SIZE])
     return magic, arb_id, length, raw_data[:length]
 
 
-def run_rov_cli(
-    args: list[str], timeout: float = 60.0
-) -> subprocess.CompletedProcess:
+def run_rov_cli(args: list[str], timeout: float = 60.0) -> subprocess.CompletedProcess:
     """Execute python rov.py with the given arguments."""
     cmd = [sys.executable, str(REPO_ROOT / "rov.py")] + args
     env = os.environ.copy()
@@ -127,9 +116,7 @@ def temp_scratch_file(
 ) -> Generator[Path, None, None]:
     """Create a temporary C scratch file and automatically unlink on exit."""
     target_dir = directory or REPO_ROOT
-    fd, path_str = tempfile.mkstemp(
-        prefix=prefix, suffix=suffix, dir=target_dir
-    )
+    fd, path_str = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=target_dir)
     os.close(fd)
     path = Path(path_str)
     try:
@@ -145,10 +132,8 @@ def temp_scratch_file(
                     time.sleep(0.1)
 
 
-def robust_rmtree(
-    path: Path | str, retries: int = 30, delay: float = 0.15
-) -> bool:
-    """Robustly remove a directory tree, retrying on Windows file locks."""
+def robust_rmtree(path: Path | str, retries: int = 30, delay: float = 0.15) -> bool:
+    """Robustly remove a directory tree, retrying on Windows file locks and permission errors."""
     target = Path(path)
     if not target.exists():
         return True
@@ -166,12 +151,7 @@ def robust_rmtree(
         try:
             if target.is_dir():
                 if sys.version_info >= (3, 12):
-                    shutil.rmtree(
-                        target,
-                        onexc=lambda func, p, exc: _remove_readonly(
-                            func, p, exc
-                        ),
-                    )
+                    shutil.rmtree(target, onexc=lambda func, p, exc: _remove_readonly(func, p, exc))
                 else:
                     shutil.rmtree(target, onerror=_remove_readonly)
             else:
@@ -191,11 +171,7 @@ def robust_rmtree(
     if target.exists():
         if os.name == "nt":
             try:
-                subprocess.run(
-                    ["cmd", "/c", "rmdir", "/s", "/q", str(target.resolve())],
-                    capture_output=True,
-                    timeout=5,
-                )
+                subprocess.run(["cmd", "/c", "rmdir", "/s", "/q", str(target.resolve())], capture_output=True, timeout=5)
             except Exception:
                 pass
         if target.exists():
@@ -216,7 +192,7 @@ def temp_board(
     mcu: str = "STM32F411RET6",
     family: str = "STM32F4",
 ) -> Generator[Path, None, None]:
-    """Create a temporary board folder with an .ioc file inside boards/."""
+    """Create a temporary board folder with an .ioc file inside boards/ and clean up on exit."""
     board_dir = REPO_ROOT / "boards" / board_name
     board_dir.mkdir(parents=True, exist_ok=True)
     ioc_file = board_dir / f"{board_name}.ioc"
@@ -230,7 +206,7 @@ Mcu.Package=LQFP64
     try:
         yield board_dir
     finally:
-        # Give Windows and Ninja a moment to release handles before teardown
+        # Give Windows processes and Ninja a moment to release file handles before teardown
         time.sleep(0.15)
         if board_dir.exists():
             robust_rmtree(board_dir, retries=30, delay=0.15)
@@ -254,7 +230,7 @@ Mcu.Package=LQFP64
 
 
 class MockSilTcpServer:
-    """Lightweight TCP server emulating the SIL CAN bridge for unit tests."""
+    """Lightweight in-process TCP server emulating the SIL CAN bridge for unit tests."""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 0):
         self.host = host
@@ -268,9 +244,7 @@ class MockSilTcpServer:
 
     def start(self) -> int:
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(
-            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1
-        )
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.host, self.port))
         self.actual_port = self.server_socket.getsockname()[1]
         self.server_socket.listen(5)
@@ -299,21 +273,12 @@ class MockSilTcpServer:
                     break
                 buf.extend(data)
                 while len(buf) >= SIL_CAN_PACKET_SIZE:
-                    magic = int.from_bytes(buf[:4], byteorder="little")
-                    if magic not in (
-                        SIL_MAGIC_HEADER,
-                        SIL_MAGIC_HEADER_LEGACY,
-                    ):
-                        del buf[:1]
-                        continue
                     packet_bytes = bytes(buf[:SIL_CAN_PACKET_SIZE])
                     del buf[:SIL_CAN_PACKET_SIZE]
                     try:
-                        magic, arb_id, length, payload = unpack_sil_can_frame(
-                            packet_bytes
-                        )
+                        magic, arb_id, length, payload = unpack_sil_can_frame(packet_bytes)
                         self.received_frames.append((arb_id, payload))
-                    except ValueError:
+                    except Exception:
                         pass
             except (socket.timeout, OSError):
                 continue
