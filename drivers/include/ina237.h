@@ -19,6 +19,7 @@ typedef struct {
     const rov_i2c_bus_t *bus; /* injected transport; set by ina237_init() */
     uint8_t i2c_addr;
     float shunt_resistor_ohms;
+    float current_lsb_a;
     float bus_voltage_v;
     float shunt_current_a;
     float power_w;
