@@ -136,8 +136,10 @@ void app_main(void) {
             }
         }
 
-        /* Check for bus-off error recovery */
-        if (can_is_bus_off()) {
+        /* Rate-limited check for bus-off error recovery (max once per second) */
+        static uint32_t last_bus_off_ms = 0;
+        if (can_is_bus_off() && (now - last_bus_off_ms >= 1000)) {
+            last_bus_off_ms = now;
             printf("[WARN] CAN controller entered Bus-Off state! Attempting recovery...\r\n");
             can_recover();
         }
@@ -212,9 +214,21 @@ void app_main(void) {
         /* ------------------------------------------------------------------ */
         if ((now - last_stats_ms) >= 1000) {
             last_stats_ms = now;
-            printf("[%s] Up: %lu s | TX: %lu pkts | RX: %lu pkts | E-Stop: %lu\r\n", ROLE_NAME,
-                   (unsigned long)(now / 1000), (unsigned long)tx_count, (unsigned long)rx_count,
-                   (unsigned long)emergency_count);
+            can_diagnostics_t diag = {0};
+            if (can_get_diagnostics(&diag)) {
+                static const char *lec_names[] = {"None", "Stuff", "Form", "Ack", "Bit1", "Bit0", "CRC", "NoChange"};
+                const char *lec_str = (diag.last_error_code <= 7) ? lec_names[diag.last_error_code] : "?";
+                const char *dlec_str = (diag.data_last_error_code <= 7) ? lec_names[diag.data_last_error_code] : "?";
+                printf(
+                    "[%s] Up: %lu s | TX: %lu | RX: %lu | TEC:%u REC:%u | LEC:%s DLEC:%s | FIFO:%u/3 | BO:%d EP:%d\r\n",
+                    ROLE_NAME, (unsigned long)(now / 1000), (unsigned long)tx_count, (unsigned long)rx_count,
+                    diag.tx_error_count, diag.rx_error_count, lec_str, dlec_str, 3 - diag.tx_fifo_free_level,
+                    diag.bus_off, diag.error_passive);
+            } else {
+                printf("[%s] Up: %lu s | TX: %lu pkts | RX: %lu pkts | E-Stop: %lu\r\n", ROLE_NAME,
+                       (unsigned long)(now / 1000), (unsigned long)tx_count, (unsigned long)rx_count,
+                       (unsigned long)emergency_count);
+            }
         }
     }
 }

@@ -116,7 +116,7 @@ def decode_msg(msg: can.Message):
         if len(data) == 41:
             ts_us, qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_NAV_TS.unpack(data[:41])
             print(f"[{ts}] [CAN 0x200] Nav [ts={ts_us}us]: Depth={depth:5.2f}m | Gyro=({gx:+.2f}, {gy:+.2f}, {gz:+.2f}) | Quat=({qw:.2f}, {qx:.2f}, {qy:.2f}, {qz:.2f}) | Cal={status}")
-        elif len(data) == 33:
+        elif len(data) >= 33:
             qw, qx, qy, qz, gx, gy, gz, depth, status = _STRUCT_NAV_LEGACY.unpack(data[:33])
             print(f"[{ts}] [CAN 0x200] Nav (Legacy 33B): Depth={depth:5.2f}m | Gyro=({gx:+.2f}, {gy:+.2f}, {gz:+.2f}) | Quat=({qw:.2f}, {qx:.2f}, {qy:.2f}, {qz:.2f}) | Cal={status}")
         else:

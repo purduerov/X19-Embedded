@@ -78,6 +78,28 @@ bool can_is_bus_off(void);
  */
 void can_recover(void);
 
+/**
+ * @brief Diagnostic information from hardware CAN controller.
+ */
+typedef struct {
+    uint8_t tx_error_count;       /**< Transmit Error Counter (TEC) */
+    uint8_t rx_error_count;       /**< Receive Error Counter (REC) */
+    uint8_t last_error_code;      /**< Last Error Code (0=None, 1=Stuff, 2=Form, 3=Ack, 4=Bit1, 5=Bit0, 6=CRC) */
+    uint8_t data_last_error_code; /**< Data Phase Last Error Code */
+    uint8_t tx_fifo_free_level;   /**< Available TX FIFO slots */
+    bool bus_off;                 /**< Controller is in Bus-Off state */
+    bool error_passive;           /**< Controller is in Error-Passive state */
+    bool error_warning;           /**< Controller is in Error-Warning state */
+} can_diagnostics_t;
+
+/**
+ * @brief Retrieve hardware CAN diagnostic status.
+ * @param[out] diag Pointer to structure receiving diagnostics.
+
+ * * @return true if diagnostics were populated, false if unavailable.
+ */
+bool can_get_diagnostics(can_diagnostics_t *diag);
+
 #ifdef __cplusplus
 }
 #endif
