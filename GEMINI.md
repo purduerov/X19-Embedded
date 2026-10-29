@@ -87,15 +87,21 @@ Provides a declarative, PlatformIO-like developer workflow across heterogeneous 
 - **Configuration File**: [`rov.toml`](rov.toml) defines active nodes, default dev boards, and hardware mappings.
 - **Unified Platform-Agnostic Commands (run from `Embedded/X19-Embedded/` via `python rov.py <command>` or `.\rov` / `./rov`)**:
   ```bash
-  # Build target binary (defaults to active node/board in rov.toml)
+  # Build target binary (positional scratch C file, node name, or default):
   python rov.py build
-  python rov.py build -n pi_shield -b f411
-  python rov.py build -n control_board -b f411
-  python rov.py build -n pi_shield -b stm32c5
+  python rov.py build multinode_can.c -b f411
+  python rov.py build control_board -b g474
+  python rov.py build pi_shield -b stm32c5
 
   # Build, flash with hardware reset, auto-detect ST-Link COM port, and open live serial monitor:
   python rov.py run
-  python rov.py run -n pi_shield -b f411
+  python rov.py run multinode_can.c
+  python rov.py run control_board -b g474
+  python rov.py run pi_shield -b f411
+
+  # Flash directly over ST-Link SWD without launching monitor:
+  python rov.py flash multinode_can.c -b f411
+  python rov.py flash control_board -b g474
 
   # Auto-detect connected ST-Link COM port and open serial monitor:
   python rov.py monitor
@@ -103,9 +109,27 @@ Provides a declarative, PlatformIO-like developer workflow across heterogeneous 
   # List connected ST-Link hardware probes and COM ports:
   python rov.py devices
 
-  # Build and run all 25 Host SIL CTest test suites:
+  # Sniff and stimulate CAN bus (real hardware or Host SIL bridge):
+  python rov.py can sniff -i can0
+  python rov.py can sniff --sil localhost:8765
+  python rov.py can estop
+  python rov.py can pwm 1550
+
+  # Format source code with clang-format (or -c / --check):
+  python rov.py format
+  python rov.py format --check
+
+  # Regenerate CubeMX peripheral HAL drivers & auto-scaffold board configs:
+  python rov.py generate
+
+  # Verify toolchain, compilers, flashing tools, and dependencies:
+  python rov.py check
+
+  # Build and run Host SIL CTest test suites (with --node, --suite, -R, -k, --dry-run):
   python rov.py test
   python rov.py test -R "safety"
+  python rov.py test --suite safety
+  python rov.py test --node control_board
   ```
 - **Optional CLI Install**: Run `pip install -e .` to install `rov` directly into your Python environment.
 - **VS Code One-Key Execution**: Press `Ctrl+Shift+B` to trigger task `ROV: Run (Build, Flash, & Monitor)`.

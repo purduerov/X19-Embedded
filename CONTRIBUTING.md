@@ -11,7 +11,7 @@ Welcome to the Purdue ROV **Embedded Firmware** team (configured for the X19 sub
    - `dev/<feature-name>` (e.g. `dev/imu-spi-driver`, `dev/pmbus-brick-telemetry`)
 3. **Open Workspace**: Always open `X19-Embedded.code-workspace` in VS Code.
 4. **Compile Frequently**: Press `Ctrl + Shift + B` or use the STM32Cube extension tab to verify clean builds.
-5. **Format Code**: Press `Shift + Alt + F` to auto-format using `.clang-format`.
+5. **Format Code**: Run `python rov.py format` (or `python rov.py format --check` to verify) or press `Shift + Alt + F` in VS Code to auto-format using `.clang-format`.
 6. **Submit PR**: Open a Pull Request against `master`. All PRs require:
    - Green CI/CD build passing.
    - Lead Engineer (Aman) review and sign-off.

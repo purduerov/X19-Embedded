@@ -161,6 +161,26 @@ python tools/node2_stimulus.py --help
 
 A legacy invocation also prints a one-line `[COMPAT]` notice on stderr naming the canonical flag and whether it actuates. Three legacy flags (`--bitrate`, `--data-bitrate`, `--channel`) have no canonical counterpart and are refused with exit 2 rather than silently dropped.
 
+### Unified `rov can` Tooling with SIL Bridge
+
+The declarative `rov` CLI provides a unified `rov can` command that can sniff, test E-stop safety, or inject PWM commands directly into the running SIL bridge server over TCP without needing physical hardware:
+
+```powershell
+# Sniff and decode virtual CAN frames from sil_bridge_server:
+python rov.py can sniff --sil localhost:8765
+
+# Broadcast E-stop (0x001) to verify emergency latching on the SIL virtual bus:
+python rov.py can estop --sil localhost:8765
+
+# Inject thruster PWM frames into Node 2 state machine (reverts to 1500 us neutral on Ctrl+C):
+python rov.py can pwm 1600 --sil localhost:8765
+
+# Run host SIL CTest test suites:
+python rov.py test
+python rov.py test -R "safety"
+python rov.py test --suite safety
+```
+
 ---
 
 ## 4. 6-DOF Hydrodynamic & Electrical Plant Simulation

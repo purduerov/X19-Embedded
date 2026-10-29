@@ -48,27 +48,26 @@ The embedded workspace includes a unified declarative CLI (`tools/rov.py`, acces
 # Build active node and board configured in rov.toml:
 python rov.py build
 
-# Build a specific node for a bench development board:
-python rov.py build -n pi_shield -b f411
-python rov.py build -n control_board -b g474
+# Build a specific node or scratch C file for a bench development board:
+python rov.py build multinode_can.c -b f411
+python rov.py build control_board -b g474
+python rov.py build pi_shield -b f411
 
 # Build, flash via ST-Link SWD, and auto-open live serial monitor:
-# (IMPORTANT: Always specify both -n <node> and -b <board> to target the intended firmware)
-python rov.py run -n pi_shield -b f411
-python rov.py run -n control_board -b g474
-python rov.py run -n rnd -b f411
+python rov.py run multinode_can.c
+python rov.py run control_board -b g474
+python rov.py run pi_shield -b f411
 
-# Rapid Prototyping / Developer Sandbox (Single-File Testing):
-# Test code in sandbox/sandbox.c or pass any custom C file with app_main():
-python rov.py sandbox                      # Run default sandbox/sandbox.c on default board (f411)
-python rov.py sandbox -b f411              # Run default sandbox on NUCLEO-F411RE
-python rov.py sandbox -b g474              # Run default sandbox on NUCLEO-G474RE
-python rov.py sandbox -b host              # Run sandbox natively in Host SIL simulator (no hardware)
-python rov.py sandbox -f my_experiment.c -b f411  # Run custom scratch C file on F411
+# Rapid Prototyping / Single-File Testing:
+# Pass any C file containing app_main() directly as positional argument:
+python rov.py run multinode_can.c           # Run scratch C file on auto-detected board
+python rov.py run sandbox/sandbox.c -b f411 # Run default sandbox on NUCLEO-F411RE
+python rov.py run sandbox/sandbox.c -b g474 # Run default sandbox on NUCLEO-G474RE
+python rov.py run multinode_can.c -b host   # Run natively in Host SIL simulator (no hardware)
 
-# Hardware I2C Diagnostic Bus Scanner (Builds, flashes, and streams live ASCII table):
-python rov.py scan -b f411                 # Zero-code I2C bus scanner on NUCLEO-F411RE (Pins PB8/PB9)
-python rov.py scan -b g474                 # Zero-code I2C bus scanner on NUCLEO-G474RE (Pins PA15/PB7)
+# Hardware I2C Diagnostic Bus Scanner:
+python rov.py run sandbox/i2c_scanner.c -b f411 # Zero-code I2C bus scanner on F411
+python rov.py run sandbox/i2c_scanner.c -b g474 # Zero-code I2C bus scanner on G474
 
 # Auto-detect connected ST-Link COM port and stream serial output at 115200 baud:
 python rov.py monitor
@@ -76,12 +75,20 @@ python rov.py monitor
 # Enumerate connected ST-Link probes and serial COM ports:
 python rov.py devices
 
+# Sniff and stimulate vehicle CAN bus:
+python rov.py can sniff -i can0
+python rov.py can estop
+python rov.py can pwm 1550
+
+# Automated code formatting with clang-format:
+python rov.py format
+
 # Run host SIL simulation test suite:
 python rov.py test
 
 # Optional: Install as an editable package to use 'rov' directly in any shell:
 pip install -e .
-rov sandbox -b f411
+rov run multinode_can.c
 ```
 
 ### Monorepo Node & Board Target Mapping
@@ -97,9 +104,9 @@ rov sandbox -b f411
 | **`power_slab`** (Node 3) | `stm32c5` | `node3_power_slab.elf` | `build/arm-c542-debug/nodes/node3_power_slab/node3_power_slab.elf` | `nodes/node3_power_slab/Core/Src/app.c`, `power_sequence.c`, `bsp.c` |
 | **`rnd`** (I2C Scan) | `f411` / `f446` | `testing_and_rnd.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/testing_and_rnd.elf` | `nodes/testing_and_rnd/Src/app.c` (`bsp_i2c_scan`), `bsp.c` |
 | **`rnd`** (I2C Scan) | `g474` | `node2_i2c_scanner.elf` | `nodes/node2_control_board/build/Debug/node2_i2c_scanner.elf` | `nodes/node2_control_board/Core/Src/diagnostic_i2c_scan.c` |
-| **`sandbox`** | `f411` | `bench_sandbox.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf` | `sandbox/sandbox.c` (or `-f <file>`), `testing_and_rnd/Src/bsp.c` |
-| **`sandbox`** | `g474` | `sandbox.elf` | `nodes/node2_control_board/build/Debug/sandbox.elf` | `sandbox/sandbox.c` (or `-f <file>`), `node2_control_board/Core/Src/bsp.c` |
-| **`sandbox`** | `host` | `sil_sandbox` | `build/sil-debug/tests/sil_sandbox.exe` | `sandbox/sandbox.c` (or `-f <file>`), `tests/sil_sandbox_main.c` |
+| **`sandbox`** | `f411` | `bench_sandbox.elf` | `build/arm-c542-debug/nodes/testing_and_rnd/Projects/bench_sandbox.elf` | `sandbox/sandbox.c` (or positional `<file.c>`), `testing_and_rnd/Src/bsp.c` |
+| **`sandbox`** | `g474` | `sandbox.elf` | `nodes/node2_control_board/build/Debug/sandbox.elf` | `sandbox/sandbox.c` (or positional `<file.c>`), `node2_control_board/Core/Src/bsp.c` |
+| **`sandbox`** | `host` | `sil_sandbox` | `build/sil-debug/tests/sil_sandbox.exe` | `sandbox/sandbox.c` (or positional `<file.c>`), `tests/sil_sandbox_main.c` |
 
 ### VS Code bench tasks
 

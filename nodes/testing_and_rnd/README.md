@@ -33,12 +33,25 @@ This project provides an isolated, low-overhead environment to test and debug:
 
 ## 3. Building & Flashing
 
+### Via Declarative `rov` CLI (Recommended)
+```powershell
+# Build, flash, and open serial monitor for multi-node CAN bench firmware:
+python rov.py run sandbox/multinode_can.c -b f411
+python rov.py run sandbox/multinode_can.c -b g474
+
+# Run the R&D testing node (CAN echo & continuous I2C scanner):
+python rov.py run -n rnd -b f411
+
+# Sniff live CAN traffic from the companion computer or bench workstation:
+python rov.py can sniff -i can0
+```
+
 ### Via VS Code
 1. Open [`X19-Embedded.code-workspace`](../../X19-Embedded.code-workspace).
 2. Select **Testing & R&D Project** from the folder list.
 3. In the STM32Cube extension tab, build `testing_and_rnd.elf` and flash via ST-Link (`F5`).
 
-### Via Command Line
+### Via Raw CMake CLI
 ```powershell
 cd X19-Embedded
 cmake -B build
