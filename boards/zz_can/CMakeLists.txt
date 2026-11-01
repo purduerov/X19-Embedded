@@ -130,8 +130,13 @@ target_include_directories(zz_can_sandbox.elf PRIVATE
 foreach(NODE node1_pi_shield node2_control_board node3_power_slab)
     set(NODE_APP "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/${NODE}/Core/Src/app.c")
     if(EXISTS "${NODE_APP}")
+        set(EXTRA_SOURCES "")
+        if(NODE STREQUAL "node3_power_slab")
+            set(EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/${NODE}/Core/Src/power_sequence.c")
+        endif()
         add_board_target_executable(zz_can_${NODE}.elf
             "${NODE_APP}"
+            ${EXTRA_SOURCES}
         )
         target_include_directories(zz_can_${NODE}.elf PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/${NODE}/Core/Inc"
