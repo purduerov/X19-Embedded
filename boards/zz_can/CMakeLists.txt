@@ -129,9 +129,15 @@ target_include_directories(zz_can_sandbox.elf PRIVATE
 # 2. Node Executables (if node sources exist)
 foreach(NODE node1_pi_shield node2_control_board node3_power_slab)
     set(NODE_APP "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/${NODE}/Core/Src/app.c")
+    set(NODE_POWER_SEQ "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/${NODE}/Core/Src/power_sequence.c")
+    set(EXTRA_SRCS "")
+    if(EXISTS "${NODE_POWER_SEQ}")
+        list(APPEND EXTRA_SRCS "${NODE_POWER_SEQ}")
+    endif()
     if(EXISTS "${NODE_APP}")
         add_board_target_executable(zz_can_${NODE}.elf
             "${NODE_APP}"
+            ${EXTRA_SRCS}
         )
         target_include_directories(zz_can_${NODE}.elf PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/${NODE}/Core/Inc"
