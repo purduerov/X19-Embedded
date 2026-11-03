@@ -20,6 +20,41 @@ __attribute__((weak)) bool mock_sensors_get_tps25990(uint8_t index, float *v_in,
     return false;
 }
 
+static const float PMBUS_EXP_LUT[32] = {
+    0.0000152587890625f, /* 2^-16 */
+    0.000030517578125f,  /* 2^-15 */
+    0.00006103515625f,   /* 2^-14 */
+    0.0001220703125f,    /* 2^-13 */
+    0.000244140625f,     /* 2^-12 */
+    0.00048828125f,      /* 2^-11 */
+    0.0009765625f,       /* 2^-10 */
+    0.001953125f,        /* 2^-9  */
+    0.00390625f,         /* 2^-8  */
+    0.0078125f,          /* 2^-7  */
+    0.015625f,           /* 2^-6  */
+    0.03125f,            /* 2^-5  */
+    0.0625f,             /* 2^-4  */
+    0.125f,              /* 2^-3  */
+    0.25f,               /* 2^-2  */
+    0.5f,                /* 2^-1  */
+    1.0f,                /* 2^0   */
+    2.0f,                /* 2^1   */
+    4.0f,                /* 2^2   */
+    8.0f,                /* 2^3   */
+    16.0f,               /* 2^4   */
+    32.0f,               /* 2^5   */
+    64.0f,               /* 2^6   */
+    128.0f,              /* 2^7   */
+    256.0f,              /* 2^8   */
+    512.0f,              /* 2^9   */
+    1024.0f,             /* 2^10  */
+    2048.0f,             /* 2^11  */
+    4096.0f,             /* 2^12  */
+    8192.0f,             /* 2^13  */
+    16384.0f,            /* 2^14  */
+    32768.0f             /* 2^15  */
+};
+
 float pmbus_linear11_to_float(uint16_t raw_value) {
     int16_t exponent = (int16_t)((int8_t)((raw_value >> 11) & 0x1F));
     if (exponent > 15) {
@@ -34,13 +69,7 @@ float pmbus_linear11_to_float(uint16_t raw_value) {
     if (mantissa > 1023) {
         mantissa -= 2048;
     }
-    float result = (float)mantissa;
-    if (exponent >= 0) {
-        result *= (float)(1 << exponent);
-    } else {
-        result /= (float)(1 << (-exponent));
-    }
-    return result;
+    return (float)mantissa * PMBUS_EXP_LUT[exponent + 16];
 }
 
 rov_status_t pmbus_brick_init(pmbus_brick_dev_t *dev, uint8_t pmbus_addr) {
@@ -170,13 +199,5 @@ float pmbus_linear16_to_float(uint16_t raw_value, int8_t exponent) {
         exp = 15;
     }
 
-    float result = (float)raw_value;
-
-    if (exp >= 0) {
-        result *= (float)(1UL << exp);
-    } else {
-        result /= (float)(1UL << (-exp));
-    }
-
-    return result;
+    return (float)raw_value * PMBUS_EXP_LUT[exp + 16];
 }
