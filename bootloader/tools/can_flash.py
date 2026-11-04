@@ -7,6 +7,7 @@ Purdue ROV 2026-2027.
 from __future__ import annotations
 
 import argparse
+import binascii
 import sys
 import time
 import struct
@@ -35,7 +36,6 @@ NODES = {
     "usb_hub":       0x04
 }
 
-import binascii
 
 def crc16_ccitt(data: bytes) -> int:
     """

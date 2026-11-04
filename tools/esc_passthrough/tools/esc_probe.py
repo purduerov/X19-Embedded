@@ -4,6 +4,7 @@ bootloader and print the BLHeli_S settings header. Read-only.
 
 usage: python3 esc_probe.py /dev/cu.usbmodemXXXX     (pip install pyserial)
 """
+import binascii
 import struct
 import sys
 
@@ -25,8 +26,6 @@ def msp(port, cmd, data=b""):
         raise RuntimeError(f"MSP {cmd} rejected")
     return payload
 
-
-import binascii
 
 def crc_xmodem(data):
     return binascii.crc_hqx(data, 0)
