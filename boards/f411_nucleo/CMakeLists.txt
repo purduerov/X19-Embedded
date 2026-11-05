@@ -74,25 +74,27 @@ function(add_f411_node_executable TARGET_NAME)
 endfunction()
 
 # 1. Bench Node 1 Pi Shield Target
+file(GLOB NODE1_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node1_pi_shield/Core/Src/*.c")
 add_f411_node_executable(f411_node1_pi_shield.elf
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node1_pi_shield/Core/Src/app.c"
+    ${NODE1_SRCS}
 )
 target_include_directories(f411_node1_pi_shield.elf PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node1_pi_shield/Core/Inc"
 )
 
 # 2. Bench Node 2 Control Board Target
+file(GLOB NODE2_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Src/*.c")
 add_f411_node_executable(f411_node2_control_board.elf
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Src/app.c"
+    ${NODE2_SRCS}
 )
 target_include_directories(f411_node2_control_board.elf PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Inc"
 )
 
 # 3. Bench Node 3 Power Slab Target
+file(GLOB NODE3_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/*.c")
 add_f411_node_executable(f411_node3_power_slab.elf
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/app.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/power_sequence.c"
+    ${NODE3_SRCS}
 )
 target_include_directories(f411_node3_power_slab.elf PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Inc"

@@ -69,8 +69,9 @@ function(add_stm32c5_node_executable TARGET_NAME)
 endfunction()
 
 # 1. STM32C5 Node 1 Pi Shield Target
+file(GLOB NODE1_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node1_pi_shield/Core/Src/*.c")
 add_stm32c5_node_executable(node1_pi_shield.elf
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node1_pi_shield/Core/Src/app.c"
+    ${NODE1_SRCS}
 )
 target_include_directories(node1_pi_shield.elf PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node1_pi_shield/Core/Inc"
@@ -87,8 +88,9 @@ add_custom_command(TARGET node1_pi_shield.elf POST_BUILD
 add_custom_target(stm32c5_node1_pi_shield.elf DEPENDS node1_pi_shield.elf)
 
 # 2. STM32C5 Node 2 Control Board Target
+file(GLOB NODE2_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Src/*.c")
 add_stm32c5_node_executable(node2_control_board.elf
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Src/app.c"
+    ${NODE2_SRCS}
 )
 target_include_directories(node2_control_board.elf PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node2_control_board/Core/Inc"
@@ -105,9 +107,9 @@ add_custom_command(TARGET node2_control_board.elf POST_BUILD
 add_custom_target(stm32c5_node2_control_board.elf DEPENDS node2_control_board.elf)
 
 # 3. STM32C5 Node 3 Power Slab Target
+file(GLOB NODE3_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/*.c")
 add_stm32c5_node_executable(node3_power_slab.elf
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/app.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Src/power_sequence.c"
+    ${NODE3_SRCS}
 )
 target_include_directories(node3_power_slab.elf PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../nodes/node3_power_slab/Core/Inc"
