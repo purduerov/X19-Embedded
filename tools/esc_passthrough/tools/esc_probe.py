@@ -26,14 +26,10 @@ def msp(port, cmd, data=b""):
     return payload
 
 
+import binascii
+
 def crc_xmodem(data):
-    crc = 0
-    for b in data:
-        crc ^= b << 8
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else (crc << 1)
-            crc &= 0xFFFF
-    return crc
+    return binascii.crc_hqx(data, 0)
 
 
 def fourway(port, cmd, addr=0, params=b"\x00"):
