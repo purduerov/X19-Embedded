@@ -154,3 +154,18 @@ bool mock_sensors_get_tmp1075(float *temperature_c) {
     *temperature_c = s_tmp1075_temperature_c;
     return true;
 }
+
+void HAL_Init(void) {
+}
+
+void SystemClock_Config(void) {
+}
+
+void MX_GPIO_Init(void) {
+}
+
+void MX_FDCAN1_Init(void) {
+}
+
+void MX_I2C1_Init(void) {
+}
