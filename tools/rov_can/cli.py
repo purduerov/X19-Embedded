@@ -73,9 +73,12 @@ def cmd_pwm(t, values: List[int], hz: float, seconds: float) -> int:
     sent = 0
     try:
         while time.monotonic() < end:
+            iter_start = time.perf_counter()
             t.send_message(P.CAN_ID_THRUSTER_CMD, payload)
             sent += 1
-            time.sleep(period)
+            elapsed = time.perf_counter() - iter_start
+            if elapsed < period:
+                time.sleep(period - elapsed)
     finally:
         t.send_message(P.CAN_ID_THRUSTER_CMD, struct.pack("<8H", *([PWM_NEUTRAL_US] * 8)))
     print(f"sent {sent} PWM frame(s) {values}, then returned all channels to {PWM_NEUTRAL_US} us")
