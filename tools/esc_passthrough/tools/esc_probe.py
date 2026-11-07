@@ -26,14 +26,12 @@ def msp(port, cmd, data=b""):
     return payload
 
 
+import binascii
+
 def crc_xmodem(data):
-    crc = 0
-    for b in data:
-        crc ^= b << 8
-        for _ in range(8):
-            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else (crc << 1)
-            crc &= 0xFFFF
-    return crc
+    # ⚡ Bolt: Using built-in C-optimized binascii.crc_hqx instead of bit-by-bit loop
+    # Reduces CRC calculation time significantly and eliminates interpreter overhead.
+    return binascii.crc_hqx(data, 0)
 
 
 def fourway(port, cmd, addr=0, params=b"\x00"):
