@@ -117,3 +117,32 @@ add_custom_target(testing_and_rnd.elf DEPENDS f411_sandbox.elf)
 add_custom_target(bench_node1_pi_shield.elf DEPENDS f411_node1_pi_shield.elf)
 add_custom_target(bench_node2_control_board.elf DEPENDS f411_node2_control_board.elf)
 add_custom_target(bench_node3_power_slab.elf DEPENDS f411_node3_power_slab.elf)
+
+# F446 target aliases and binary mirroring (Issue #176)
+add_custom_target(f446_sandbox.elf ALL DEPENDS f411_sandbox.elf)
+add_custom_command(TARGET f411_sandbox.elf POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:f411_sandbox.elf>"
+        "${CMAKE_CURRENT_BINARY_DIR}/f446_sandbox.elf"
+)
+
+add_custom_target(f446_node1_pi_shield.elf ALL DEPENDS f411_node1_pi_shield.elf)
+add_custom_command(TARGET f411_node1_pi_shield.elf POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:f411_node1_pi_shield.elf>"
+        "${CMAKE_CURRENT_BINARY_DIR}/f446_node1_pi_shield.elf"
+)
+
+add_custom_target(f446_node2_control_board.elf ALL DEPENDS f411_node2_control_board.elf)
+add_custom_command(TARGET f411_node2_control_board.elf POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:f411_node2_control_board.elf>"
+        "${CMAKE_CURRENT_BINARY_DIR}/f446_node2_control_board.elf"
+)
+
+add_custom_target(f446_node3_power_slab.elf ALL DEPENDS f411_node3_power_slab.elf)
+add_custom_command(TARGET f411_node3_power_slab.elf POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:f411_node3_power_slab.elf>"
+        "${CMAKE_CURRENT_BINARY_DIR}/f446_node3_power_slab.elf"
+)
