@@ -46,3 +46,7 @@
 ## 2026-09-23 - Prevent catch-up bursting in relative sleep loops
 **Learning:** When implementing periodic high-frequency transmission loops (e.g., CAN flashing), calculating sleep duration based on an absolute start time (e.g., `target = start + i * interval`) causes 'catch-up bursting'. If the loop is delayed (OS switch, full buffer), the sleep becomes negative, and subsequent iterations will fire with zero delay until the debt is repaid, overwhelming downstream receivers.
 **Action:** Calculate sleep relative to the start of the current iteration using high-resolution timers: `elapsed = time.perf_counter() - iter_start; if elapsed < interval: time.sleep(interval - elapsed)` to guarantee a minimum period without accumulating debt.
+
+## 2026-09-24 - Evaluate time exactly once per string cache hit
+**Learning:** When caching timestamp strings by integer seconds and appending milliseconds, evaluating `time.time()` implicitly via `strftime` and again explicitly for the milliseconds can lead to time skew/desynchronization if the clock ticks over to a new second in between the two evaluations.
+**Action:** Evaluate `time.time()` exactly once per event (e.g., `now = time.time()`) and use that single value for both the integer-second string cache lookup and the millisecond remainder calculation.
