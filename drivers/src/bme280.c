@@ -291,32 +291,20 @@ static uint32_t bme280_compensate_pressure(bme280_dev_t *dev, int32_t adc_p) {
 /*
  * Bosch humidity compensation, from the datasheet's 64-bit float reference.
  *
- * This is deliberately the floating-point form rather than the datasheet's
- * integer variant.  The integer transcription is widely copied and does not
- * reproduce this reference: measured against the datasheet's own example
- * trimming at 25.08 C, the integer form returns 0.37 %RH where the reference
- * returns 48.59 %RH for adc_H = 30000, and collapses to zero above
- * adc_H = 33000.  An earlier revision of this driver used that transcription
- * and therefore reported a flat ~0.00-0.03 %RH for every input, which silently
- * disabled the humidity half of node1's leak detection.
- *
- * The float form is the datasheet's normative algorithm, so it is the one that
- * can be pinned to a published vector: tests/test_driver_bme280.c asserts
- * 48.5-48.7 %RH for that same example.  The cost is a handful of FPU
- * operations per poll, which is irrelevant at node1's 10 Hz rate.
+ * This uses the normative 64-bit float algorithm from Section 4.2.3 of the
+ * Bosch BME280 datasheet.
  *
  * Returns percent relative humidity, already clamped to [0, 100].
  */
 static float bme280_compensate_humidity(bme280_dev_t *dev, int32_t adc_h) {
     double var_h;
 
-    var_h = (double)dev->t_fine / 5120.0;
-    var_h = var_h - 76800.0;
+    var_h = (double)dev->t_fine - 76800.0;
 
-    var_h = ((double)adc_h - (((double)dev->calib.dig_H4 * 64.0) + (((double)dev->calib.dig_H5 / 16384.0) * var_h))) *
-            ((double)dev->calib.dig_H2 / 65536.0);
-
-    var_h = var_h * (1.0 + (((double)dev->calib.dig_H3 / 67108864.0) * var_h));
+    var_h =
+        ((double)adc_h - (((double)dev->calib.dig_H4 * 64.0) + (((double)dev->calib.dig_H5 / 16384.0) * var_h))) *
+        (((double)dev->calib.dig_H2 / 65536.0) * (1.0 + (((double)dev->calib.dig_H6 / 67108864.0) * var_h *
+                                                         (1.0 + (((double)dev->calib.dig_H3 / 67108864.0) * var_h)))));
 
     var_h = var_h * (1.0 - (((double)dev->calib.dig_H1 * var_h) / 524288.0));
 

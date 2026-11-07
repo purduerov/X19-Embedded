@@ -125,11 +125,10 @@ static float pressure_hpa_from_raw(int32_t adc_p, int32_t t_fine) {
 static float humidity_pct_from_raw(int32_t adc_h, int32_t t_fine) {
     double var_h;
 
-    var_h = (double)t_fine / 5120.0;
-    var_h = var_h - 76800.0;
-    var_h =
-        ((double)adc_h - (((double)DIG_H4 * 64.0) + (((double)DIG_H5 / 16384.0) * var_h))) * ((double)DIG_H2 / 65536.0);
-    var_h = var_h * (1.0 + (((double)DIG_H3 / 67108864.0) * var_h));
+    var_h = (double)t_fine - 76800.0;
+    var_h = ((double)adc_h - (((double)DIG_H4 * 64.0) + (((double)DIG_H5 / 16384.0) * var_h))) *
+            (((double)DIG_H2 / 65536.0) *
+             (1.0 + (((double)DIG_H6 / 67108864.0) * var_h * (1.0 + (((double)DIG_H3 / 67108864.0) * var_h)))));
     var_h = var_h * (1.0 - (((double)DIG_H1 * var_h) / 524288.0));
 
     if (var_h > 100.0) {

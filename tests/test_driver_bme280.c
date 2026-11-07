@@ -308,15 +308,10 @@ static void test_compensation(void) {
  * Verify humidity against a published vector rather than against its own clamp.
  *
  * With the datasheet's example trimming at 25.08 C, the datasheet's reference
- * algorithm returns 48.59 %RH for adc_H = 30000.
+ * algorithm returns 47.52 %RH for adc_H = 30000.
  *
- * This assertion is the reason the earlier revision of this driver was caught.
- * It used the widely copied integer humidity transcription, which returns
- * 0.37 %RH for the same input, and the previous test only asserted
- * 0 <= humidity <= 100 -- bounds that the function's own clamp guarantees, so
- * a formula that returned a flat ~0.00-0.03 %RH for every possible input
- * passed. That silently disabled node1's humidity leak threshold, which sits
- * at ROV_LEAK_HUMIDITY_MAX_PCT, because 0 %RH can never cross it.
+ * This assertion verifies the normative 64-bit float algorithm from Section 4.2.3
+ * of the Bosch BME280 datasheet.
  */
 static void test_humidity_reference_vector(void) {
     bme280_dev_t dev;
@@ -335,7 +330,39 @@ static void test_humidity_reference_vector(void) {
     assert(bme280_read_all(&dev) == ROV_OK);
 
     assert(dev.temperature_c > 25.07f && dev.temperature_c < 25.09f);
-    assert(dev.humidity_pct > 48.5f && dev.humidity_pct < 48.7f);
+    assert(dev.humidity_pct > 47.4f && dev.humidity_pct < 47.6f);
+}
+
+/*
+ * Verify sub-zero temperature calculations and that t_fine is signed (Issue #171).
+ *
+ * adc_t = 400000 produces negative t_fine (-64736) and -12.64 C.
+ * If t_fine is unsigned, underflow corrupts temperature to ~+838848 C.
+ */
+static void test_subzero_temperature_and_signed_t_fine(void) {
+    bme280_dev_t dev;
+    uint8_t data[8] = {0};
+
+    setup_bme280();
+
+    /* Set raw temperature to 400000 (sub-zero C). */
+    data[3] = (uint8_t)((400000 >> 12) & 0xFF);
+    data[4] = (uint8_t)((400000 >> 4) & 0xFF);
+    data[5] = (uint8_t)((400000 & 0x0F) << 4);
+    /* Dummy pressure (1000 hPa raw ~ 384000) and humidity */
+    data[0] = (uint8_t)((384000 >> 12) & 0xFF);
+    data[1] = (uint8_t)((384000 >> 4) & 0xFF);
+    data[2] = (uint8_t)((384000 & 0x0F) << 4);
+    data[6] = (uint8_t)((30000 >> 8) & 0xFF);
+    data[7] = (uint8_t)(30000 & 0xFF);
+    mock_bsp_i2c_set_regs(BME280_TEST_ADDR, BME280_REG_DATA, data, sizeof(data));
+
+    assert(bme280_init(&dev, bsp_i2c_bus()) == ROV_OK);
+    assert(bme280_read_all(&dev) == ROV_OK);
+
+    assert(dev.t_fine < 0);
+    assert(dev.temperature_c < 0.0f);
+    assert(dev.temperature_c > -13.0f && dev.temperature_c < -12.0f);
 }
 
 /*
@@ -494,6 +521,7 @@ void test_bme280_driver(void) {
     test_invalid_calibration();
     test_compensation();
     test_humidity_reference_vector();
+    test_subzero_temperature_and_signed_t_fine();
     test_humidity_is_monotonic_across_the_threshold();
     test_power_on_sentinel_is_rejected();
     test_bus_error_propagates_and_leaves_reading_intact();

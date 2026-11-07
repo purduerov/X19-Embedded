@@ -44,7 +44,7 @@ typedef struct {
     const rov_i2c_bus_t *bus; /* injected transport; set by bme280_init() */
     uint8_t i2c_addr;         // 0x76 or 0x77
     bme280_calib_t calib;
-    uint32_t t_fine;  // temperature compensation produces an intermediate value
+    int32_t t_fine;  // temperature compensation produces an intermediate value
 
     float pressure_hpa;
     float humidity_pct;
