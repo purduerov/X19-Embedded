@@ -46,3 +46,7 @@
 ## 2026-09-23 - Prevent catch-up bursting in relative sleep loops
 **Learning:** When implementing periodic high-frequency transmission loops (e.g., CAN flashing), calculating sleep duration based on an absolute start time (e.g., `target = start + i * interval`) causes 'catch-up bursting'. If the loop is delayed (OS switch, full buffer), the sleep becomes negative, and subsequent iterations will fire with zero delay until the debt is repaid, overwhelming downstream receivers.
 **Action:** Calculate sleep relative to the start of the current iteration using high-resolution timers: `elapsed = time.perf_counter() - iter_start; if elapsed < interval: time.sleep(interval - elapsed)` to guarantee a minimum period without accumulating debt.
+
+## 2024-05-18 - Python CRC Computation Bottleneck
+**Learning:** In high-throughput scripts like the CAN FD bootloader (`can_flash.py`), using Python-level precomputed lookup tables for CRC16-CCITT is significantly slower than relying on Python's built-in `binascii.crc_hqx` which is C-optimized. A custom Python implementation can take ~0.61s for a large firmware while `binascii.crc_hqx` takes ~0.014s (over 40x speedup).
+**Action:** When calculating CRC16-CCITT in Python host utilities, always use Python's built-in C-optimized `binascii.crc_hqx(data, initial_value)` instead of custom Python lookup tables or bit-by-bit loops to eliminate interpreter overhead and achieve significant speedups.
