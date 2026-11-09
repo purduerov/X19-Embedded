@@ -28,7 +28,8 @@ bool can_send(uint32_t id, const uint8_t *data, uint8_t len) {
     tx_header.TxFrameType = FDCAN_DATA_FRAME;
     uint32_t dlc;
     if (len <= 8U) {
-        dlc = (uint32_t)len << 16U;
+        /* G4 FDCAN DLC constants are unshifted codes (0..15), not shifted header fields. */
+        dlc = (uint32_t)len;
     } else if (len <= 12U) {
         dlc = FDCAN_DLC_BYTES_12;
     } else if (len <= 16U) {
@@ -73,7 +74,7 @@ bool can_receive(uint32_t *id, uint8_t *data, uint8_t *len) {
     }
 
     *id = rx_header.Identifier;
-    uint32_t dlc_code = (rx_header.DataLength >> 16U) & 0x0FU;
+    uint32_t dlc_code = rx_header.DataLength & 0x0FU;
     static const uint8_t dlc_to_bytes[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64};
     *len = dlc_to_bytes[dlc_code];
     return true;
