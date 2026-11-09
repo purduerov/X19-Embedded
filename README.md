@@ -446,6 +446,7 @@ These 25 native executables are registered with CTest. The Python bridge integra
   - Application code (`app.c`, control loops, state machines) **must NOT** invoke low-level vendor HAL functions (`HAL_CAN_...`, `HAL_FDCAN_...`, `HAL_GPIO_...`) directly.
   - All communication must use the shared transport interface defined in [`shared/include/can_interface.h`](shared/include/can_interface.h) (`can_send()`, `can_receive()`, `can_init()`).
   - All board-level utilities must use [`shared/include/bsp.h`](shared/include/bsp.h) (`time_get_ms()`, `delay_ms()`, `bsp_pwm_set_us()`, `bsp_solenoid_set()`, `bsp_leak_probe_read()`, `bsp_emergency_brake_trip()`).
+- **Layer Boundaries are Enforced in CI**: `python tools/check_layers.py` fails when a lower layer includes a higher one, when vendor HAL headers or `HAL_*`/`LL_*` calls appear outside `boards/*/platform` and the node BSP/CAN transport files, or when application code includes board/CubeMX headers. Run it before opening a PR; `--self-test` verifies the checker itself.
   - STM32CubeMX generated `main.c` must ONLY contain a call to `app_main()` placed strictly inside `/* USER CODE BEGIN 2 */` / `/* USER CODE END 2 */`.
 
 ---
