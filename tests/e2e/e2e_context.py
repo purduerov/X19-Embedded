@@ -26,8 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SIL_MAGIC_HEADER = 0x524F5643        # "ROVC" in ASCII
 SIL_MAGIC_HEADER_LEGACY = 0x58313943 # "X19C" in ASCII
 SIL_CAN_PACKET_FORMAT = "<IIB64s"    # magic(4), id(4), len(1), data(64) = 73 bytes
-SIL_CAN_PACKET_STRUCT = struct.Struct(SIL_CAN_PACKET_FORMAT)
-SIL_CAN_PACKET_SIZE = SIL_CAN_PACKET_STRUCT.size
+SIL_CAN_PACKET_SIZE = struct.calcsize(SIL_CAN_PACKET_FORMAT)
 
 # Standard protocol CAN identifiers
 CAN_ID_EMERGENCY_BREAK = 0x001
@@ -79,14 +78,14 @@ def pack_sil_can_frame(arb_id: int, data: bytes, magic: int = SIL_MAGIC_HEADER) 
     if length > 64:
         raise ValueError(f"CAN FD payload exceeds 64 bytes: {length}")
     padded_data = data.ljust(64, b"\x00")
-    return SIL_CAN_PACKET_STRUCT.pack(magic, arb_id, length, padded_data)
+    return struct.pack(SIL_CAN_PACKET_FORMAT, magic, arb_id, length, padded_data)
 
 
 def unpack_sil_can_frame(buffer: bytes) -> Tuple[int, int, int, bytes]:
     """Unpack a 73-byte SIL CAN packet into (magic, arb_id, length, data)."""
     if len(buffer) < SIL_CAN_PACKET_SIZE:
         raise ValueError(f"Buffer too short for SIL frame: {len(buffer)} < {SIL_CAN_PACKET_SIZE}")
-    magic, arb_id, length, raw_data = SIL_CAN_PACKET_STRUCT.unpack(buffer[:SIL_CAN_PACKET_SIZE])
+    magic, arb_id, length, raw_data = struct.unpack(SIL_CAN_PACKET_FORMAT, buffer[:SIL_CAN_PACKET_SIZE])
     return magic, arb_id, length, raw_data[:length]
 
 
