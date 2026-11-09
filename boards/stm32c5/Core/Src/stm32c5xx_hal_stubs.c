@@ -235,5 +235,7 @@ HAL_StatusTypeDef HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef *hfdcan, uint32_t R
     (void)RxFifo0;
     if (!pRxHeader || !pRxData)
         return HAL_ERROR;
-    return HAL_OK;
+    /* This stub models no RX FIFO, so report an empty FIFO. Returning
+       HAL_OK here made every can_receive() drain loop spin forever. */
+    return HAL_ERROR;
 }
