@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 try:
     import serial
@@ -16,36 +15,38 @@ except ImportError:
     serial = None
 
 
+_STM32_PROGRAMMER_CANDIDATES = (
+    r"C:\ST\STM32CubeCLT_1.22.0\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+    r"C:\ST\STM32CubeCLT\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+    r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+    r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+    "/opt/st/stm32cubeclt/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+    "/opt/ST/STM32CubeCLT/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+    "/opt/st/stm32cubeprogrammer/bin/STM32_Programmer_CLI",
+    "/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+    "/usr/local/bin/STM32_Programmer_CLI",
+    "/opt/homebrew/bin/STM32_Programmer_CLI",
+    "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI",
+    "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI",
+    "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI",
+    "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI",
+    "/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI",
+    "/Applications/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI",
+    "/Applications/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI",
+    "/Applications/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI",
+    "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+)
+
+
 def find_stm32programmer_cli(required: bool = True) -> str | None:
     """Find STM32_Programmer_CLI executable across system PATH and standard ST directories."""
     found = shutil.which("STM32_Programmer_CLI") or shutil.which("STM32_Programmer_CLI.exe")
     if found:
         return found
 
-    candidates = [
-        Path(r"C:\ST\STM32CubeCLT_1.22.0\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-        Path(r"C:\ST\STM32CubeCLT\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-        Path(r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-        Path(r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-        Path("/opt/st/stm32cubeclt/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-        Path("/opt/ST/STM32CubeCLT/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-        Path("/opt/st/stm32cubeprogrammer/bin/STM32_Programmer_CLI"),
-        Path("/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-        Path("/usr/local/bin/STM32_Programmer_CLI"),
-        Path("/opt/homebrew/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI"),
-        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI"),
-        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-    ]
-    for c in candidates:
-        if c.is_file():
-            return str(c)
+    for c in _STM32_PROGRAMMER_CANDIDATES:
+        if os.path.isfile(c):
+            return c
 
     if required:
         sys.exit(
@@ -55,24 +56,31 @@ def find_stm32programmer_cli(required: bool = True) -> str | None:
     return None
 
 
+_CUBEMX_CANDIDATES = (
+    r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeMX\STM32CubeMX.exe",
+    r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeMX\STM32CubeMX.exe",
+    "/Applications/STMicroelectronics/STM32CubeMX.app/Contents/MacOs/STM32CubeMX",
+    "/Applications/STM32CubeMX.app/Contents/MacOs/STM32CubeMX",
+    "/usr/local/STMicroelectronics/STM32CubeMX/STM32CubeMX",
+    "/opt/STMicroelectronics/STM32CubeMX/STM32CubeMX",
+)
+
+
 def find_cubemx(required: bool = True) -> str | None:
     """Find STM32CubeMX executable across system PATH and standard ST installation directories."""
     found = shutil.which("STM32CubeMX") or shutil.which("STM32CubeMX.exe")
     if found:
         return found
 
-    candidates = [
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/STM32CubeMX/STM32CubeMX.exe",
-        Path(r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeMX\STM32CubeMX.exe"),
-        Path(r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeMX\STM32CubeMX.exe"),
-        Path("/Applications/STMicroelectronics/STM32CubeMX.app/Contents/MacOs/STM32CubeMX"),
-        Path("/Applications/STM32CubeMX.app/Contents/MacOs/STM32CubeMX"),
-        Path("/usr/local/STMicroelectronics/STM32CubeMX/STM32CubeMX"),
-        Path("/opt/STMicroelectronics/STM32CubeMX/STM32CubeMX"),
-    ]
-    for c in candidates:
-        if c.is_file():
-            return str(c)
+    localappdata = os.environ.get("LOCALAPPDATA", "")
+    if localappdata:
+        c = os.path.join(localappdata, "Programs", "STM32CubeMX", "STM32CubeMX.exe")
+        if os.path.isfile(c):
+            return c
+
+    for c in _CUBEMX_CANDIDATES:
+        if os.path.isfile(c):
+            return c
 
     if required:
         sys.exit(
