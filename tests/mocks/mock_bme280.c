@@ -158,6 +158,7 @@ void mock_bme280_present(uint8_t addr) {
     uint8_t calib1[26] = {0};
     uint8_t calib2[7] = {0};
 
+    mock_bsp_i2c_set_present(addr, true);
     mock_bsp_i2c_set_reg(addr, BME280_CHIP_ID_REG, BME280_CHIP_ID);
 
     put_u16_le(&calib1[0], (uint16_t)DIG_T1);
