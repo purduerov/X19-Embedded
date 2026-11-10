@@ -5,7 +5,6 @@ import sys
 import time
 import socket
 import select
-import struct
 import threading
 import subprocess
 from collections import deque
