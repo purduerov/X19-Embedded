@@ -46,3 +46,7 @@
 ## 2026-09-23 - Prevent catch-up bursting in relative sleep loops
 **Learning:** When implementing periodic high-frequency transmission loops (e.g., CAN flashing), calculating sleep duration based on an absolute start time (e.g., `target = start + i * interval`) causes 'catch-up bursting'. If the loop is delayed (OS switch, full buffer), the sleep becomes negative, and subsequent iterations will fire with zero delay until the debt is repaid, overwhelming downstream receivers.
 **Action:** Calculate sleep relative to the start of the current iteration using high-resolution timers: `elapsed = time.perf_counter() - iter_start; if elapsed < interval: time.sleep(interval - elapsed)` to guarantee a minimum period without accumulating debt.
+
+## 2024-05-14 - Redundant module search path addition
+**Learning:** Checking `if str(_path) not in sys.path:` in a loop triggers a linear $O(N)$ scan of `sys.path` for each iteration. While acceptable for a few paths, in environments with deeply populated `sys.path` variables, this scaling causes measurable overhead during module import paths.
+**Action:** When dynamically constructing `sys.path` to include multiple directories, cast `sys.path` to a local `set` upfront (e.g., `_sys_path_set = set(sys.path)`) to reduce $O(N)$ lookups to $O(1)$. Make sure to keep the local `set` updated (`_sys_path_set.add()`) to prevent duplication.
