@@ -14,8 +14,8 @@ from .constants import (
     DEFAULT_SIL_HOST,
     DEFAULT_SIL_PORT,
 )
-from .models import CheckResult, StimulusReport, format_result
-from .protocol import _raw_frame, describe_can_id, int_literal
+from .models import CheckResult, StimulusReport
+from .protocol import _raw_frame, int_literal
 from .tester import VehicleStimulusTester
 
 ACTION_FLAGS = (
