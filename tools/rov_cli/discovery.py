@@ -22,30 +22,30 @@ def find_stm32programmer_cli(required: bool = True) -> str | None:
     if found:
         return found
 
-    candidates = [
-        Path(r"C:\ST\STM32CubeCLT_1.22.0\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-        Path(r"C:\ST\STM32CubeCLT\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-        Path(r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-        Path(r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe"),
-        Path("/opt/st/stm32cubeclt/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-        Path("/opt/ST/STM32CubeCLT/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-        Path("/opt/st/stm32cubeprogrammer/bin/STM32_Programmer_CLI"),
-        Path("/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-        Path("/usr/local/bin/STM32_Programmer_CLI"),
-        Path("/opt/homebrew/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI"),
-        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI"),
-        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI"),
-        Path("/Applications/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI"),
-        Path("/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI"),
-    ]
-    for c in candidates:
-        if c.is_file():
-            return str(c)
+    _PROGRAMMER_CLI_CANDIDATES = (
+        r"C:\ST\STM32CubeCLT_1.22.0\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+        r"C:\ST\STM32CubeCLT\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+        r"C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+        r"C:\Program Files (x86)\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_Programmer_CLI.exe",
+        "/opt/st/stm32cubeclt/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+        "/opt/ST/STM32CubeCLT/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+        "/opt/st/stm32cubeprogrammer/bin/STM32_Programmer_CLI",
+        "/usr/local/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+        "/usr/local/bin/STM32_Programmer_CLI",
+        "/opt/homebrew/bin/STM32_Programmer_CLI",
+        "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI",
+        "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI",
+        "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI",
+        "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI",
+        "/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin/STM32_Programmer_CLI",
+        "/Applications/STM32CubeProgrammer.app/Contents/MacOS/bin/STM32_Programmer_CLI",
+        "/Applications/STM32CubeProgrammer.app/Contents/MacOs/STM32_Programmer_CLI",
+        "/Applications/STM32CubeProgrammer.app/Contents/MacOS/STM32_Programmer_CLI",
+        "/Applications/STMicroelectronics/STM32Cube/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+    )
+    for c in _PROGRAMMER_CLI_CANDIDATES:
+        if os.path.isfile(c):
+            return c
 
     if required:
         sys.exit(
