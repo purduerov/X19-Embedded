@@ -8,7 +8,7 @@ import argparse
 import contextlib
 from typing import Callable, List, Optional, Sequence, Tuple
 
-from .backends import ForeignEngineError, _BaseBackend, build_backend
+from .backends import ForeignEngineError, _BaseBackend
 from .constants import (
     CAN_ID_SIL_OUTPUT_STATUS,
     DEFAULT_SIL_HOST,
