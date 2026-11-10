@@ -102,6 +102,7 @@ static void test_env_service(void) {
     mock_bme280_present(0x76u);
     mock_bme280_set_reading(0x76u, 1013.25f, 42.0f, 26.5f);
 
+    assert(env_probe_i2c(0x76));
     assert(env_service_init() == ROV_OK);
     assert(env_read_all(&temp_c, &press_hpa, &hum_pct) == ROV_OK);
 

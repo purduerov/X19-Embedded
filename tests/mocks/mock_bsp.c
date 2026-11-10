@@ -449,8 +449,10 @@ bool bsp_i2c_read(uint8_t addr, uint8_t *data, uint16_t len) {
 }
 
 bool bsp_i2c_probe(uint8_t addr) {
-    (void)addr;
-    return false;
+    if (addr >= MOCK_I2C_NUM_ADDRS) {
+        return false;
+    }
+    return g_mock_i2c_present[addr];
 }
 
 void bsp_i2c_init(void) {}
