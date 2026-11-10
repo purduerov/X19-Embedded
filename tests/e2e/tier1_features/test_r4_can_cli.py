@@ -9,6 +9,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from tests.e2e.e2e_context import MockSilTcpServer
 
@@ -22,6 +23,30 @@ def rov_can(port: int, *args: str) -> subprocess.CompletedProcess:
         [sys.executable, "rov.py", "can", "--sil", f"127.0.0.1:{port}", *args],
         cwd=REPO, capture_output=True, text=True, timeout=30,
     )
+
+
+class TestPwmTimingValidation(unittest.TestCase):
+    def test_invalid_timing_returns_usage_error_without_sending(self):
+        from tools.rov_can.cli import cmd_pwm
+
+        cases = [(hz, 0.0) for hz in (0.0, -1.0, float("nan"), float("inf"), -float("inf"))]
+        cases += [(50.0, seconds) for seconds in (-1.0, float("nan"), float("inf"), -float("inf"))]
+        for hz, seconds in cases:
+            with self.subTest(hz=hz, seconds=seconds):
+                transport = Mock()
+                # Bound the original buggy loop too, including an infinite duration.
+                with patch("tools.rov_can.cli.time.monotonic", side_effect=[0.0, float("inf")]):
+                    with patch("sys.stderr") as stderr:
+                        self.assertEqual(cmd_pwm(transport, [1500], hz, seconds), 2)
+                transport.send_message.assert_not_called()
+                self.assertTrue(stderr.write.called)
+
+    def test_zero_duration_still_returns_to_neutral(self):
+        from tools.rov_can.cli import cmd_pwm
+
+        transport = Mock()
+        self.assertEqual(cmd_pwm(transport, [1550], 50.0, 0.0), 0)
+        transport.send_message.assert_called_once_with(0x100, NEUTRAL)
 
 
 class TestRovCan(unittest.TestCase):
@@ -47,6 +72,13 @@ class TestRovCan(unittest.TestCase):
         r = rov_can(self.port, "pwm", "2500")
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         time.sleep(0.2)
+        self.assertEqual(self.server.received_frames, [])
+
+    def test_zero_pwm_rate_is_a_usage_error_and_sends_nothing(self):
+        r = rov_can(self.port, "pwm", "1500", "--hz", "0")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("--hz", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
         self.assertEqual(self.server.received_frames, [])
 
     def test_pwm_ends_on_neutral(self):
