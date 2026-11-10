@@ -19,9 +19,12 @@ REPO_ROOT = TOOLS_DIR.parent
 SIL_BRIDGE_DIR = REPO_ROOT / "tests" / "sil_companion_bridge"
 SIL_STIMULUS_DIR = REPO_ROOT / "tests" / "sil_stimulus"
 SIL_DASHBOARD_DIR = REPO_ROOT / "tests" / "sil_dashboard"
+_sys_path_set = set(sys.path)
 for _path in (REPO_ROOT, TOOLS_DIR, SIL_STIMULUS_DIR, SIL_BRIDGE_DIR, SIL_DASHBOARD_DIR):
-    if str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
+    _path_str = str(_path)
+    if _path_str not in _sys_path_set:
+        sys.path.insert(0, _path_str)
+        _sys_path_set.add(_path_str)
 
 from tools.can_stimulus_pkg import (
     ACTION_FLAGS,
