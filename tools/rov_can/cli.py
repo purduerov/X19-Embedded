@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import struct
 import sys
 import time
@@ -66,6 +67,12 @@ def cmd_pwm(t, values: List[int], hz: float, seconds: float) -> int:
     bad = [v for v in values if not PWM_MIN_US <= v <= PWM_MAX_US]
     if bad:
         print(f"error: {bad} outside {PWM_MIN_US}-{PWM_MAX_US} us (neutral is {PWM_NEUTRAL_US})", file=sys.stderr)
+        return 2
+    if not math.isfinite(hz) or hz <= 0:
+        print("error: --hz must be finite and greater than zero", file=sys.stderr)
+        return 2
+    if not math.isfinite(seconds) or seconds < 0:
+        print("error: --seconds must be finite and non-negative", file=sys.stderr)
         return 2
     payload = struct.pack("<8H", *values)
     period = 1.0 / hz
