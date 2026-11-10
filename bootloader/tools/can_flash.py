@@ -184,9 +184,8 @@ def flash_node(interface: str, target_node: str | int, bin_path: str) -> bool:
                     is_fd=True,
                 ),
             )
-            elapsed = time.perf_counter() - iter_start
-            if elapsed < 0.001:
-                time.sleep(0.001 - elapsed)
+            while (time.perf_counter() - iter_start) < 0.001:
+                time.sleep(0)
 
         print("Firmware transfer complete. Verifying application image...")
         _send_boot_command(bus, CMD_VERIFY_APP, node_id)
