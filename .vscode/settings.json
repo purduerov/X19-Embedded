@@ -49,5 +49,16 @@
     "cortex-debug.stlinkPath.linux": "/opt/st/stm32cubeclt/STLink-gdb-server/bin/ST-LINK_gdbserver",
     "cortex-debug.stm32cubeprogrammer.linux": "/opt/st/stm32cubeclt/STM32CubeProgrammer/bin",
     "cortex-debug.armToolchainPath.osx": "/Applications/ArmGNUToolchain/bin",
-    "cortex-debug.stm32cubeprogrammer.osx": "/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin"
+    "cortex-debug.stm32cubeprogrammer.osx": "/Applications/STM32CubeProgrammer.app/Contents/MacOs/bin",
+    "python-envs.pythonProjects": [
+        {
+            "path": ".",
+            "envManager": "ms-python.python:venv",
+            "packageManager": "ms-python.python:pip"
+        }
+    ],
+    "cmake.cmakePath": "cube-cmake",
+    "cmake.configureArgs": [
+        "-DCMAKE_COMMAND=cube-cmake"
+    ]
 }

@@ -449,7 +449,10 @@ void test_node1_rail_saturates(void) {
     setup();
 
     set_bme280_reading(1013.25f, 35.0f, 24.0f);
-    /* 100 A through 0.001 ohm is 100000 mA, which would wrap a uint16_t. */
+    /*
+     * 100 A exceeds the signed CURRENT register range at 0.5 mA/LSB, so the
+     * mock clamps the raw device result to INT16_MAX before publication.
+     */
     mock_ina237_set_reading(0x40u, 5.0f, 100.0f, 0.001f);
 
     node1_app_init();
@@ -468,7 +471,7 @@ void test_node1_rail_saturates(void) {
 
     assert(rov_can_unpack_env_telemetry(data, len, &env) == ROV_OK);
     assert(env.rail_voltage_mv == 5000u);
-    assert(env.rail_current_ma == 65535u);
+    assert(env.rail_current_ma == 16384u);
 
     printf("[PASS] test_node1_rail_saturates\n");
 }
