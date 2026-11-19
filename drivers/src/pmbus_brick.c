@@ -71,6 +71,10 @@ rov_status_t pmbus_brick_read_telemetry(pmbus_brick_dev_t *dev) {
         return ROV_ERR_INVALID_ARG;
     }
 
+    if (!pmbus_brick_address_valid(dev->pmbus_addr)) {
+        return ROV_ERR_INVALID_ARG;
+    }
+
     uint8_t idx = (uint8_t)(dev->pmbus_addr - PMBUS_BRICK_ADDR_12V_0);
 
     /*

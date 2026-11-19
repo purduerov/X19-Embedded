@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #define FLOAT_TOLERANCE 0.001f
 
@@ -35,6 +36,10 @@ static void test_pmbus_brick_driver(void) {
     assert(pmbus_brick_init(NULL, PMBUS_BRICK_ADDR_12V_0) == ROV_ERR_INVALID_ARG);
 
     assert(pmbus_brick_read_telemetry(NULL) == ROV_ERR_INVALID_ARG);
+
+    pmbus_brick_dev_t zeroed_dev;
+    memset(&zeroed_dev, 0, sizeof(zeroed_dev));
+    assert(pmbus_brick_read_telemetry(&zeroed_dev) == ROV_ERR_INVALID_ARG);
 
     /* Valid initialization */
     assert(pmbus_brick_init(&dev, PMBUS_BRICK_ADDR_12V_1) == ROV_OK);
