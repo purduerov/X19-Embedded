@@ -59,6 +59,10 @@ void mock_sensors_set_ms5837(float pressure_mbar, float temp_c) {
     g_mock_ms5837.valid = true;
 }
 
+void mock_sensors_set_ms5837_valid(bool valid) {
+    g_mock_ms5837.valid = valid;
+}
+
 bool mock_sensors_get_ms5837(float *pressure_mbar, float *temp_c) {
     if (!g_mock_ms5837.valid)
         return false;

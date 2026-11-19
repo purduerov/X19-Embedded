@@ -29,6 +29,7 @@ void mock_sensors_reset(void);
  * @brief Inject MS5837-30BA hydrostatic pressure and temperature.
  */
 void mock_sensors_set_ms5837(float pressure_mbar, float temp_c);
+void mock_sensors_set_ms5837_valid(bool valid);
 bool mock_sensors_get_ms5837(float *pressure_mbar, float *temp_c);
 
 /**
