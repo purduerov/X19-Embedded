@@ -90,6 +90,22 @@ static void test_pmbus_linear11_conversion(void) {
 }
 
 /**
+ * @brief Verify LINEAR16 exponent masking and signed two's-complement handling.
+ */
+static void test_pmbus_linear16_conversion(void) {
+    assert(float_near(pmbus_linear16_to_float(768U, -12), 0.1875f));
+
+    /* 5-bit signed exponent -1 for an encoded VOUT_MODE of 0x1F/0xFF. */
+    assert(float_near(pmbus_linear16_to_float(768U, (int8_t)0xFF), 384.0f));
+
+    /* Encoded exponents 0x10 and 0x0F map to -16 and +15. */
+    assert(float_near(pmbus_linear16_to_float(65535U, (int8_t)0x10), 65535.0f / 65536.0f));
+    assert(float_near(pmbus_linear16_to_float(1U, (int8_t)0x0F), 32768.0f));
+
+    printf("[PASS] test_pmbus_linear16_conversion\n");
+}
+
+/**
  * @brief Verify all five Power Slab PMBus addresses.
  */
 static void test_pmbus_address_validation(void) {
@@ -212,6 +228,7 @@ int main(void) {
 
     test_pmbus_brick_driver();
     test_pmbus_linear11_conversion();
+    test_pmbus_linear16_conversion();
     test_pmbus_address_validation();
     test_pmbus_brick_voltage_mapping();
     test_pmbus_round_robin();
