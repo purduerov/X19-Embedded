@@ -30,6 +30,8 @@ void test_ina237_driver(void) {
     assert(ina237_init(&dev, bus, INA237_TEST_ADDR, INA237_TEST_SHUNT_OHMS) == ROV_OK);
     assert(dev.i2c_addr == INA237_TEST_ADDR);
     assert(dev.shunt_resistor_ohms > 0.0009f && dev.shunt_resistor_ohms < 0.0011f);
+    assert(mock_bsp_i2c_get_reg(INA237_TEST_ADDR, 0x02u) == 0x01u);
+    assert(mock_bsp_i2c_get_reg(INA237_TEST_ADDR, 0x03u) == 0x9Au);
 
     /*
      * Datasheet round trip at the default ADCRANGE = 0:
