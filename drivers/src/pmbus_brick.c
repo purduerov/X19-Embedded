@@ -159,11 +159,5 @@ float pmbus_linear16_to_float(uint16_t raw_value, int8_t exponent) {
     uint8_t encoded_exp = (uint8_t)exponent & 0x1FU;
     int16_t exp = (encoded_exp & 0x10U) != 0U ? (int16_t)encoded_exp - 32 : (int16_t)encoded_exp;
 
-    if (exp < -31) {
-        exp = -31;
-    } else if (exp > 31) {
-        exp = 31;
-    }
-
     return ldexpf((float)raw_value, (int)exp);
 }
