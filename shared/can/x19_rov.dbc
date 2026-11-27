@@ -1,0 +1,187 @@
+VERSION ""
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_VALTYPE_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: PI_CORE PI_SHIELD CONTROL_BOARD POWER_SLAB USB_HUB Vector__XXX
+
+BO_ 1 EMERGENCY_BREAK: 8 PI_SHIELD
+ SG_ magic_byte_0 : 0|8@1+ (1,0) [0|255] "" CONTROL_BOARD
+ SG_ magic_byte_1 : 8|8@1+ (1,0) [0|255] "" CONTROL_BOARD
+ SG_ leak_bme280 : 16|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ leak_floor_probe_0 : 17|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ leak_floor_probe_1 : 18|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ leak_flags_unused : 19|5@1+ (1,0) [0|31] "" CONTROL_BOARD
+
+BO_ 5 EFUSE_FAULT_ALERT: 8 POWER_SLAB
+ SG_ magic_byte_0 : 0|8@1+ (1,0) [0|255] "" PI_CORE,CONTROL_BOARD
+ SG_ magic_byte_1 : 8|8@1+ (1,0) [0|255] "" PI_CORE,CONTROL_BOARD
+ SG_ fault_flags : 16|8@1+ (1,0) [0|255] "" PI_CORE,CONTROL_BOARD
+
+BO_ 16 TIME_SYNC_MASTER: 16 PI_CORE
+ SG_ master_time_us : 0|64@1+ (1,0) [0|18446744073709551615] "us" Vector__XXX
+ SG_ sync_seq : 64|32@1+ (1,0) [0|4294967295] "" Vector__XXX
+ SG_ flag_ntp_locked : 96|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ flag_sync_valid : 97|1@1+ (1,0) [0|1] "" Vector__XXX
+ SG_ flags_unused : 98|6@1+ (1,0) [0|63] "" Vector__XXX
+
+BO_ 17 TIME_SYNC_REQ: 16 PI_CORE
+ SG_ target_node_id : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ seq : 8|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ reserved : 16|16@1+ (1,0) [0|65535] "" Vector__XXX
+ SG_ flags : 32|32@1+ (1,0) [0|4294967295] "" Vector__XXX
+ SG_ t1_us : 64|64@1+ (1,0) [0|18446744073709551615] "us" Vector__XXX
+
+BO_ 18 TIME_SYNC_RESP: 32 CONTROL_BOARD
+ SG_ responder_node_id : 0|8@1+ (1,0) [0|255] "" PI_CORE
+ SG_ seq : 8|8@1+ (1,0) [0|255] "" PI_CORE
+ SG_ reserved : 16|16@1+ (1,0) [0|65535] "" PI_CORE
+ SG_ status : 32|32@1+ (1,0) [0|4294967295] "" PI_CORE
+ SG_ t1_us : 64|64@1+ (1,0) [0|18446744073709551615] "us" PI_CORE
+ SG_ t2_us : 128|64@1+ (1,0) [0|18446744073709551615] "us" PI_CORE
+ SG_ t3_us : 192|64@1+ (1,0) [0|18446744073709551615] "us" PI_CORE
+
+BO_ 256 THRUSTER_CMD: 16 PI_CORE
+ SG_ thruster_1_pwm_us : 0|16@1+ (1,0) [1000|2000] "us" CONTROL_BOARD
+ SG_ thruster_2_pwm_us : 16|16@1+ (1,0) [1000|2000] "us" CONTROL_BOARD
+ SG_ thruster_3_pwm_us : 32|16@1+ (1,0) [1000|2000] "us" CONTROL_BOARD
+ SG_ thruster_4_pwm_us : 48|16@1+ (1,0) [1000|2000] "us" CONTROL_BOARD
+ SG_ thruster_5_pwm_us : 64|16@1+ (1,0) [1000|2000] "us" CONTROL_BOARD
+ SG_ thruster_6_pwm_us : 80|16@1+ (1,0) [1000|2000] "us" CONTROL_BOARD
+ SG_ thruster_7_pwm_us : 96|16@1+ (1,0) [1000|2000] "us" CONTROL_BOARD
+ SG_ thruster_8_pwm_us : 112|16@1+ (1,0) [1000|2000] "us" CONTROL_BOARD
+
+BO_ 272 SOLENOID_CMD: 2 PI_CORE
+ SG_ valve_1_extend : 0|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_1_retract : 1|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_2_extend : 2|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_2_retract : 3|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_3_extend : 4|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_3_retract : 5|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_4_extend : 6|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_4_retract : 7|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_5_extend : 8|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ valve_5_retract : 9|1@1+ (1,0) [0|1] "" CONTROL_BOARD
+ SG_ solenoid_unused : 10|6@1+ (1,0) [0|63] "" CONTROL_BOARD
+
+BO_ 512 NAV_TELEMETRY: 41 CONTROL_BOARD
+ SG_ timestamp_us : 0|64@1+ (1,0) [0|18446744073709551615] "us" PI_CORE
+ SG_ q_w : 64|32@1- (1,0) [-1|1] "" PI_CORE
+ SG_ q_x : 96|32@1- (1,0) [-1|1] "" PI_CORE
+ SG_ q_y : 128|32@1- (1,0) [-1|1] "" PI_CORE
+ SG_ q_z : 160|32@1- (1,0) [-1|1] "" PI_CORE
+ SG_ gyro_x_rad_s : 192|32@1- (1,0) [-100|100] "rad/s" PI_CORE
+ SG_ gyro_y_rad_s : 224|32@1- (1,0) [-100|100] "rad/s" PI_CORE
+ SG_ gyro_z_rad_s : 256|32@1- (1,0) [-100|100] "rad/s" PI_CORE
+ SG_ depth_meters : 288|32@1- (1,0) [-1|100] "m" PI_CORE
+ SG_ imu_status : 320|8@1+ (1,0) [0|255] "" PI_CORE
+
+BO_ 528 ENV_TELEMETRY: 17 PI_SHIELD
+ SG_ pressure_hpa : 0|32@1- (1,0) [0|2000] "hPa" PI_CORE
+ SG_ humidity_pct : 32|32@1- (1,0) [0|100] "%" PI_CORE
+ SG_ temperature_c : 64|32@1- (1,0) [-40|125] "degC" PI_CORE
+ SG_ leak_bme280 : 96|1@1+ (1,0) [0|1] "" PI_CORE
+ SG_ leak_floor_probe_0 : 97|1@1+ (1,0) [0|1] "" PI_CORE
+ SG_ leak_floor_probe_1 : 98|1@1+ (1,0) [0|1] "" PI_CORE
+ SG_ leak_flags_unused : 99|5@1+ (1,0) [0|31] "" PI_CORE
+ SG_ rail_voltage_mv : 104|16@1+ (1,0) [0|65535] "mV" PI_CORE
+ SG_ rail_current_ma : 120|16@1+ (1,0) [0|65535] "mA" PI_CORE
+
+BO_ 768 POWER_TELEMETRY: 20 POWER_SLAB
+ SG_ tether_voltage_mv : 0|16@1+ (1,0) [0|65535] "mV" PI_CORE
+ SG_ tether_current_ma : 16|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ v5_voltage_mv : 32|16@1+ (1,0) [0|65535] "mV" PI_CORE
+ SG_ v5_current_ma : 48|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ v12_brick1_current_ma : 64|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ v12_brick2_current_ma : 80|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ v12_brick3_current_ma : 96|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ v12_brick4_current_ma : 112|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ pcb_temp_c : 128|16@1- (0.1,0) [-40|150] "degC" PI_CORE
+ SG_ status_flags : 144|16@1+ (1,0) [0|65535] "" PI_CORE
+
+BO_ 784 USB_HUB_TELEMETRY: 22 USB_HUB
+ SG_ vbus_voltage_mv : 0|16@1+ (1,0) [0|65535] "mV" PI_CORE
+ SG_ port_1_current_ma : 16|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ port_2_current_ma : 32|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ port_3_current_ma : 48|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ port_4_current_ma : 64|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ port_5_current_ma : 80|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ port_6_current_ma : 96|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ port_7_current_ma : 112|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ port_8_current_ma : 128|16@1+ (1,0) [0|65535] "mA" PI_CORE
+ SG_ controller_temp_c : 144|16@1- (0.1,0) [-40|150] "degC" PI_CORE
+ SG_ port_power_mask : 160|8@1+ (1,0) [0|255] "" PI_CORE
+ SG_ fault_flags : 168|8@1+ (1,0) [0|255] "" PI_CORE
+
+BO_ 1792 BOOTLOADER_CMD: 10 PI_CORE
+ SG_ boot_cmd : 0|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ target_node_id : 8|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ total_bytes : 16|32@1+ (1,0) [0|4294967295] "B" Vector__XXX
+ SG_ crc32 : 48|32@1+ (1,0) [0|4294967295] "" Vector__XXX
+
+BO_ 1793 BOOTLOADER_DATA: 64 PI_CORE
+ SG_ chunk_index : 0|16@1+ (1,0) [0|65535] "" Vector__XXX
+ SG_ chunk_crc16 : 496|16@1+ (1,0) [0|65535] "" Vector__XXX
+
+BA_DEF_ "BusType" STRING ;
+BA_DEF_ BO_ "VFrameFormat" ENUM "StandardCAN","ExtendedCAN","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","reserved","StandardCAN_FD","ExtendedCAN_FD" ;
+BA_DEF_DEF_ "BusType" "CAN FD";
+BA_DEF_DEF_ "VFrameFormat" "StandardCAN_FD";
+
+BA_ "BusType" "CAN FD";
+BA_ "VFrameFormat" BO_ 1 14;
+BA_ "VFrameFormat" BO_ 5 14;
+BA_ "VFrameFormat" BO_ 16 14;
+BA_ "VFrameFormat" BO_ 17 14;
+BA_ "VFrameFormat" BO_ 18 14;
+BA_ "VFrameFormat" BO_ 256 14;
+BA_ "VFrameFormat" BO_ 272 14;
+BA_ "VFrameFormat" BO_ 512 14;
+BA_ "VFrameFormat" BO_ 528 14;
+BA_ "VFrameFormat" BO_ 768 14;
+BA_ "VFrameFormat" BO_ 784 14;
+BA_ "VFrameFormat" BO_ 1792 14;
+BA_ "VFrameFormat" BO_ 1793 14;
+
+SIG_VALTYPE_ 512 q_w : 1;
+SIG_VALTYPE_ 512 q_x : 1;
+SIG_VALTYPE_ 512 q_y : 1;
+SIG_VALTYPE_ 512 q_z : 1;
+SIG_VALTYPE_ 512 gyro_x_rad_s : 1;
+SIG_VALTYPE_ 512 gyro_y_rad_s : 1;
+SIG_VALTYPE_ 512 gyro_z_rad_s : 1;
+SIG_VALTYPE_ 512 depth_meters : 1;
+SIG_VALTYPE_ 528 pressure_hpa : 1;
+SIG_VALTYPE_ 528 humidity_pct : 1;
+SIG_VALTYPE_ 528 temperature_c : 1;
+
+VAL_ 1792 boot_cmd 1 "PING" 2 "ERASE_APP" 3 "START_FLASH" 4 "VERIFY_APP" 5 "JUMP_APP" 6 "ACK" 7 "NACK" ;
