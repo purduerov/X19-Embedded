@@ -1,188 +1,43 @@
 # X19 Embedded Subsystem Guidelines
 
-The `Embedded/X19-Embedded/` repository contains the C firmware, shared protocols, safety monitors, drivers, and host Software-in-the-Loop (SIL) test suite for the X19-ROV vehicle network.
+The `Embedded/X19-Embedded/` repository contains the C11 firmware, shared protocols, safety monitors, drivers, and host Software-in-the-Loop (SIL) suite for the X19-ROV vehicle network.
 
-## Hardware & Architecture Overview
+## Hardware & Layer Architecture
 
-- **Standardized Vehicle Target MCU**: STM32C542CCT6 (48-pin LQFP48, Cortex-M33 @ 144 MHz with single-precision hardware FPU, Arm TrustZone, 256 KB SRAM, 1 MB Flash, dual native FDCAN).
-  - Node 1: Pi Shield (RPi 5 HAT, leak detection, chamber environment)
-  - Node 2: Control Board (Thruster PWM, SMC pneumatics, BMI270 IMU, MS5837 depth)
-  - Node 3: Power Slab (48V to 12V/5V distribution, INA237 current monitoring, PMBus, TPS25990 eFuses)
-- **Bench Evaluation & Testing Boards**:
-  - **STM32F446RE (NUCLEO-F446RE / Testing & R&D Sandbox)**: Located under `nodes/testing_and_rnd/`. Standalone sandbox for physical CAN bus ping-pong with the Raspberry Pi, latency profiling, and bench testing.
-  - **STM32G474RE (NUCLEO-G474RE Nucleo-64)**: Standalone bench project under `nodes/node2_control_board/` for Node 2 firmware bench testing.
-  - **STM32F411RE (NUCLEO-F411RE)**: Supported for bench peripheral testing via generic ST-Link debug and flash configurations.
-- **Physical Bus**: CAN FD (1.0 Mbps nominal / 5.0 Mbps data phase with Bit Rate Switch enabled) via TI TCAN1044 transceivers.
+- **Vehicle Target MCU**: `STM32C542CCT6` (LQFP-48, Cortex-M33 @ 144 MHz, dual FDCAN, 1 MB Flash / 256 KB SRAM).
+  - Node 1 (`nodes/node1_pi_shield`): RPi 5 HAT, leak detection, chamber environment.
+  - Node 2 (`nodes/node2_control_board`): Thruster PWM, SMC pneumatics, BMI270 IMU, MS5837 depth.
+  - Node 3 (`nodes/node3_power_slab`): 48V->12V/5V distribution, INA237, PMBus, TPS25990 eFuses.
+- **Bench Targets**: `NUCLEO-F446RE` (`nodes/testing_and_rnd/`), `NUCLEO-G474RE` (`nodes/node2_control_board/`), `NUCLEO-F411RE`.
+- **Bus**: CAN FD (1.0 Mbps nominal / 5.0 Mbps data, BRS enabled) via TI TCAN1044.
+- **One-Way Dependency Graph**: `app (nodes/*/Core/Src/app.c)` -> `services` -> `drivers` -> `shared`. Platform code (`boards/*/platform`, `bsp.c`, `can_f4.c`) may include `shared` and vendor HAL, never `drivers`/`services`/`app`.
 
-## Toolchain & Prerequisites
+## Core Developer Commands (`python rov.py ...`)
 
-Run the automated diagnostic tool to verify all required compilers, build tools, and flash utilities:
+- `python rov.py check`: Verify CMake, Ninja, `arm-none-eabi-gcc`, `STM32_Programmer_CLI`, and git hooks.
+- `python rov.py lint [--format-check] [--json]`: Enforce layer boundaries, firmware invariants, hygiene, and formatting.
+- `python rov.py test [--node N] [--suite S] [-R REGEX] [-k CASE] [--compact]`: Build & run Host SIL CTest suites (`build-native/`).
+- `python rov.py build [target] [-b f411|g474|stm32c5|host]` / `flash` / `run` / `monitor` / `devices`.
+- `python rov.py can sniff [--sil localhost:8765 | -i can0]` / `estop` / `pwm <us>`.
+- `python rov.py format [--check]`: Run `clang-format`.
+- `python rov.py memory <status|search|add|distill|prune>`: Query and maintain institutional memory.
 
-```powershell
-python tools/check_prereqs.py
-```
+## Critical Safety, Assumptions & Architectural Rules
 
-### Required Tools
-- **CMake**: >= 3.22 (System install on PATH)
-- **Ninja**: >= 1.10 (System install on PATH)
-- **Host Compiler**: GCC, Clang, or MSVC (C11 support for host SIL tests)
-- **ARM Cross-Compiler**: GNU Arm Embedded Toolchain 13.x+ (`arm-none-eabi-gcc` on PATH)
-  - Windows: `winget install Arm.GnuArmEmbeddedToolchain`
-  - Linux: `sudo apt install gcc-arm-none-eabi`
-  - macOS: `brew install --cask gcc-arm-embedded`
-- **Flashing Utility**: STM32CubeCLT or STM32CubeProgrammer (`STM32_Programmer_CLI`)
-  - Official ST Command Line Toolset (bundles programmer and debug tools): [STM32CubeCLT on st.com](https://www.st.com/en/development-tools/stm32cubeclt.html)
-  - Or standalone programmer: [STM32CubeProgrammer on st.com](https://www.st.com/en/development-tools/stm32cubeprog.html)
+- **Always State Assumptions Explicitly**: Before acting or alongside every answer, explicitly state any assumptions made (target board/MCU, pinout, build preset, protocol/unit semantics, or ambiguous requirements). Never silently guess hardware or pin assignments; check `docs/board_findings.md` and `docs/lessons.md` first.
+- **Zero ST HAL in Application Code**: Never call `HAL_*` / `__HAL_*` / `LL_*` outside platform code; use `shared/include/bsp.h` and `shared/include/can_interface.h`. (Mechanically enforced by `rov.py lint`.)
+- **CubeMX Trampoline**: Generated `nodes/*/Core/Src/main.c` must ONLY call `app_main()` inside `/* USER CODE BEGIN 2 */`.
+- **Fail-Safe Invariants**: Thruster neutral PWM is strictly `1500 us`; heartbeat loss (>250 ms), water leak, or E-stop immediately disarms all outputs.
+- **No Dynamic Allocation or Blocking Delays**: Never use `malloc`/`calloc`/`realloc`/`free` or `HAL_Delay()` in non-platform firmware.
+- **Formatting & Hygiene**: Format C/C++ with `.clang-format`; never use emojis in code, comments, or docs; never leave root `.ioc` or `*(1)*` duplicate files.
 
-## VS Code Development Environment
+## Knowledge & On-Demand Skills (Progressive Disclosure)
 
-### Recommended Extensions
-- `ms-vscode.cmake-tools` (CMake Tools integration)
-- `ms-vscode.cpptools` (C/C++ IntelliSense)
-- `marus25.cortex-debug` (Hardware debugging via ST-Link/J-Link)
-- `twxs.cmake` (CMake syntax highlighting)
-
-> [!WARNING]
-> Do NOT install the official `stmicroelectronics.stm32-vscode-extension`. It misidentifies internal CMake fragment directories as standalone projects and overrides build directories.
-
-### Workspace Setup
-Open `Embedded/X19-Embedded/` as the root workspace folder, or open `X19-Embedded.code-workspace`. Configuration is driven cleanly by `CMakePresets.json`.
-
-## Build, Test, and Verification Workflows
-
-### 1. Host Software-in-the-Loop (SIL) Simulation
-Builds and runs the entire vehicle logic, virtual bus, and 25 unit/integration test suites natively without requiring physical hardware:
-
-- **VS Code**: Press `Ctrl+Shift+B` -> Select `Build: Host SIL (Debug)`. Run tests via task `Test: Host SIL (Debug)`.
-- **CLI (from `Embedded/X19-Embedded/`)**:
-  ```powershell
-  cmake --preset sil-debug
-  cmake --build --preset sil-debug
-  ctest --preset sil-debug
-  ```
-
-### 2. STM32C542 Vehicle Nodes Cross-Compilation
-Compiles Node 1 (Pi Shield) and Node 3 (Power Slab) using `arm-none-eabi-gcc`:
-
-- **VS Code**: Select preset `arm-c542-debug` from the CMake Tools status bar, or run task `Build: ARM Nodes (C542)`. Output binaries are placed into `build/arm-c542-debug/`.
-- **CLI (from `Embedded/X19-Embedded/`)**:
-  ```powershell
-  cmake --preset arm-c542-debug
-  cmake --build --preset arm-c542-debug
-  ```
-
-### 3. Node 2 Nucleo Bench Target (STM32G474)
-Compiles the standalone Nucleo bench project:
-
-- **VS Code**: Run task `Build: Node 2 Nucleo G474 (Debug)`.
-- **CLI (from `Embedded/X19-Embedded/nodes/node2_control_board`)**:
-  ```powershell
-  cmake --preset Debug
-  cmake --build --preset Debug
-  ```
-
-### 4. Declarative Developer CLI (`rov` & `rov.toml`)
-Provides a declarative, PlatformIO-like developer workflow across heterogeneous development boards (NUCLEO-F411, NUCLEO-G474) and production STM32C542 targets:
-
-- **Configuration File**: [`rov.toml`](rov.toml) defines active nodes, default dev boards, and hardware mappings.
-- **Unified Platform-Agnostic Commands (run from `Embedded/X19-Embedded/` via `python rov.py <command>` or `.\rov` / `./rov`)**:
-  ```bash
-  # Build target binary (positional scratch C file, node name, or default):
-  python rov.py build
-  python rov.py build multinode_can.c -b f411
-  python rov.py build control_board -b g474
-  python rov.py build pi_shield -b stm32c5
-
-  # Build, flash with hardware reset, auto-detect ST-Link COM port, and open live serial monitor:
-  python rov.py run
-  python rov.py run multinode_can.c
-  python rov.py run control_board -b g474
-  python rov.py run pi_shield -b f411
-
-  # Flash directly over ST-Link SWD without launching monitor:
-  python rov.py flash multinode_can.c -b f411
-  python rov.py flash control_board -b g474
-
-  # Auto-detect connected ST-Link COM port and open serial monitor:
-  python rov.py monitor
-
-  # List connected ST-Link hardware probes and COM ports:
-  python rov.py devices
-
-  # Sniff and stimulate CAN bus (real hardware or Host SIL bridge):
-  python rov.py can sniff -i can0
-  python rov.py can sniff --sil localhost:8765
-  python rov.py can estop
-  python rov.py can pwm 1550
-
-  # Format source code with clang-format (or -c / --check):
-  python rov.py format
-  python rov.py format --check
-
-  # Regenerate CubeMX peripheral HAL drivers & auto-scaffold board configs:
-  python rov.py generate
-
-  # Verify toolchain, compilers, flashing tools, and dependencies:
-  python rov.py check
-
-  # Build and run Host SIL CTest test suites (with --node, --suite, -R, -k, --dry-run):
-  python rov.py test
-  python rov.py test -R "safety"
-  python rov.py test --suite safety
-  python rov.py test --node control_board
-  ```
-- **Optional CLI Install**: Run `pip install -e .` to install `rov` directly into your Python environment.
-- **VS Code One-Key Execution**: Press `Ctrl+Shift+B` to trigger task `ROV: Run (Build, Flash, & Monitor)`.
-
-## Flashing Targets
-
-### ST-Link SWD Flashing
-Connect an ST-LINK programmer to the target's SWD header (SWDIO, SWCLK, GND, 3V3) or plug in a Nucleo USB cable:
-- **VS Code**: Run task:
-  - `Flash: Node 1 Pi Shield (ST-Link SWD)`
-  - `Flash: Node 2 Nucleo G474 Bench (ST-Link)`
-  - `Flash: Node 3 Power Slab (ST-Link SWD)`
-  - `Flash: Testing & R&D F446 Dev Board (ST-Link)`
-  - `Flash: Nucleo F411RE Dev Board (ST-Link)`
-  - `Flash: Any Firmware File (choose path and port)`
-
-### USB DFU Flashing
-Connect the board's USB-C device port to the PC with BOOT0 pulled high:
-- **VS Code**: Run task:
-  - `Flash: Node 1 Pi Shield (STM32C542 USB DFU)`
-  - `Flash: Node 3 Power Slab (STM32C542 USB DFU)`
-
-### Remote CAN Bootloader Flashing
-Flash nodes remotely over the vehicle CAN bus using the companion computer:
-```bash
-python bootloader/tools/can_flash.py --channel can0 --node-id 0x01 firmware.bin
-```
-
-## Debugging
-
-Debug configurations are pre-wired in `.vscode/launch.json`:
-
-1. **Physical Hardware Debugging (`marus25.cortex-debug`)**:
-   - `Debug: Testing & R&D F446 (dev board, ST-Link)`
-   - `Debug: Nucleo F411RE (dev board, ST-Link)`
-   - `Debug: Node 2 Nucleo G474 (dev board, ST-Link)`
-   - `Debug: Node 1 Pi Shield (ST-Link SWD)`
-   - `Debug: Node 3 Power Slab (ST-Link SWD)`
-   - `Debug: Any STM32 Target (dev board / generic ST-Link)`
-   - Requires ST-Link probe or Nucleo board connected. Automatically builds target before launching, connects GDB, and halts at `main`.
-2. **Host SIL Debugging (`cppdbg`)**:
-   - `Debug: Host SIL Test (Node 2 Control Board)`
-   - `Debug: Host SIL Bridge Server`
-   - Attaches host GDB to `sil_bridge_server.exe` for stepping through simulation loops.
-
-## Critical Safety & Architectural Rules
-
-- **CubeMX Trampoline**: STM32CubeMX generated `main.c` must ONLY contain a call to `app_main()` placed strictly inside `/* USER CODE BEGIN 2 */`. Application logic lives exclusively in `Core/Src/app.c`.
-- **Zero ST HAL in Application Code**: Application routines must NEVER call `HAL_*` functions directly. Use the hardware abstractions in `shared/include/bsp.h` and `shared/include/can_interface.h`.
-- **Fail-Safe Invariants**:
-  - Thruster neutral PWM is strictly 1500 us.
-  - Heartbeat loss (>250ms), water leak, or E-stop command immediately disarms all actuator outputs.
-  - No `HAL_Delay()` inside polling routines or timer callbacks.
-  - No dynamic memory allocation (`malloc`, `free`) in vehicle firmware.
-- **Clang-Format**: All C/C++ code must be formatted with `.clang-format` before committing.
-- **No Emojis**: Do not use emojis in commit messages, code comments, or documentation.
+- **Documentation Index**: [docs/INDEX.md](docs/INDEX.md) (source-of-truth map, hardware errata, specs, and plans).
+- **Public Header Symbol Map**: [docs/REPO_MAP.md](docs/REPO_MAP.md) (auto-generated via `python rov.py map`; check before opening multiple headers).
+- **Lessons & Decision Log**: [docs/lessons.md](docs/lessons.md) (check with `python rov.py memory search <topic>`).
+- **Repo Skills** (`.agents/skills/`):
+  - `x19-firmware-workflow`: CMake presets, flashing (ST-Link / DFU / CAN bootloader), and VS Code debugging.
+  - `x19-cubemx-and-layers`: Safe `.ioc` regeneration (`rov.py generate`), trampoline, and layer boundaries.
+  - `x19-sil-and-i2c-drivers`: Injected `rov_i2c_bus_t` drivers, SIL bridge stimulus, and CTest filtering.
+  - `x19-knowledge-capture`: End-of-task reflection, `rov.py memory add/distill/prune`, and invariant promotion.

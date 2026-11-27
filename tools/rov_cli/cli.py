@@ -37,6 +37,8 @@ Examples:
   rov flash control_board -b g474         Build and flash Node 2
   rov monitor                             Auto-detect COM port and open serial monitor
   rov test                                Run Host SIL CTest test suites
+  rov lint                                Check firmware invariants, layers, and formatting
+  rov memory status                       Inspect institutional memory and budget health
   rov devices                             List connected ST-Link probes and COM ports
   rov generate                            Regenerate peripheral drivers from .ioc files
   rov format                              Format C/C++ source code with clang-format
@@ -95,6 +97,7 @@ Examples:
                         help="Run the target_* readiness contracts instead of the host SIL suite")
     test_p.add_argument("--preset", default=None, help="Optional CMakePresets build preset")
     test_p.add_argument("--dry-run", action="store_true", help="Print the resolved commands without running them")
+    test_p.add_argument("--compact", action="store_true", help="Emit concise output (failures only) for agent workflows")
 
     # 7. Generate (STM32CubeMX CLI)
     gen_p = subparsers.add_parser("generate", help="Regenerate peripheral drivers from .ioc files via STM32CubeMX CLI")
@@ -123,6 +126,42 @@ Examples:
     fmt_p = subparsers.add_parser("format", help="Format C/C++ source code with clang-format", description="Format C/C++ source code with clang-format.")
     fmt_p.add_argument("paths", nargs="*", default=None, help="Specific files or directories to format (default: all project sources)")
     fmt_p.add_argument("-c", "--check", action="store_true", help="Check formatting without modifying files (exits 1 if unformatted)")
+
+    # 11. Lint (firmware invariants + layer boundaries + optional clang-format)
+    lint_p = subparsers.add_parser("lint", help="Enforce firmware safety invariants, layer boundaries, and repo hygiene")
+    lint_p.add_argument("--files", nargs="*", default=None, help="Specific file paths to check")
+    lint_p.add_argument("--format-check", action="store_true", help="Also verify clang-format compliance")
+    lint_p.add_argument("--tidy", action="store_true", help="Run clang-tidy using compile_commands.json (if available)")
+    lint_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON output")
+    lint_p.add_argument("--compact", action="store_true", help="Cap output to 20 violation lines (also enabled by ROV_COMPACT=1)")
+    lint_p.add_argument("--strict", action="store_true", help="Treat warnings (e.g., instruction bloat) as errors")
+
+    # 12. Memory (institutional memory & knowledge growth)
+    mem_p = subparsers.add_parser("memory", help="Manage structured repository memory (docs/lessons.md, session logs)")
+    mem_sub = mem_p.add_subparsers(dest="memory_command", required=True)
+    mem_sub.add_parser("status", help="Show memory budgets, lesson counts, and session log status")
+    mem_search = mem_sub.add_parser("search", help="Search docs/lessons.md, docs/, and repo skills")
+    mem_search.add_argument("query", help="Case-insensitive keyword or tag to search for")
+    mem_add = mem_sub.add_parser("add", help="Append a structured lesson entry to docs/lessons.md")
+    mem_add.add_argument("--tag", required=True, help="Subsystem tag (e.g., CAN, SIL, STM32C542, I2C, TOOLING)")
+    mem_add.add_argument("--symptom", required=True, help="Observed symptom or context")
+    mem_add.add_argument("--cause", required=True, help="Root cause or dead end to avoid")
+    mem_add.add_argument("--fix", required=True, help="Verified rule or fix")
+    mem_add.add_argument("--supersedes", default="-", help="Optional lesson ID superseded by this entry")
+    mem_distill = mem_sub.add_parser("distill", help="Summarize recent session_log.jsonl entries for promotion")
+    mem_distill.add_argument("--limit", type=int, default=10, help="Max entries to display")
+    mem_distill.add_argument("--teamwork", action="store_true", help="Also summarize .agents/teamwork/ handoffs")
+    mem_sub.add_parser("prune", help="Detect stale file references or superseded entries in docs/lessons.md")
+
+    # 13. Map (compact public header symbol map)
+    map_p = subparsers.add_parser("map", help="Generate or verify docs/REPO_MAP.md public header symbol index")
+    map_p.add_argument("--check", action="store_true", help="Exit 1 if docs/REPO_MAP.md is out of date")
+    map_p.add_argument("--stdout", action="store_true", help="Print map to stdout instead of writing")
+
+    # 14. Size (ELF section sizes & -fstack-usage audit)
+    size_p = subparsers.add_parser("size", help="Report ELF Flash/RAM section sizes and top -fstack-usage functions")
+    size_p.add_argument("--build-dir", default=None, help="Build directory to scan (default: build)")
+    size_p.add_argument("--top", type=int, default=15, help="Number of top stack-heavy functions to display")
 
     args = parser.parse_args()
 
@@ -204,7 +243,10 @@ Examples:
 
     elif args.command == "test":
         build_dir = "build-native"
+        compact = getattr(args, "compact", False) or os.environ.get("ROV_COMPACT") == "1"
         cmd = ["ctest", "--test-dir", build_dir, "--output-on-failure"]
+        if compact:
+            cmd.append("--quiet")
         if args.regex:
             cmd += ["-R", args.regex]
         if args.node and args.node != "all":
@@ -232,7 +274,8 @@ Examples:
                 print(f"(env ROV_TEST_FILTER={args.filter})")
             return
 
-        print("\033[1;32m=== Building & Executing Host SIL CTest Test Suites ===\033[0m")
+        if not args.dry_run and not compact:
+            print("\033[1;32m=== Building & Executing Host SIL CTest Test Suites ===\033[0m")
         for c in build_cmds:
             run_cmd(c, cwd=REPO_ROOT)
         run_cmd(cmd, cwd=REPO_ROOT)
@@ -281,4 +324,66 @@ Examples:
     elif args.command == "format":
         from .format import run_format
         sys.exit(run_format(check_only=args.check, paths=args.paths))
+
+    elif args.command == "lint":
+        sys.path.insert(0, str(REPO_ROOT))
+        from tools.check_invariants import main as run_invariants
+        inv_argv: list[str] = []
+        if args.files:
+            inv_argv += ["--files", *args.files]
+        if args.json:
+            inv_argv.append("--json")
+        if getattr(args, "compact", False) or os.environ.get("ROV_COMPACT") == "1":
+            inv_argv.append("--compact")
+        if args.strict:
+            inv_argv.append("--strict")
+        rc = run_invariants(inv_argv)
+        if args.format_check:
+            from .format import run_format
+            fmt_rc = run_format(check_only=True, paths=args.files)
+            if fmt_rc != 0:
+                rc = fmt_rc
+        if getattr(args, "tidy", False):
+            import shutil
+            import subprocess
+            tidy_bin = shutil.which("clang-tidy")
+            cc_dir = next(
+                (
+                    d
+                    for d in (REPO_ROOT / "build-native", REPO_ROOT / "build" / "arm-c542-debug")
+                    if (d / "compile_commands.json").is_file()
+                ),
+                None,
+            )
+            if not tidy_bin:
+                print("clang-tidy not found on PATH; skipping --tidy.")
+            elif not cc_dir:
+                print("compile_commands.json not found in build-native/ or build/arm-c542-debug/; configure CMake first.")
+            elif not args.files:
+                print("Pass --files <path...> with --tidy to analyze specific C files.")
+            else:
+                tidy_targets = [str((REPO_ROOT / f) if not os.path.isabs(f) else f) for f in args.files if f.endswith(".c")]
+                if tidy_targets:
+                    tidy_res = subprocess.run([tidy_bin, "-p", str(cc_dir), *tidy_targets], cwd=REPO_ROOT)
+                    if tidy_res.returncode != 0:
+                        rc = tidy_res.returncode
+        sys.exit(rc)
+
+    elif args.command == "memory":
+        from .memory import run_memory
+        sys.exit(run_memory(args))
+
+    elif args.command == "map":
+        sys.path.insert(0, str(REPO_ROOT))
+        from tools.gen_repo_map import main as run_map
+        map_argv: list[str] = []
+        if args.check:
+            map_argv.append("--check")
+        if args.stdout:
+            map_argv.append("--stdout")
+        sys.exit(run_map(map_argv))
+
+    elif args.command == "size":
+        from .size_audit import run_size_audit
+        sys.exit(run_size_audit(build_dir=args.build_dir, top=args.top))
 

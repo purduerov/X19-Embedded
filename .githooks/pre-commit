@@ -1,0 +1,16 @@
+#!/bin/sh
+# X19-Embedded git pre-commit hook: enforce firmware invariants and layer boundaries.
+# Enable with: git config core.hooksPath .githooks
+
+PYTHON_BIN="python"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+fi
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -z "$STAGED" ]; then
+    exit 0
+fi
+
+# shellcheck disable=SC2086
+"$PYTHON_BIN" rov.py lint --files $STAGED

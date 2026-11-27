@@ -1,0 +1,55 @@
+{
+  "x19-safety-guardrails": {
+    "PreToolUse": [
+      {
+        "matcher": "edit_file|write_file|run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/pre_tool_use.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "x19-memory-hydration": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python hooks/session_start.py",
+        "timeout": 10
+      }
+    ]
+  },
+  "x19-live-invariant-guard": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/post_edit.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python hooks/pre_invocation.py",
+        "timeout": 5
+      }
+    ]
+  },
+  "x19-stop-gate-and-log": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python hooks/on_stop.py",
+        "timeout": 15
+      }
+    ]
+  }
+}

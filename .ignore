@@ -1,0 +1,24 @@
+# Search & ripgrep exclusions for token/context hygiene
+build/
+build-native/
+build-test/
+build-host/
+build-native-coverage/
+nodes/*/Drivers/
+nodes/*/Middlewares/
+tests/vendor/
+.agents/teamwork/
+.agents/state/
+*.map
+*.elf
+*.bin
+*.hex
+*.o
+*.obj
+*.d
+*.a
+__pycache__/
+.cache/
+.freebuff/
+.vibe-wise/
+.superpowers/

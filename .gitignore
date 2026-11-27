@@ -44,4 +44,7 @@ nodes/*/.vscode/
 *.ioc.bak
 .aider*
 .vibe-wise/
-.agents/
+.agents/*
+!.agents/hooks.json
+!.agents/hooks/
+!.agents/skills/
