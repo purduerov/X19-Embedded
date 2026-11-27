@@ -77,6 +77,7 @@ void app_main(void) {
      * on the I2C bus.
      */
     bsp_i2c_scan();
+    bsp_watchdog_kick();
 
     /*
      * Now initialize the real BME280 driver.
@@ -98,6 +99,7 @@ void app_main(void) {
         printf("Status = %d\r\n", (int)status);
 
         while (1) {
+            bsp_watchdog_kick();
             delay_ms(1000);
         }
     }
@@ -109,6 +111,7 @@ void app_main(void) {
     uint32_t last_bme280_time = 0;
 
     while (1) {
+        bsp_watchdog_kick();
         /*
          * Read the physical BME280 once every second.
          */

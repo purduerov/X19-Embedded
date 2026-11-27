@@ -495,3 +495,9 @@ bool bsp_pmbus_read_word(uint8_t pmbus_addr, uint8_t command, uint16_t *raw_word
 
     return true;
 }
+
+void bsp_watchdog_init(uint32_t timeout_ms) {
+    (void)timeout_ms;
+}
+
+void bsp_watchdog_kick(void) {}

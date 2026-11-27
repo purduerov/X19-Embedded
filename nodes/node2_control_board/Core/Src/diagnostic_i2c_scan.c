@@ -70,6 +70,7 @@ void app_main(void) {
     printf("======================================================\r\n\r\n");
 
     while (1) {
+        bsp_watchdog_kick();
         led_toggle();
         delay_ms(1000);
     }

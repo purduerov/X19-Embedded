@@ -118,6 +118,12 @@ __attribute__((weak)) bool bsp_leak_probe_read(uint8_t probe_idx) {
 
 __attribute__((weak)) void bsp_emergency_brake_trip(void) {}
 
+__attribute__((weak)) void bsp_watchdog_init(uint32_t timeout_ms) {
+    (void)timeout_ms;
+}
+
+__attribute__((weak)) void bsp_watchdog_kick(void) {}
+
 __attribute__((weak)) void bsp_power_brick_enable(uint8_t brick_idx) {
     (void)brick_idx;
 }

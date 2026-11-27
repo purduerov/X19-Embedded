@@ -187,6 +187,7 @@ void node1_app_init(void) {
 #if defined(X19_DIAGNOSTIC_I2C_SCAN) && (X19_DIAGNOSTIC_I2C_SCAN != 0)
     /* Run I2C bus scan at startup to verify all sensors are reachable */
     node1_i2c_scan();
+    bsp_watchdog_kick();
 #endif
 
     g_can_ready = can_init();
@@ -214,6 +215,7 @@ void node1_app_init(void) {
 }
 
 void node1_app_step(void) {
+    bsp_watchdog_kick();
     uint32_t current_time = time_get_ms();
 
     if (!g_can_ready) {

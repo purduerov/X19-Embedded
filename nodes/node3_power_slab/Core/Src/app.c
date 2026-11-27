@@ -79,6 +79,7 @@ void node3_app_init(void) {
 }
 
 void node3_app_step(void) {
+    bsp_watchdog_kick();
     uint32_t current_time = time_get_ms();
 
     /*

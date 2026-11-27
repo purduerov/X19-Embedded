@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app.h"
+#include "bsp.h"
 
 /* USER CODE END Includes */
 
@@ -530,6 +531,13 @@ static void MX_GPIO_Init(void) {
  */
 void Error_Handler(void) {
     /* USER CODE BEGIN Error_Handler_Debug */
+#if defined(TIM1) && defined(TIM_BDTR_MOE)
+    TIM1->BDTR &= ~TIM_BDTR_MOE;
+#endif
+#if defined(TIM8) && defined(TIM_BDTR_MOE)
+    TIM8->BDTR &= ~TIM_BDTR_MOE;
+#endif
+    bsp_emergency_brake_trip();
     /* User can add his own implementation to report the HAL error return state */
     __disable_irq();
     while (1) {

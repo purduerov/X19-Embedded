@@ -135,6 +135,17 @@ void bsp_emergency_brake_trip(void);
 bool bsp_is_emergency_brake_tripped(void);
 
 /**
+ * @brief Enable hardware Independent Watchdog (IWDG) and freeze PWM/IWDG on debug halt.
+ * @param timeout_ms Watchdog reset timeout in milliseconds.
+ */
+void bsp_watchdog_init(uint32_t timeout_ms);
+
+/**
+ * @brief Refresh/kick the hardware Independent Watchdog counter.
+ */
+void bsp_watchdog_kick(void);
+
+/**
  * @brief Enable a specific DC-DC converter brick on Node 3 (0 to 3).
  * @param brick_idx Converter brick index (0 to 3).
  */
