@@ -8,7 +8,6 @@
  */
 
 #include "bsp.h"
-#include "ina237.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -72,28 +71,7 @@ void app_main(void) {
     printf("======================================================\r\n\r\n");
 
 #if !defined(ROV_UNIT_TEST) && !defined(X19_UNIT_TEST)
-    ina237_dev_t ina237;
-    rov_status_t ina_status = ina237_init(&ina237, bsp_i2c_bus(), 0x40u, 0.001f);
-
-    if (ina_status != ROV_OK) {
-        printf("INA237 initialization FAILED (status=%d)\r\n", (int)ina_status);
-        while (1) {
-            led_toggle();
-            delay_ms(1000);
-        }
-    }
-
-    printf("INA237 initialized at 0x40. Reading rail telemetry...\r\n\r\n");
-
     while (1) {
-        ina_status = ina237_read_power(&ina237);
-        if (ina_status == ROV_OK) {
-            printf("INA237 | VBUS: %.3f V | Current: %.3f A | Power: %.3f W | Die temp: %.2f C\r\n",
-                   (double)ina237.bus_voltage_v, (double)ina237.shunt_current_a, (double)ina237.power_w,
-                   (double)ina237.die_temp_c);
-        } else {
-            printf("INA237 read FAILED (status=%d)\r\n", (int)ina_status);
-        }
         led_toggle();
         delay_ms(1000);
     }

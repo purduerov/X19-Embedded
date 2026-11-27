@@ -31,8 +31,8 @@
 #define INA237_CURRENT_LSB_A 0.0005f
 
 /* Default ADCRANGE = 0 conversion factors. */
-#define INA237_BUS_VOLTAGE_LSB_V   0.003125f /* 3.125 mV per count */
-#define INA237_DIE_TEMP_LSB_C      0.125f    /* 0.125 C per count */
+#define INA237_BUS_VOLTAGE_LSB_V 0.003125f /* 3.125 mV per count */
+#define INA237_DIE_TEMP_LSB_C    0.125f    /* 0.125 C per count */
 
 static rov_status_t ina237_configure_adc(ina237_dev_t *dev) {
     const uint8_t config[2] = {(uint8_t)(INA237_ADC_CONFIG_CONTINUOUS >> 8),
@@ -79,11 +79,11 @@ rov_status_t ina237_init(ina237_dev_t *dev, const rov_i2c_bus_t *bus, uint8_t i2
 rov_status_t ina237_read_power(ina237_dev_t *dev) {
     uint8_t vbus_raw[2] = {0u, 0u};
     uint8_t current_raw[2] = {0u, 0u};
-    uint8_t power_raw[2] = {0u, 0u};
+    uint8_t power_raw[3] = {0u, 0u, 0u};
     uint8_t temp_raw[2] = {0u, 0u};
     uint16_t vbus;
     int16_t current;
-    uint16_t power;
+    uint32_t power;
     int16_t temp;
 
     if (dev == NULL || dev->bus == NULL) {
@@ -115,12 +115,12 @@ rov_status_t ina237_read_power(ina237_dev_t *dev) {
 
     vbus = (uint16_t)(((uint16_t)vbus_raw[0] << 8) | (uint16_t)vbus_raw[1]);
     current = (int16_t)(((uint16_t)current_raw[0] << 8) | (uint16_t)current_raw[1]);
-    power = (uint16_t)(((uint16_t)power_raw[0] << 8) | (uint16_t)power_raw[1]);
+    power = ((uint32_t)power_raw[0] << 16) | ((uint32_t)power_raw[1] << 8) | (uint32_t)power_raw[2];
     temp = (int16_t)(((uint16_t)temp_raw[0] << 8) | (uint16_t)temp_raw[1]);
 
     dev->bus_voltage_v = (float)vbus * INA237_BUS_VOLTAGE_LSB_V;
     dev->shunt_current_a = (float)current * dev->current_lsb_a;
-    dev->power_w = (float)power * (25.0f * dev->current_lsb_a);
+    dev->power_w = (float)power * (0.2f * dev->current_lsb_a);
 
     /* Die temperature is 12-bit two's complement, left-justified in 16 bits. */
     dev->die_temp_c = (float)(int16_t)(temp >> 4) * INA237_DIE_TEMP_LSB_C;
