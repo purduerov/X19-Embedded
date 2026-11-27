@@ -23,12 +23,9 @@ sim/renode/
 
 ---
 
-## 2. Installed Renode Engine
+## 2. Prerequisites
 
-Renode v1.16.0 (.NET 8 runtime) is installed locally on this machine at:
-```
-C:\Users\aman\tools\renode_1.16.0-dotnet_portable\renode.exe
-```
+Install [Antmicro Renode](https://renode.io/) (v1.16.0+) and ensure `renode` is on your `PATH`, or set the `RENODE_EXE` environment variable to the `renode` executable path.
 
 ---
 
@@ -74,5 +71,5 @@ python sim/renode/tests/test_renode.py
 ### B. Robot Framework (`renode-test`)
 For keyword-driven verification of UART outputs and virtual CAN packet assertions:
 ```powershell
-C:\Users\aman\tools\renode_1.16.0-dotnet_portable\renode-test.bat sim/renode/tests/node_tests.robot
+renode-test sim/renode/tests/node_tests.robot
 ```

@@ -3,7 +3,7 @@
     Runs STM32 target binaries inside Antmicro Renode simulation.
 
 .PARAMETER Target
-    The simulation target: "node1", "node2", or "scanner". Default is "node1".
+    The simulation target: "node1", "node2", "scanner", or "multi". Default is "node1".
 
 .PARAMETER Gui
     If specified, launches Renode with interactive graphical Monitor and serial analyzer.
@@ -21,16 +21,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RenodePaths = @(
-    "C:\Users\aman\tools\renode_1.16.0-dotnet_portable\renode.exe",
-    "C:\Program Files\Renode\bin\renode.exe"
-)
-
 $RenodeExe = $null
-foreach ($path in $RenodePaths) {
-    if (Test-Path $path) {
-        $RenodeExe = $path
-        break
+if ($env:RENODE_EXE -and (Test-Path $env:RENODE_EXE)) {
+    $RenodeExe = $env:RENODE_EXE
+}
+
+if (-not $RenodeExe) {
+    $DefaultPath = "C:\Program Files\Renode\bin\renode.exe"
+    if (Test-Path $DefaultPath) {
+        $RenodeExe = $DefaultPath
     }
 }
 
@@ -42,7 +41,7 @@ if (-not $RenodeExe) {
 }
 
 if (-not $RenodeExe) {
-    Write-Error "Renode executable could not be found. Please ensure it is installed in C:\Users\aman\tools\renode_1.16.0-dotnet_portable\renode.exe"
+    Write-Error "Renode executable could not be found. Install Renode and add it to PATH, or set the RENODE_EXE environment variable."
 }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
