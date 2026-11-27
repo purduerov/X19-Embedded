@@ -6,6 +6,7 @@
 
 extern float rov_pwm_apply_expo(float raw_norm);
 extern uint16_t rov_pwm_step_ramp(uint16_t current_us, uint16_t target_us, uint16_t max_step_us);
+extern float x19_pwm_apply_expo(float raw_norm);
 
 void test_pwm_slew_rate_limiting(void) {
     uint16_t current_pwm = 1500;
@@ -67,11 +68,22 @@ void test_cubic_expo_mapping(void) {
     printf("[PASS] test_cubic_expo_mapping\n");
 }
 
+void test_x19_pwm_apply_expo_compatibility(void) {
+    float test_vals[] = {0.0f, 1.0f, 0.5f, -1.0f, -0.5f, 1.5f, -1.5f};
+    for (size_t i = 0; i < sizeof(test_vals) / sizeof(test_vals[0]); i++) {
+        float rov_out = rov_pwm_apply_expo(test_vals[i]);
+        float x19_out = x19_pwm_apply_expo(test_vals[i]);
+        assert(fabsf(rov_out - x19_out) < 0.0001f);
+    }
+    printf("[PASS] test_x19_pwm_apply_expo_compatibility\n");
+}
+
 int main(void) {
     printf("Running PWM Ramp & Math Unit Tests...\n");
     test_pwm_slew_rate_limiting();
     test_pwm_clamps();
     test_cubic_expo_mapping();
+    test_x19_pwm_apply_expo_compatibility();
     printf("All PWM Tests Passed Successfully!\n");
     return 0;
 }
