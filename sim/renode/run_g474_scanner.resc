@@ -1,0 +1,7 @@
+using sysbus
+mach create "Node2_G474_Scanner"
+machine LoadPlatformDescription @sim/renode/nucleo_g474re.repl
+
+sysbus LoadELF @build/arm-c542-debug/boards/g474_nucleo/g474_i2c_scanner.elf
+
+showAnalyzer sysbus.usart2

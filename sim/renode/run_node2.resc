@@ -1,0 +1,7 @@
+using sysbus
+mach create "Node2_Control_Board"
+machine LoadPlatformDescription @sim/renode/nucleo_g474re.repl
+
+sysbus LoadELF @build/arm-c542-debug/boards/g474_nucleo/g474_node2_control_board.elf
+
+showAnalyzer sysbus.usart2
