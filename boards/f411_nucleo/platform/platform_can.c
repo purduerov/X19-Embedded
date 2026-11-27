@@ -13,6 +13,13 @@ bool can_init(void) {
         return false;
     }
 
+    /* bsp_init() may already have started the bus; a second HAL start would
+       fail and leave the node latched. HAL_CAN_Start leaves the peripheral
+       LISTENING, so treat that state as already ready. */
+    if (hcan1.State == HAL_CAN_STATE_LISTENING) {
+        return true;
+    }
+
     CAN_FilterTypeDef filter = {0};
     filter.FilterBank = 0;
     filter.FilterMode = CAN_FILTERMODE_IDMASK;

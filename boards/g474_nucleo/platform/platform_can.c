@@ -10,6 +10,10 @@
 extern FDCAN_HandleTypeDef hfdcan1;
 
 bool can_init(void) {
+    if (hfdcan1.State == HAL_FDCAN_STATE_BUSY) {
+        return true;
+    }
+
     HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_FILTER_REMOTE,
                                  FDCAN_FILTER_REMOTE);
     HAL_FDCAN_ConfigTxDelayCompensation(&hfdcan1, 26, 0);

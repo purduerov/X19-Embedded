@@ -11,6 +11,12 @@
 extern FDCAN_HandleTypeDef hfdcan1;
 
 bool can_init(void) {
+    /* bsp_init() starts the bus before the app asks for its status. A second
+       HAL start would fail, so treat an already-running bus as ready. */
+    if (hfdcan1.State == HAL_FDCAN_STATE_BUSY) {
+        return true;
+    }
+
     HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_FILTER_REMOTE,
                                  FDCAN_FILTER_REMOTE);
     return HAL_FDCAN_Start(&hfdcan1) == HAL_OK;
