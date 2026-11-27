@@ -8,10 +8,17 @@
 #include "mocks/mock_sensors.h"
 #include "ms5837.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 
 void test_ms5837_driver(void) {
     ms5837_dev_t dev;
+
+    /* Negative test: all-zero PROM coefficients */
+    mock_sensors_reset();
+    mock_bsp_reset();
+    mock_sensors_set_ms5837_valid(false);
+    assert(ms5837_init(&dev) == ROV_ERR_CRC_MISMATCH);
 
     /* Negative test: NULL pointer and invalid density */
     assert(ms5837_init(NULL) == ROV_ERR_INVALID_ARG);
@@ -21,6 +28,8 @@ void test_ms5837_driver(void) {
     assert(ms5837_init(&dev) == ROV_OK);
     assert(ms5837_read_pressure_depth(&dev, 0.0f) == ROV_ERR_INVALID_ARG);
     assert(ms5837_read_pressure_depth(&dev, -10.0f) == ROV_ERR_INVALID_ARG);
+    assert(ms5837_read_pressure_depth(&dev, NAN) == ROV_ERR_INVALID_ARG);
+    assert(ms5837_read_sync(&dev, INFINITY) == ROV_ERR_INVALID_ARG);
 
     /* Test non-blocking asynchronous state machine under mock */
     assert(ms5837_read_pressure_depth(&dev, 1000.0f) == ROV_BUSY);

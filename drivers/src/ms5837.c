@@ -6,6 +6,7 @@
 
 #include "ms5837.h"
 #include "bsp.h"
+#include <math.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -223,6 +224,18 @@ rov_status_t ms5837_init(ms5837_dev_t *dev) {
         }
     }
 
+    bool prom_all_zero = true;
+    for (uint8_t i = 0U; i < 7U; i++) {
+        if (dev->cal_coeffs[i] != 0U) {
+            prom_all_zero = false;
+            break;
+        }
+    }
+
+    if (prom_all_zero) {
+        return ROV_ERR_CRC_MISMATCH;
+    }
+
     uint8_t expected_crc = (uint8_t)(dev->cal_coeffs[0] >> 12U);
     uint8_t calculated_crc = ms5837_crc4(dev->cal_coeffs);
 
@@ -238,7 +251,7 @@ rov_status_t ms5837_init(ms5837_dev_t *dev) {
 }
 
 rov_status_t ms5837_read_pressure_depth(ms5837_dev_t *dev, float fluid_density_kg_m3) {
-    if (!dev || fluid_density_kg_m3 <= 0.0f) {
+    if (!dev || !isfinite(fluid_density_kg_m3) || fluid_density_kg_m3 <= 0.0f) {
         return ROV_ERR_INVALID_ARG;
     }
 
@@ -327,7 +340,7 @@ rov_status_t ms5837_read_pressure_depth(ms5837_dev_t *dev, float fluid_density_k
 }
 
 rov_status_t ms5837_read_sync(ms5837_dev_t *dev, float fluid_density_kg_m3) {
-    if (!dev || fluid_density_kg_m3 <= 0.0f) {
+    if (!dev || !isfinite(fluid_density_kg_m3) || fluid_density_kg_m3 <= 0.0f) {
         return ROV_ERR_INVALID_ARG;
     }
 
