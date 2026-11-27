@@ -253,6 +253,7 @@ The host SIL suite comprises 36 `test_*` targets testing the test framework itse
 | 34 | `test_sil_bridge_logical` | Logical-clock engine step determinism |
 | 35 | `test_registry_consistency` | CMake test registry matches rov.toml (drift guard) |
 | 36 | `test_suite_manifest` | Guide suite list matches CTest registrations (drift guard) |
+| 37 | `test_pi_gateway_mix` | Pi Gateway 6-DOF thruster kinematics mixing and CAN FD gateway self-test |
 
 `tests/test_suite_manifest.py` and `tests/test_registry_consistency.py` are the two drift guards wired to CTest; the live CTest registry is the source of truth the guide enumerates above via `ctest --test-dir build-native -N`.
 

@@ -419,5 +419,9 @@ if(NOT CMAKE_CROSSCOMPILING)
     if(NOT WIN32 OR MINGW)
         target_link_libraries(sil_sandbox PRIVATE m)
     endif()
+
+    # Pi Gateway Kinematics & Gateway Host Verification
+    add_test(NAME test_pi_gateway_mix COMMAND pi_gateway --test-mix)
+    set_property(TEST test_pi_gateway_mix APPEND PROPERTY LABELS "suite:gateway" "node:pi_core")
 endif()
 

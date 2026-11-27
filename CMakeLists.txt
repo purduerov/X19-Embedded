@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
-project(ROV-Embedded C ASM)
+project(ROV-Embedded C CXX ASM)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Auto-detect ccache for fast rebuilds across targets
 find_program(CCACHE_PROGRAM ccache)
@@ -11,6 +12,8 @@ endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 enable_testing()
 
@@ -66,7 +69,8 @@ if(CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
-# Add unit tests (host-only)
+# Add unit tests and host tools (host-only)
 if(NOT CMAKE_CROSSCOMPILING)
     add_subdirectory(tests)
+    add_subdirectory(tools/pi_gateway)
 endif()

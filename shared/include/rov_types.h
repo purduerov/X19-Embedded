@@ -160,16 +160,22 @@ typedef struct __attribute__((packed)) {
     uint8_t fault_flags;         /**< Overcurrent, thermal warning flags */
 } rov_usb_hub_telemetry_t;
 
-_Static_assert(sizeof(rov_thruster_cmd_t) == 16, "rov_thruster_cmd_t size mismatch");
-_Static_assert(sizeof(rov_solenoid_cmd_t) == 2, "rov_solenoid_cmd_t size mismatch");
-_Static_assert(sizeof(imu_data_t) == 29, "imu_data_t size mismatch");
-_Static_assert(sizeof(rov_time_sync_master_t) == 16, "rov_time_sync_master_t size mismatch");
-_Static_assert(sizeof(rov_time_sync_req_t) == 16, "rov_time_sync_req_t size mismatch");
-_Static_assert(sizeof(rov_time_sync_resp_t) == 32, "rov_time_sync_resp_t size mismatch");
-_Static_assert(sizeof(rov_nav_telemetry_t) == 41, "rov_nav_telemetry_t size mismatch");
-_Static_assert(sizeof(rov_env_telemetry_t) == 17, "rov_env_telemetry_t size mismatch");
-_Static_assert(sizeof(rov_power_telemetry_t) == 20, "rov_power_telemetry_t size mismatch");
-_Static_assert(sizeof(rov_usb_hub_telemetry_t) == 22, "rov_usb_hub_telemetry_t size mismatch");
+#if defined(__cplusplus)
+#define ROV_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#else
+#define ROV_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#endif
+
+ROV_STATIC_ASSERT(sizeof(rov_thruster_cmd_t) == 16, "rov_thruster_cmd_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(rov_solenoid_cmd_t) == 2, "rov_solenoid_cmd_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(imu_data_t) == 29, "imu_data_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(rov_time_sync_master_t) == 16, "rov_time_sync_master_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(rov_time_sync_req_t) == 16, "rov_time_sync_req_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(rov_time_sync_resp_t) == 32, "rov_time_sync_resp_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(rov_nav_telemetry_t) == 41, "rov_nav_telemetry_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(rov_env_telemetry_t) == 17, "rov_env_telemetry_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(rov_power_telemetry_t) == 20, "rov_power_telemetry_t size mismatch");
+ROV_STATIC_ASSERT(sizeof(rov_usb_hub_telemetry_t) == 22, "rov_usb_hub_telemetry_t size mismatch");
 
 /**
  * @brief Bootloader Control Command Identifiers.
