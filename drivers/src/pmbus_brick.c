@@ -6,6 +6,7 @@
 
 #include "pmbus_brick.h"
 #include "bsp.h"
+#include <math.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -35,12 +36,7 @@ float pmbus_linear11_to_float(uint16_t raw_value) {
         mantissa -= 2048;
     }
     float result = (float)mantissa;
-    if (exponent >= 0) {
-        result *= (float)(1 << exponent);
-    } else {
-        result /= (float)(1 << (-exponent));
-    }
-    return result;
+    return ldexpf(result, exponent);
 }
 
 rov_status_t pmbus_brick_init(pmbus_brick_dev_t *dev, uint8_t pmbus_addr) {
@@ -164,23 +160,8 @@ bool pmbus_status_has_thermal_fault(uint16_t status_word) {
 }
 
 float pmbus_linear16_to_float(uint16_t raw_value, int8_t exponent) {
-    int8_t exp = exponent;
-    if (exp > 15) {
-        exp = (int8_t)(exp - 32);
-    }
-    if (exp < -16) {
-        exp = -16;
-    } else if (exp > 15) {
-        exp = 15;
-    }
+    uint8_t encoded_exp = (uint8_t)exponent & 0x1FU;
+    int16_t exp = (encoded_exp & 0x10U) != 0U ? (int16_t)encoded_exp - 32 : (int16_t)encoded_exp;
 
-    float result = (float)raw_value;
-
-    if (exp >= 0) {
-        result *= (float)(1UL << exp);
-    } else {
-        result /= (float)(1UL << (-exp));
-    }
-
-    return result;
+    return ldexpf((float)raw_value, (int)exp);
 }
